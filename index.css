@@ -26,35 +26,20 @@ body {
   scrollbar-width: none;
 }
 
+/* ЗАСВАР #114: утсанд хуудас гvйлгэхэд хажуу талд гарч ирдэг native
+   scrollbar thumb-ыг сайтын бvх хэсэгт нуув (Android Chrome/Edge) */
+html, body {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar, body::-webkit-scrollbar {
+  display: none;
+}
+
 /* ЗАСВАР #84: Edge/IE browser-ийн built-in нууц үг харуулах/цэвэрлэх дүрс
    (native eye icon) манай өөрийн "нүд" товчтой давхцаж "2 нүд" харагддаг
    байсныг арилгав. */
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
   display: none;
-}
-
-/* ЗАСВАР #96: гvйдэг мөрvvдийн зvvн/баруун гар товч */
-.scroll-arrow {
-  position: absolute;
-  top: 40%;
-  transform: translateY(-50%);
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(20, 20, 20, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #fff;
-  cursor: pointer;
-  z-index: 5;
-  backdrop-filter: blur(4px);
-}
-.scroll-arrow-left {
-  left: -6px;
-}
-.scroll-arrow-right {
-  right: -6px;
 }

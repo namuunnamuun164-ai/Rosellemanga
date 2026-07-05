@@ -1010,9 +1010,6 @@ export default function App() {
     { label: 'Нүүр', p: 'home', icon: <IconHome /> },
     { label: 'Бүх гаргалт', p: 'all', icon: <IconGrid /> },
     { label: 'Хуваарь', p: 'schedule', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-    // ЗАСВАР #113: TikTok маягийн reel feed — зөвхөн admin/moderator upload хийнэ,
-    // харин бvх хэрэглэгч vзэж болно
-    { label: 'Юу уншихаа мэдэхгvй vv?', p: 'reels', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg> },
   ];
 
   const MangaCard = ({ m, showChapter }) => (
@@ -1096,6 +1093,14 @@ export default function App() {
             {item.label}
           </div>
         ))}
+        {/* ЗАСВАР #114: "Эрх авах" (VIP)-ийг эндvv зөөв, "Юу унших вэ?"-тэй байрлал сольсон */}
+        <div onClick={() => { setPreviousPage(page); setPage('vip'); }}
+          style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === 'vip' ? '#8B0000' : '#888', background: page === 'vip' ? '#1a1a1a' : 'transparent', fontWeight: page === 'vip' ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+          Эрх авах
+        </div>
 
         <div style={{ fontSize: 11, color: '#444', letterSpacing: 1, margin: '1.5rem 0 0.5rem', paddingLeft: 8 }}>ХЭРЭГЛЭГЧ</div>
         <div onClick={() => { setPreviousPage(page); setPage('library'); }}
@@ -1103,12 +1108,12 @@ export default function App() {
           <IconBookmark />
           Миний сан
         </div>
-        <div onClick={() => { setPreviousPage(page); setPage('vip'); }}
-          style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === 'vip' ? '#8B0000' : '#888', background: page === 'vip' ? '#1a1a1a' : 'transparent', fontWeight: page === 'vip' ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-          </svg>
-          Эрх авах
+        {/* ЗАСВАР #113/#114: TikTok маягийн reel feed — нэрийг "Юу унших вэ?" болгож,
+            байрлалыг "Эрх авах"-тай сольсон */}
+        <div onClick={() => { setPreviousPage(page); setPage('reels'); }}
+          style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === 'reels' ? '#fff' : '#888', background: page === 'reels' ? '#1a1a1a' : 'transparent', fontWeight: page === 'reels' ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+          Юу унших вэ?
         </div>
 
         {/* ЗАСВАР #45: sidebar-ийн ёроолд site нэр + сошиал линкүүд
@@ -1494,23 +1499,11 @@ export default function App() {
                     </div>
                   ))}
                   <div style={{ position: 'absolute', bottom: '1.25rem', left: '1.5rem', right: '1.5rem', zIndex: 2 }}>
-                    <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.2, maxWidth: 640 }}>
+                    {/* ЗАСВАР #115: илvv загварлаг (serif) фонт, жижигрvvлсэн хэмжээ */}
+                    <div style={{ fontFamily: "'Noto Serif', serif", fontStyle: 'italic', fontSize: 15, fontWeight: 700, letterSpacing: 0.3, lineHeight: 1.3, maxWidth: 640 }}>
                       {heroManga.title}
                     </div>
                   </div>
-                  {/* ЗАСВАР #98: зvvн/баруун гар товчийг зөвхөн эхний hero панелд нэмэв */}
-                  {recommendedMangas.length > 1 && (
-                    <>
-                      <button onClick={e => { e.stopPropagation(); setHeroIndex(prev => (prev - 1 + recommendedMangas.length) % recommendedMangas.length); }}
-                        className="scroll-arrow scroll-arrow-left" aria-label="Өмнөх">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-                      </button>
-                      <button onClick={e => { e.stopPropagation(); setHeroIndex(prev => (prev + 1) % recommendedMangas.length); }}
-                        className="scroll-arrow scroll-arrow-right" aria-label="Дараах">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-                      </button>
-                    </>
-                  )}
                 </div>
               </div>
             )}
@@ -1767,7 +1760,7 @@ export default function App() {
                     onClick={e => { e.currentTarget.paused ? e.currentTarget.play().catch(() => {}) : e.currentTarget.pause(); }}
                     style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', cursor: 'pointer' }} />
 
-                  <button onClick={() => setPage(previousPage)} title="Буцах"
+                  <button onClick={() => setPage('home')} title="Буцах"
                     style={{ position: 'absolute', top: 16, left: 16, width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', cursor: 'pointer', zIndex: 2 }}>
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
                   </button>
@@ -1784,7 +1777,7 @@ export default function App() {
                     <div style={{ position: 'absolute', left: 14, right: 74, bottom: 28, zIndex: 2 }}>
                       <div style={{ color: '#fff', fontWeight: 800, fontSize: 15, marginBottom: 10, textShadow: '0 1px 4px rgba(0,0,0,0.8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{manga.title}</div>
                       <button onClick={() => goToDetail(manga)}
-                        style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '9px 22px', borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '11px 40px', borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', maxWidth: 280 }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                         Унших
                       </button>
@@ -1819,7 +1812,9 @@ export default function App() {
         {page === 'detail' && selected && (
           <div>
             <div style={{ position: 'relative', height: 220, overflow: 'hidden' }}>
-              <img src={selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', transform: 'scale(1.1)' }} />
+              {/* ЗАСВАР #114: дэвсгэрт cover биш, манганы panel/banner зургийг ашиглана
+                  (banner байхгvй бол л cover-с нөөцлөнө) */}
+              <img src={selected.banner_url || selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', transform: 'scale(1.1)' }} />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.25), rgba(10,10,10,0.95))' }} />
 
               <button onClick={() => setPage(previousPage)} title="Буцах"
