@@ -33,3 +33,28 @@ input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
   display: none;
 }
+
+/* ЗАСВАР #96: гvйдэг мөрvvдийн зvvн/баруун гар товч */
+.scroll-arrow {
+  position: absolute;
+  top: 40%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 20, 20, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  z-index: 5;
+  backdrop-filter: blur(4px);
+}
+.scroll-arrow-left {
+  left: -6px;
+}
+.scroll-arrow-right {
+  right: -6px;
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 
 const genres = ['Action', 'Historical', 'Modern', 'Smut', 'BL', 'Horror', 'Romance'];
@@ -27,16 +27,6 @@ const PLANS = [
 // ЗАСВАР #91: "Төлбөр төлсөн" хүсэлт батлахад багц тус бүрийн VIP хоногийг тооцоход ашиглана
 const PLAN_DAYS = { '1sar': 30, '3sar': 90, '6sar': 180 };
 
-// localStorage-оос аюулгүй унших туслах функц
-const loadLS = (key, fallback) => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
 // ЗАСВАР #11: upload хийхийн өмнө файлын төрлийг шалгах нэг цэгтэй функц
 // (өмнө нь <input accept="image/*"> л байсан бөгөөд энэ нь зөвхөн UI-д зориулсан
 // зөвлөмж тул хэрэглэгч ямар ч файл сонгож upload хийж болдог байсан).
@@ -63,6 +53,26 @@ const uploadToR2 = async (file, path) => {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Upload алдаа гарлаа');
   return data.publicUrl;
+};
+
+// ЗАСВАР #96: нүүр хэсгийн гүйдэг мөрүүд (carousel) дээр гараар зvvн/баруун
+// тийш гvйлгэх цэвэрхэн дугуй товч нэмэв.
+const ScrollRow = ({ children }) => {
+  const ref = useRef(null);
+  const scroll = (dir) => ref.current?.scrollBy({ left: dir * 420, behavior: 'smooth' });
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => scroll(-1)} className="scroll-arrow scroll-arrow-left" aria-label="Зvvн тийш гvйлгэх">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div ref={ref} className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
+        {children}
+      </div>
+      <button onClick={() => scroll(1)} className="scroll-arrow scroll-arrow-right" aria-label="Баруун тийш гvйлгэх">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  );
 };
 
 const IconHome = () => (
@@ -130,10 +140,11 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeGenre, setActiveGenre] = useState('Бүгд');
-  // ЗАСВАР #7: library болон history-г localStorage-д хадгалдаг болгосон
-  // (өмнө нь refresh хийхэд алга болдог байсан, history нь хатуу бичсэн массив байсан).
-  const [library, setLibrary] = useState(() => loadLS('manga_library', []));
-  const [history, setHistory] = useState(() => loadLS('manga_history', []));
+  // ЗАСВАР #95: library/history/readChapters-г localStorage-с Supabase руу
+  // шилжүүлэв (user_library, reading_progress хүснэгтүүд) — төхөөрөмж
+  // солиход ч мэдээлэл алдагдахгүй, зөвхөн нэвтэрсэн үед л ажиллана.
+  const [library, setLibrary] = useState([]);
+  const [history, setHistory] = useState([]);
   const [dbMangas, setDbMangas] = useState([]);
   const [authPage, setAuthPage] = useState(null);
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
@@ -151,7 +162,7 @@ export default function App() {
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [chapterImages, setChapterImages] = useState([]);
   // ЗАСВАР #56: 1 төрлийн оронд 1-3 төрөл зэрэг сонгож болдог болгосон (массив)
-  const [adminManga, setAdminManga] = useState({ title: '', desc: '', genres: [], status: 'Үргэлжилж байна' });
+  const [adminManga, setAdminManga] = useState({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
   const [adminWorkerEmail, setAdminWorkerEmail] = useState('');
   // ЗАСВАР #31: цуглуулга болсон — олон staff role-ийг зэрэг чеклэж болно
   const [adminWorkerRoles, setAdminWorkerRoles] = useState([]);
@@ -164,7 +175,7 @@ export default function App() {
   const [bannerFile, setBannerFile] = useState(null);
   // ШИНЭ: оруулсан мангаг засах (edit) цонх
   const [editManga, setEditManga] = useState(null);
-  const [editMangaForm, setEditMangaForm] = useState({ title: '', desc: '', genres: [], status: 'Үргэлжилж байна' });
+  const [editMangaForm, setEditMangaForm] = useState({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
   const [editPosterFile, setEditPosterFile] = useState(null);
   const [editBannerFile, setEditBannerFile] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
@@ -199,7 +210,7 @@ export default function App() {
   const [commentText, setCommentText] = useState('');
   const [commentSending, setCommentSending] = useState(false);
   // { [mangaId]: [бүлгийн дугаарууд] } — уншсан бүлгүүд
-  const [readChapters, setReadChapters] = useState(() => loadLS('manga_read', {}));
+  const [readChapters, setReadChapters] = useState({});
   // ШИНЭ: role систем, нийтлэх урсгал, report
   const [chapterIsVip, setChapterIsVip] = useState(false);
   // ЗАСВАР #60: "ҮНЭГҮЙ"/"VIP" бэлгэдлийн оронд admin өөрөө бичих дурын тэмдэглэгээ (жишээ нь S1 END)
@@ -316,23 +327,31 @@ export default function App() {
   // Товлосон цаг нь болоогүй бүлэг эсэх
   const chapterLocked = (ch) => ch.publish_at && new Date(ch.publish_at).getTime() > nowTs;
 
-  // library өөрчлөгдөх бүрт localStorage-д хадгална
+  // ЗАСВАР #95: нэвтрэхэд Supabase-с хадгалсан манга + унших явцыг татаж ирнэ;
+  // гарахад (logout) локал state-ийг цэвэрлэнэ (DB-д хэвээрээ үлдэнэ).
   useEffect(() => {
-    localStorage.setItem('manga_library', JSON.stringify(library));
-  }, [library]);
+    if (!currentUser) { setLibrary([]); setHistory([]); setReadChapters({}); return; }
+    supabase.from('user_library').select('manga_id').eq('user_id', currentUser.id)
+      .then(({ data }) => setLibrary((data || []).map(r => r.manga_id)));
+    supabase.from('reading_progress').select('manga_id, last_chapter, read_chapters, updated_at').eq('user_id', currentUser.id)
+      .then(({ data }) => {
+        const rows = data || [];
+        setHistory(rows
+          .map(r => ({ mangaId: r.manga_id, chapter: r.last_chapter, date: new Date(r.updated_at).getTime() }))
+          .sort((a, b) => b.date - a.date));
+        setReadChapters(Object.fromEntries(rows.map(r => [r.manga_id, r.read_chapters || []])));
+      });
+  }, [currentUser]);
 
-  // history өөрчлөгдөх бүрт localStorage-д хадгална
-  useEffect(() => {
-    localStorage.setItem('manga_history', JSON.stringify(history));
-  }, [history]);
-
-  // уншсан бүлгүүдийг localStorage-д хадгална
-  useEffect(() => {
-    localStorage.setItem('manga_read', JSON.stringify(readChapters));
-  }, [readChapters]);
-
-  const toggleLibrary = (id) => {
-    setLibrary(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleLibrary = async (id) => {
+    if (!currentUser) { setAuthPage('login'); return; }
+    if (library.includes(id)) {
+      setLibrary(prev => prev.filter(x => x !== id));
+      await supabase.from('user_library').delete().eq('user_id', currentUser.id).eq('manga_id', id);
+    } else {
+      setLibrary(prev => [...prev, id]);
+      await supabase.from('user_library').insert({ user_id: currentUser.id, manga_id: id });
+    }
   };
 
   // ЗАСВАР #61: манга дэлгэрэнгүй хуудас руу орохдоо одоогийн хуудсыг санана,
@@ -761,6 +780,7 @@ export default function App() {
     // ШИНЭ: VIP бүлгийг зөвхөн VIP/staff уншина
     if (chapter.is_vip && !isVip) {
       notify('👑 Энэ бол VIP бүлэг. Унших эрх авна уу!');
+      setPreviousPage(page);
       setPage('vip');
       return;
     }
@@ -776,12 +796,19 @@ export default function App() {
       { mangaId: manga.id, chapter: chapter.chapter_number, date: Date.now() },
       ...prev.filter(h => h.mangaId !== manga.id),
     ]);
-    // ШИНЭ: энэ бүлгийг "уншсан" гэж тэмдэглэнэ
-    setReadChapters(prev => {
-      const list = prev[manga.id] || [];
-      if (list.includes(chapter.chapter_number)) return prev;
-      return { ...prev, [manga.id]: [...list, chapter.chapter_number] };
-    });
+    // ШИНЭ: энэ бүлгийг "уншсан" гэж тэмдэглэнэ (нэвтэрсэн бол Supabase-д хадгална)
+    if (currentUser) {
+      const existing = readChapters[manga.id] || [];
+      const nextRead = existing.includes(chapter.chapter_number) ? existing : [...existing, chapter.chapter_number];
+      setReadChapters(prev => ({ ...prev, [manga.id]: nextRead }));
+      supabase.from('reading_progress').upsert({
+        user_id: currentUser.id,
+        manga_id: manga.id,
+        last_chapter: chapter.chapter_number,
+        read_chapters: nextRead,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,manga_id' }).then(({ error }) => { if (error) notify('Алдаа: ' + error.message); });
+    }
   };
 
   // ШИНЭ: сэтгэгдэл устгах (өөрийн эсвэл moderator/admin)
@@ -849,8 +876,7 @@ export default function App() {
     </div>
   );
 
-  // ШИНЭ: нүүр хэсгийн ангилал тус бүрийг хажуу тийш гүйдэг мөр (carousel) болгох стиль
-  const scrollRowStyle = { display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' };
+  // ШИНЭ: нүүр хэсгийн ангилал тус бүрийн манга картын хэмжээ
   const scrollCardStyle = { width: 130, flexShrink: 0 };
 
   return (
@@ -888,7 +914,7 @@ export default function App() {
 
         <div style={{ fontSize: 11, color: '#444', letterSpacing: 1, marginBottom: '0.5rem', paddingLeft: 8 }}>ҮНДСЭН</div>
         {navItems.map(item => (
-          <div key={item.p} onClick={() => { setPage(item.p); if (item.p === 'all') setAllCategory(null); }}
+          <div key={item.p} onClick={() => { setPreviousPage(page); setPage(item.p); if (item.p === 'all') setAllCategory(null); }}
             style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === item.p ? '#fff' : '#888', background: page === item.p ? '#1a1a1a' : 'transparent', fontWeight: page === item.p ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
             {item.icon}
             {item.label}
@@ -896,12 +922,12 @@ export default function App() {
         ))}
 
         <div style={{ fontSize: 11, color: '#444', letterSpacing: 1, margin: '1.5rem 0 0.5rem', paddingLeft: 8 }}>ХЭРЭГЛЭГЧ</div>
-        <div onClick={() => setPage('library')}
+        <div onClick={() => { setPreviousPage(page); setPage('library'); }}
           style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === 'library' ? '#fff' : '#888', background: page === 'library' ? '#1a1a1a' : 'transparent', fontWeight: page === 'library' ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
           <IconBookmark />
           Миний сан
         </div>
-        <div onClick={() => setPage('vip')}
+        <div onClick={() => { setPreviousPage(page); setPage('vip'); }}
           style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === 'vip' ? '#8B0000' : '#888', background: page === 'vip' ? '#1a1a1a' : 'transparent', fontWeight: page === 'vip' ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
@@ -1261,16 +1287,16 @@ export default function App() {
             <div style={{ padding: '1.5rem 2rem 3rem' }}>
               {allMangas.filter(m => history.find(h => h.mangaId === m.id)).length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
-                  <SectionHeader title="ТҮҮХ" onClick={() => { setAllCategory('history'); setPage('all'); }} />
-                  <div className="scroll-row" style={scrollRowStyle}>
+                  <SectionHeader title="ТҮҮХ" onClick={() => { setPreviousPage('home'); setAllCategory('history'); setPage('all'); }} />
+                  <ScrollRow>
                     {allMangas.filter(m => history.find(h => h.mangaId === m.id)).map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={true} /></div>)}
-                  </div>
+                  </ScrollRow>
                 </div>
               )}
 
               <div style={{ marginBottom: '2.5rem' }}>
-                <SectionHeader title="ШИНЭ БҮЛЭГ" onClick={() => { setAllCategory('recentChapter'); setPage('all'); }} />
-                <div className="scroll-row" style={scrollRowStyle}>
+                <SectionHeader title="ШИНЭ БҮЛЭГ" onClick={() => { setPreviousPage('home'); setAllCategory('recentChapter'); setPage('all'); }} />
+                <ScrollRow>
                   {recentChapters
                     .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
@@ -1286,34 +1312,34 @@ export default function App() {
                         </div>
                       </div>
                     ))}
-                </div>
+                </ScrollRow>
               </div>
 
               {/* ЗАСВАР #64: ШИНЭ МАНГА — саяхан нэмэгдсэн манганууд */}
               {newMangas.length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
-                  <SectionHeader title="ШИНЭ МАНГА" onClick={() => { setAllCategory('new'); setPage('all'); }} />
-                  <div className="scroll-row" style={scrollRowStyle}>
+                  <SectionHeader title="ШИНЭ МАНГА" onClick={() => { setPreviousPage('home'); setAllCategory('new'); setPage('all'); }} />
+                  <ScrollRow>
                     {newMangas.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
-                  </div>
+                  </ScrollRow>
                 </div>
               )}
 
               {/* ЗАСВАР #76: САНАЛ БОЛГОХ — admin гараар сонгосон 10 манга */}
               {curatedRecommended.length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
-                  <SectionHeader title="САНАЛ БОЛГОХ" onClick={() => { setAllCategory('recommended'); setPage('all'); }} />
-                  <div className="scroll-row" style={scrollRowStyle}>
+                  <SectionHeader title="САНАЛ БОЛГОХ" onClick={() => { setPreviousPage('home'); setAllCategory('recommended'); setPage('all'); }} />
+                  <ScrollRow>
                     {curatedRecommended.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
-                  </div>
+                  </ScrollRow>
                 </div>
               )}
 
               <div style={{ marginBottom: '2.5rem' }}>
-                <SectionHeader title="ДУУССАН" onClick={() => { setAllCategory('finished'); setPage('all'); }} />
-                <div className="scroll-row" style={scrollRowStyle}>
+                <SectionHeader title="ДУУССАН" onClick={() => { setPreviousPage('home'); setAllCategory('finished'); setPage('all'); }} />
+                <ScrollRow>
                   {allMangas.filter(m => m.status === 'Дууссан').map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
-                </div>
+                </ScrollRow>
               </div>
             </div>
           </div>
@@ -1322,8 +1348,8 @@ export default function App() {
         {/* ALL PAGE */}
         {page === 'all' && (
           <div style={{ padding: '1.5rem 2rem' }}>
-            {/* ЗАСВАР #80: "цааш үзэх" тэмдгээр орж ирэхэд буцах товч байхгүй байсныг засав */}
-            <button onClick={() => setPage('home')} title="Буцах"
+            {/* ЗАСВАР #97: "Буцах" одоо hardcoded 'home' биш, previousPage руу очно */}
+            <button onClick={() => setPage(previousPage)} title="Буцах"
               style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', marginBottom: '1.25rem' }}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
@@ -1801,6 +1827,11 @@ export default function App() {
         {/* VIP PAGE — үнийг PLANS-аас уншина (ЗАСВАР #3) */}
         {page === 'vip' && (
           <div style={{ padding: '3rem 2rem', minHeight: '100vh', background: '#050505', color: '#fff' }}>
+            {/* ЗАСВАР #97: буцах товч нэмэв */}
+            <button onClick={() => setPage(previousPage)} title="Буцах"
+              style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', marginBottom: '1.5rem' }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
             <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
               <div style={{ fontSize: 42, fontWeight: 900 }}>ЭРХ АВАХ</div>
               <div style={{ color: '#777', marginTop: 10 }}>Өөрт тохирох багцаа сонгоно уу</div>
@@ -2164,7 +2195,7 @@ export default function App() {
                   if (error) notify('Алдаа: ' + error.message);
                   else {
                     notify('Манга амжилттай нэмэгдлээ! 🎉');
-                    setAdminManga({ title: '', desc: '', genres: [], status: 'Үргэлжилж байна' });
+                    setAdminManga({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
                     setPosterFile(null);
                     setBannerFile(null);
                     fetchMangas(); // ЗАСВАР: жагсаалтыг шууд шинэчилнэ (өмнө нь refresh хэрэгтэй байсан)
@@ -2661,6 +2692,11 @@ export default function App() {
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
             <div style={{ width: 400, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto', background: '#111', border: '1px solid #222', borderRadius: 18, padding: '1.5rem', position: 'relative', boxSizing: 'border-box' }}>
 
+              {/* ЗАСВАР #97: буцах товч нэмэв */}
+              <button onClick={() => setShowPopup(false)} title="Буцах"
+                style={{ position: 'absolute', top: 14, left: 16, width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
               <span onClick={() => setShowPopup(false)} style={{ position: 'absolute', top: 14, right: 16, cursor: 'pointer', fontSize: 18, color: '#555' }}>✕</span>
 
               <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
