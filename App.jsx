@@ -159,6 +159,15 @@ export default function App() {
   const [mangaReplyText, setMangaReplyText] = useState('');
   const [mangaSelectedSticker, setMangaSelectedSticker] = useState(null);
 
+  // ЗАСВАР #113: "Юу уншихаа мэдэхгvй vv?" reel (tiktok маягийн) feed
+  const [dbReels, setDbReels] = useState([]);
+  const [myReelLikes, setMyReelLikes] = useState([]);
+  const [reelLikeCounts, setReelLikeCounts] = useState({});
+  const [reelsMuted, setReelsMuted] = useState(true);
+  const [adminReelManga, setAdminReelManga] = useState('');
+  const [reelVideoFile, setReelVideoFile] = useState(null);
+  const [reelUploading, setReelUploading] = useState(false);
+
   // ============ ROLE СИСТЕМ ============
   // admin     — бүх эрх
   // moderator — манга/бүлэг нэмэх, Editor-ийн хүсэлт батлах/татгалзах, сэтгэгдэл устгах, report шалгах (манга устгах эрхгүй)
@@ -452,6 +461,7 @@ export default function App() {
   // байсан тул browser буцах товч дарахад сайтаас шууд гардаг байсан.
   const isPopStateNav = useRef(false);
   const didInitialRestore = useRef(false);
+  const reelVideoRefs = useRef({});
   // ЗАСВАР #100: deep-link (жишээ нь /manga/2 руу шууд орох эсвэл refresh хийх)
   // үед dbMangas ирэхээс ӨМНӨ sync effect ажиллаж, URL-ыг '/' болгож дарж бичдэг
   // байсан bug-ыг засав — одоо анхны сэргээлт дуустал sync хийхгvй хvлээнэ.
@@ -481,7 +491,7 @@ export default function App() {
       return;
     }
     const seg = pathname.replace(/^\//, '');
-    setPage(['all', 'schedule', 'vip', 'library', 'admin'].includes(seg) ? seg : 'home');
+    setPage(['all', 'schedule', 'vip', 'library', 'admin', 'reels'].includes(seg) ? seg : 'home');
   }, [dbMangas]);
 
   // Анх ачаалахад (эсвэл dbMangas ирэхэд) одоогийн URL-аас хуудсыг сэргээнэ
@@ -565,6 +575,29 @@ export default function App() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, selectedChapter]);
+
+  // ЗАСВАР #113: "Юу уншихаа мэдэхгvй vv?" хуудсанд эсвэл admin "REEL НЭМЭХ" tab-д ороход reel-vvдийг татна
+  useEffect(() => {
+    if (page !== 'reels' && !(page === 'admin' && adminTab === 'reels')) return;
+    let cancelled = false;
+    fetchReels(() => cancelled);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, adminTab]);
+
+  // ЗАСВАР #113: харагдаж буй reel-ийг л автоматаар тоглуулж, бусдыг зогсооно
+  // (like дархад dbReels дахин ачаалагддаггvй тул энэ effect тоглуулалтыг тасалдуулахгvй)
+  useEffect(() => {
+    if (page !== 'reels' || dbReels.length === 0) return;
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) entry.target.play().catch(() => {});
+        else entry.target.pause();
+      });
+    }, { threshold: 0.6 });
+    Object.values(reelVideoRefs.current).forEach(v => observer.observe(v));
+    return () => observer.disconnect();
+  }, [page, dbReels]);
 
   // ШИНЭ: сэтгэгдэл татах (нэр, avatar, like-ийн тоотой хамт)
   // isCancelled — өмнөх бүлгийн хүсэлт хожуу ирвэл state дарж бичихээс сэргийлэх (заавал биш)
@@ -727,6 +760,42 @@ export default function App() {
     if (error) { notify('Алдаа: ' + error.message); return; }
     notify('Vнэлгээ хадгалагдлаа! 🎉');
     fetchMangaRatings(selected.id);
+  };
+
+  // ЗАСВАР #113: reel-vvдийг манга мэдээлэл + like-ийн тоотой нь татна
+  const fetchReels = (isCancelled = () => false) => {
+    supabase.from('reels').select('*').order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (isCancelled()) return;
+        if (error) { console.error('Reel татах алдаа:', error); return; }
+        const list = data || [];
+        setDbReels(list);
+        if (list.length === 0) { setReelLikeCounts({}); return; }
+        supabase.from('reel_likes').select('reel_id').in('reel_id', list.map(r => r.id))
+          .then(({ data: likeRows }) => {
+            if (isCancelled()) return;
+            const counts = {};
+            (likeRows || []).forEach(r => { counts[r.reel_id] = (counts[r.reel_id] || 0) + 1; });
+            setReelLikeCounts(counts);
+          });
+      });
+    if (currentUser) {
+      supabase.from('reel_likes').select('reel_id').eq('user_id', currentUser.id)
+        .then(({ data }) => { if (!isCancelled()) setMyReelLikes((data || []).map(x => x.reel_id)); });
+    }
+  };
+
+  // ЗАСВАР #113: зvрх дарах/болих — feed дэхь video-г дахин ачаалуулж тоглуулалтыг
+  // тасалдуулахгvйн тулд dbReels-ийг дахин ТАТАХГVЙгээр орон нутгийн (optimistic) байдлаар шинэчилнэ
+  const toggleReelLike = async (reel) => {
+    if (!currentUser) { setAuthPage('login'); return; }
+    const liked = myReelLikes.includes(reel.id);
+    setMyReelLikes(prev => liked ? prev.filter(id => id !== reel.id) : [...prev, reel.id]);
+    setReelLikeCounts(prev => ({ ...prev, [reel.id]: Math.max(0, (prev[reel.id] || 0) + (liked ? -1 : 1)) }));
+    const { error } = liked
+      ? await supabase.from('reel_likes').delete().eq('reel_id', reel.id).eq('user_id', currentUser.id)
+      : await supabase.from('reel_likes').insert({ reel_id: reel.id, user_id: currentUser.id });
+    if (error) { notify('Алдаа: ' + error.message); fetchReels(); }
   };
 
   // ЗАСВАР #108: профайлдаа хадгалсан 3 стикер upload/устгах
@@ -941,6 +1010,9 @@ export default function App() {
     { label: 'Нүүр', p: 'home', icon: <IconHome /> },
     { label: 'Бүх гаргалт', p: 'all', icon: <IconGrid /> },
     { label: 'Хуваарь', p: 'schedule', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+    // ЗАСВАР #113: TikTok маягийн reel feed — зөвхөн admin/moderator upload хийнэ,
+    // харин бvх хэрэглэгч vзэж болно
+    { label: 'Юу уншихаа мэдэхгvй vv?', p: 'reels', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg> },
   ];
 
   const MangaCard = ({ m, showChapter }) => (
@@ -1240,8 +1312,9 @@ export default function App() {
       <div style={{ marginLeft: isMobile ? 0 : 220, flex: 1, minWidth: 0 }}>
 
         {/* ЗАСВАР #105: Topbar-ыг chapter уншиж байх үед нуув (reader-ийн
-            өөрийн компакт header-тэй давхцаж зай дэмий эзэлдэг байсан). */}
-        {page !== 'reader' && (
+            өөрийн компакт header-тэй давхцаж зай дэмий эзэлдэг байсан).
+            ЗАСВАР #113: reels хуудсанд ч бас нуув — бvтэн дэлгэцийн видео feed. */}
+        {page !== 'reader' && page !== 'reels' && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'nowrap', padding: '0.75rem 1rem', borderBottom: '1px solid #1a1a1a', position: 'sticky', top: 0, background: '#0a0a0a', zIndex: 50, gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, minWidth: 0 }}>
             {isMobile && (
@@ -1667,7 +1740,61 @@ export default function App() {
           </div>
         )}
 
+        {/* ЗАСВАР #113: "Юу уншихаа мэдэхгvй vv?" — TikTok маягийн доошоо гvйдэг reel feed */}
+        {page === 'reels' && (
+          <div style={{ height: '100vh', overflowY: 'scroll', scrollSnapType: 'y mandatory', background: '#000' }}>
+            <button onClick={() => setReelsMuted(m => !m)} title={reelsMuted ? 'Дуу нээх' : 'Дуу хаах'}
+              style={{ position: 'fixed', top: 16, right: 16, zIndex: 3, width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', cursor: 'pointer' }}>
+              {reelsMuted
+                ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>}
+            </button>
 
+            {dbReels.length === 0 ? (
+              <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 14, scrollSnapAlign: 'start', gap: 8 }}>
+                <span style={{ fontSize: 32 }}>🎬</span>
+                Одоогоор reel алга байна.
+              </div>
+            ) : dbReels.map(reel => {
+              const manga = dbMangas.find(m => m.id === reel.manga_id);
+              const liked = myReelLikes.includes(reel.id);
+              const likeCount = reelLikeCounts[reel.id] || 0;
+              return (
+                <div key={reel.id} style={{ position: 'relative', height: '100vh', scrollSnapAlign: 'start', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  <video
+                    ref={el => { if (el) reelVideoRefs.current[reel.id] = el; else delete reelVideoRefs.current[reel.id]; }}
+                    src={reel.video_url} muted={reelsMuted} loop playsInline
+                    onClick={e => { e.currentTarget.paused ? e.currentTarget.play().catch(() => {}) : e.currentTarget.pause(); }}
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', cursor: 'pointer' }} />
+
+                  <button onClick={() => setPage(previousPage)} title="Буцах"
+                    style={{ position: 'absolute', top: 16, left: 16, width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', cursor: 'pointer', zIndex: 2 }}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                  </button>
+
+                  <div style={{ position: 'absolute', right: 14, bottom: 110, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, zIndex: 2 }}>
+                    <span onClick={() => toggleReelLike(reel)}
+                      style={{ cursor: 'pointer', width: 46, height: 46, borderRadius: '50%', background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill={liked ? '#e0245e' : 'none'} stroke={liked ? '#e0245e' : '#fff'} strokeWidth="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.8 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+                    </span>
+                    <span style={{ color: '#fff', fontSize: 12, fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{likeCount}</span>
+                  </div>
+
+                  {manga && (
+                    <div style={{ position: 'absolute', left: 14, right: 74, bottom: 28, zIndex: 2 }}>
+                      <div style={{ color: '#fff', fontWeight: 800, fontSize: 15, marginBottom: 10, textShadow: '0 1px 4px rgba(0,0,0,0.8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{manga.title}</div>
+                      <button onClick={() => goToDetail(manga)}
+                        style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '9px 22px', borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                        Унших
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* LIBRARY PAGE */}
         {page === 'library' && (
@@ -2369,6 +2496,7 @@ export default function App() {
               {[
                 { key: 'manga', label: 'МАНГА НЭМЭХ', show: isStaff },
                 { key: 'chapter', label: 'БҮЛЭГ НЭМЭХ', show: isStaff },
+                { key: 'reels', label: 'REEL НЭМЭХ', show: canModerate },
                 { key: 'roles', label: 'ЭРХ ОЛГОХ', show: isAdmin },
                 { key: 'vip', label: 'VIP ОЛГОХ', show: isAdmin },
                 { key: 'payments', label: `ТӨЛБӨРИЙН ХҮСЭЛТ (${paymentRequests.length})`, show: isAdmin },
@@ -2690,6 +2818,88 @@ export default function App() {
                   style={{ width: '100%', background: chapterUploading ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: chapterUploading ? 'not-allowed' : 'pointer', fontSize: 14 }}>
                   {chapterUploading ? 'УНШИЖ БАЙНА...' : 'БҮЛЭГ НЭМЭХ'}
                 </button>
+              </div>
+              )}
+
+              {/* ЗАСВАР #113: Reel нэмэх — зөвхөн admin/moderator */}
+              {adminTab === 'reels' && canModerate && (
+              <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e', maxWidth: 480 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
+                  REEL НЭМЭХ
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>МАНГА СОНГО</div>
+                  <select value={adminReelManga} onChange={e => setAdminReelManga(e.target.value)}
+                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }}>
+                    <option value="">-- Манга сонгох --</option>
+                    {dbMangas.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ВИДЕО ФАЙЛ</div>
+                  <input type="file" accept="video/*" onChange={e => setReelVideoFile(e.target.files[0] || null)}
+                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>1 мангад олон reel нэмж болно</div>
+                </div>
+
+                <button
+                  disabled={reelUploading}
+                  onClick={async () => {
+                    if (!adminReelManga) { notify('Манга сонгоно уу!'); return; }
+                    if (!reelVideoFile) { notify('Видео файл сонгоно уу!'); return; }
+                    if (!reelVideoFile.type.startsWith('video/')) { notify('Алдаа: зөвхөн видео файл оруулна уу.'); return; }
+                    setReelUploading(true);
+                    let videoUrl;
+                    try {
+                      const ext = reelVideoFile.name.split('.').pop();
+                      videoUrl = await uploadToR2(reelVideoFile, `reels/${Date.now()}.${ext}`);
+                    } catch (uploadError) {
+                      notify('Видео upload алдаа: ' + uploadError.message);
+                      setReelUploading(false);
+                      return;
+                    }
+                    const { error } = await supabase.from('reels').insert({
+                      manga_id: adminReelManga,
+                      video_url: videoUrl,
+                      created_by: currentUser.id,
+                    });
+                    setReelUploading(false);
+                    if (error) { notify('Алдаа: ' + error.message); return; }
+                    notify('Reel амжилттай нэмэгдлээ! 🎉');
+                    setAdminReelManga('');
+                    setReelVideoFile(null);
+                    fetchReels();
+                  }}
+                  style={{ width: '100%', background: reelUploading ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: reelUploading ? 'not-allowed' : 'pointer', fontSize: 14 }}>
+                  {reelUploading ? 'УНШИЖ БАЙНА...' : 'REEL НЭМЭХ'}
+                </button>
+
+                {dbReels.length > 0 && (
+                  <div style={{ marginTop: 20 }}>
+                    <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>ОРУУЛСАН REEL-vvД ({dbReels.length})</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                      {dbReels.map(reel => {
+                        const manga = dbMangas.find(m => m.id === reel.manga_id);
+                        return (
+                          <div key={reel.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#1a1a1a', borderRadius: 8, padding: '8px 10px' }}>
+                            <video src={reel.video_url} muted style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6, background: '#000', flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{manga?.title || 'Манга'}</div>
+                            <span onClick={async () => {
+                              if (!window.confirm('Энэ reel-ийг устгах уу?')) return;
+                              const { error } = await supabase.from('reels').delete().eq('id', reel.id);
+                              if (error) notify('Алдаа: ' + error.message); else fetchReels();
+                            }}
+                              title="Устгах"
+                              style={{ cursor: 'pointer', color: '#8B0000', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>✕</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               )}
 

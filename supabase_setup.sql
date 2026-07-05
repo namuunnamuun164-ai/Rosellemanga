@@ -237,6 +237,24 @@ $$;
 grant execute on function public.top_manga_last_days(int, int) to anon, authenticated;
 
 -- ============================================================
+-- 8b) REELS — ЗАСВАР #113: "Юу уншихаа мэдэхгvй vv?" TikTok маягийн feed
+-- ============================================================
+create table if not exists public.reels (
+  id bigint generated always as identity primary key,
+  manga_id bigint not null references public.mangas(id) on delete cascade,
+  video_url text not null,
+  created_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.reel_likes (
+  reel_id bigint not null references public.reels(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (reel_id, user_id)
+);
+
+-- ============================================================
 -- 9) users.roles-ийг зөвхөн admin өөрчилж чадахаар хамгаална
 -- ============================================================
 create or replace function public.prevent_role_escalation()
@@ -279,6 +297,8 @@ alter table public.manga_ratings enable row level security;
 alter table public.payment_requests enable row level security;
 alter table public.user_library enable row level security;
 alter table public.reading_progress enable row level security;
+alter table public.reels enable row level security;
+alter table public.reel_likes enable row level security;
 
 -- users
 drop policy if exists "users_select_all" on public.users;
@@ -415,6 +435,27 @@ create policy "manga_ratings_select_all" on public.manga_ratings for select usin
 
 drop policy if exists "manga_ratings_own" on public.manga_ratings;
 create policy "manga_ratings_own" on public.manga_ratings for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- reels — зөвхөн admin/moderator нэмж/устгаж болно, бvгд хардаг
+drop policy if exists "reels_select_all" on public.reels;
+create policy "reels_select_all" on public.reels for select using (true);
+
+drop policy if exists "reels_moderator_write" on public.reels;
+create policy "reels_moderator_write" on public.reels for all
+  using (exists (
+    select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator']
+  ))
+  with check (exists (
+    select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator']
+  ));
+
+-- reel_likes
+drop policy if exists "reel_likes_select_all" on public.reel_likes;
+create policy "reel_likes_select_all" on public.reel_likes for select using (true);
+
+drop policy if exists "reel_likes_own" on public.reel_likes;
+create policy "reel_likes_own" on public.reel_likes for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ============================================================
