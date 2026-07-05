@@ -43,3 +43,18 @@ input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
   display: none;
 }
+
+/* ЗАСВАР #116: reel feed-ийг гvйлгэхэд доороос цайвар зай гарч ирдэг байсныг
+   засав — "100vh" нь утасны хөдөлгөөнтэй (dynamic) хаяг/toolbar-ыг тооцдоггvй
+   тул бодит харагдах өндрөөс өндөр гарч, snap хэсгvvдийн хооронд цонх
+   (gap) vvсгэдэг байсан. "100dvh" дэмждэг browser дээр vvнийг дарж ашиглана.
+   overscroll-behavior нь elastic bounce vед арын цайвар дэвсгэр харагдахаас сэргийлнэ. */
+.reel-feed {
+  height: 100vh;
+  height: 100dvh;
+  overscroll-behavior-y: contain;
+}
+.reel-item {
+  height: 100vh;
+  height: 100dvh;
+}

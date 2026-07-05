@@ -1735,7 +1735,7 @@ export default function App() {
 
         {/* ЗАСВАР #113: "Юу уншихаа мэдэхгvй vv?" — TikTok маягийн доошоо гvйдэг reel feed */}
         {page === 'reels' && (
-          <div style={{ height: '100vh', overflowY: 'scroll', scrollSnapType: 'y mandatory', background: '#000' }}>
+          <div className="reel-feed" style={{ overflowY: 'scroll', scrollSnapType: 'y mandatory', background: '#000' }}>
             <button onClick={() => setReelsMuted(m => !m)} title={reelsMuted ? 'Дуу нээх' : 'Дуу хаах'}
               style={{ position: 'fixed', top: 16, right: 16, zIndex: 3, width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', cursor: 'pointer' }}>
               {reelsMuted
@@ -1744,7 +1744,7 @@ export default function App() {
             </button>
 
             {dbReels.length === 0 ? (
-              <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 14, scrollSnapAlign: 'start', gap: 8 }}>
+              <div className="reel-item" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 14, scrollSnapAlign: 'start', gap: 8 }}>
                 <span style={{ fontSize: 32 }}>🎬</span>
                 Одоогоор reel алга байна.
               </div>
@@ -1753,7 +1753,7 @@ export default function App() {
               const liked = myReelLikes.includes(reel.id);
               const likeCount = reelLikeCounts[reel.id] || 0;
               return (
-                <div key={reel.id} style={{ position: 'relative', height: '100vh', scrollSnapAlign: 'start', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                <div key={reel.id} className="reel-item" style={{ position: 'relative', scrollSnapAlign: 'start', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                   <video
                     ref={el => { if (el) reelVideoRefs.current[reel.id] = el; else delete reelVideoRefs.current[reel.id]; }}
                     src={reel.video_url} muted={reelsMuted} loop playsInline
