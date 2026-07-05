@@ -57,6 +57,10 @@ create table if not exists public.users (
   -- ЗАСВАР #20: VIP-г roles-оос тусад нь, дуусах хугацаатайгаар хадгална
   is_vip boolean not null default false,
   vip_expires_at timestamptz,
+  -- ЗАСВАР #10 (migration_10): хэрэглэгчийн сэтгэгдэлд ашиглах 3 хvртэлх стикер
+  sticker_1 text,
+  sticker_2 text,
+  sticker_3 text,
   created_at timestamptz not null default now()
 );
 
@@ -118,6 +122,8 @@ create table if not exists public.comments (
   user_id uuid not null references public.users(id) on delete cascade,
   content text not null,
   parent_id bigint references public.comments(id) on delete cascade,
+  -- ЗАСВАР #10 (migration_10): хэрэглэгчийн профайл дахь стикерийг сэтгэгдэлд хавсаргах
+  sticker_url text,
   created_at timestamptz not null default now()
 );
 
