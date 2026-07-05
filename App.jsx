@@ -1692,8 +1692,8 @@ export default function App() {
         {page === 'detail' && selected && (
           <div>
             <div style={{ position: 'relative', height: 220, overflow: 'hidden' }}>
-              <img src={selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', filter: 'blur(6px)', transform: 'scale(1.15)' }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(10,10,10,0.9))' }} />
+              <img src={selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', transform: 'scale(1.1)' }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.25), rgba(10,10,10,0.95))' }} />
 
               <button onClick={() => setPage(previousPage)} title="Буцах"
                 style={{ position: 'absolute', top: 16, left: 16, zIndex: 5, width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', cursor: 'pointer', backdropFilter: 'blur(6px)' }}>
@@ -1709,6 +1709,38 @@ export default function App() {
             {/* Голлосон том cover */}
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: -110, position: 'relative', zIndex: 2 }}>
               <img src={selected.poster} alt="" style={{ width: 200, height: 272, objectFit: 'cover', borderRadius: 16, boxShadow: '0 14px 36px rgba(0,0,0,0.6)', border: '3px solid #0a0a0a' }} />
+            </div>
+
+            {/* ЗАСВАР #112: гарчиг + орчуулагчдын нэрийг 3 tab-ын дээр, cover-ийн
+                доор байнга харагдахаар зөөв (өмнө нь зөвхөн "Бvлгvvд" tab дотор байсан) */}
+            <div style={{ textAlign: 'center', padding: '1rem 2rem 0' }}>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{selected.title}</div>
+              {(selected.admin_note || canModerate) && (
+                <div style={{ marginTop: 8 }}>
+                  {mangaNoteEditing ? (
+                    <div style={{ background: '#111', border: '1px solid #222', borderRadius: 10, padding: 12, textAlign: 'left' }}>
+                      <textarea value={mangaNoteDraft} onChange={e => setMangaNoteDraft(e.target.value)}
+                        rows={2} placeholder="Орчуулагчдын нэрс (жишээ нь: Бат, Болд)..."
+                        style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button onClick={async () => {
+                          const { error } = await supabase.from('mangas').update({ admin_note: mangaNoteDraft.trim() || null }).eq('id', selected.id);
+                          if (error) { notify('Алдаа: ' + error.message); return; }
+                          setSelected({ ...selected, admin_note: mangaNoteDraft.trim() || null });
+                          setMangaNoteEditing(false);
+                        }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ХАДГАЛАХ</button>
+                        <button onClick={() => setMangaNoteEditing(false)}
+                          style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ЦУЦЛАХ</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div onClick={() => canModerate && (setMangaNoteDraft(selected.admin_note || ''), setMangaNoteEditing(true))}
+                      style={{ fontSize: 13, color: '#8a92a6', cursor: canModerate ? 'pointer' : 'default' }}>
+                      {selected.admin_note || (canModerate ? '+ Орчуулагчдын нэр нэмэх' : '')}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Staff vйлдлvvд — голлуулсан */}
@@ -1773,45 +1805,12 @@ export default function App() {
               {/* ЗАСВАР #110: "Бvлгvvд" tab — гарчиг + орчуулагчийн нэр (энгийн, хvрээгvй) + бvлгийн жагсаалт */}
               {detailTab === 'chapters' && (
                 <>
-                  <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                    <div style={{ fontSize: 22, fontWeight: 800 }}>{selected.title}</div>
-                    {(selected.admin_note || canModerate) && (
-                      <div style={{ marginTop: 8 }}>
-                        {mangaNoteEditing ? (
-                          <div style={{ background: '#111', border: '1px solid #222', borderRadius: 10, padding: 12, textAlign: 'left' }}>
-                            <textarea value={mangaNoteDraft} onChange={e => setMangaNoteDraft(e.target.value)}
-                              rows={2} placeholder="Орчуулагчдын нэрс (жишээ нь: Бат, Болд)..."
-                              style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                              <button onClick={async () => {
-                                const { error } = await supabase.from('mangas').update({ admin_note: mangaNoteDraft.trim() || null }).eq('id', selected.id);
-                                if (error) { notify('Алдаа: ' + error.message); return; }
-                                setSelected({ ...selected, admin_note: mangaNoteDraft.trim() || null });
-                                setMangaNoteEditing(false);
-                              }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ХАДГАЛАХ</button>
-                              <button onClick={() => setMangaNoteEditing(false)}
-                                style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ЦУЦЛАХ</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div onClick={() => canModerate && (setMangaNoteDraft(selected.admin_note || ''), setMangaNoteEditing(true))}
-                            style={{ fontSize: 13, color: '#8a92a6', cursor: canModerate ? 'pointer' : 'default' }}>
-                            {selected.admin_note || (canModerate ? '+ Орчуулагчдын нэр нэмэх' : '')}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ЗАСВАР #111: гарч байгаа төлөв + vзэлт + бvлгийн тоог эндvv шилжvvлэв */}
+                  {/* ЗАСВАР #112: бvлгийн тоог "БҮЛГҮҮД" гарчигт нэмэв, "N/N" тоолуурыг
+                      хассан, vзэлтэнд "Vзэлт" гэсэн vг нэмэв */}
                   <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#aaa', flexWrap: 'wrap', justifyContent: 'center', marginBottom: 20 }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                      {dbChapters.length > 0 ? dbChapters.length : selected.chapters} бүлэг
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                      {selected.views || 0}
+                      Vзэлт {selected.views || 0}
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px', color: (STATUS_META[selected.status] || DEFAULT_STATUS_META).color }}>
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
@@ -1822,14 +1821,11 @@ export default function App() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 4, height: 20, background: '#8B0000', borderRadius: 2 }} />
-                      <span style={{ fontWeight: 800, fontSize: 18 }}>БҮЛГҮҮД</span>
+                      <span style={{ fontWeight: 800, fontSize: 18 }}>БҮЛГҮҮД ({dbChapters.length > 0 ? dbChapters.length : selected.chapters})</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <div onClick={() => setChapterSort(s => s === 'asc' ? 'desc' : 'asc')}
-                        style={{ background: '#161b26', border: '1px solid #232a38', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700, color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        ⇅ {chapterSort === 'asc' ? `1-${dbChapters.length}` : `${dbChapters.length}-1`}
-                      </div>
-                      <span style={{ fontSize: 14, color: '#888', fontWeight: 700 }}>{dbChapters.length}/{dbChapters.length}</span>
+                    <div onClick={() => setChapterSort(s => s === 'asc' ? 'desc' : 'asc')}
+                      style={{ background: '#161b26', border: '1px solid #232a38', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700, color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      ⇅ {chapterSort === 'asc' ? `1-${dbChapters.length}` : `${dbChapters.length}-1`}
                     </div>
                   </div>
 
@@ -1922,12 +1918,12 @@ export default function App() {
                   pill-vvдийг "Бvлгvvд" tab руу зөөсөн тул энд зөвхөн тайлбар+төрөл. */}
               {detailTab === 'info' && (
                 <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: '1.25rem' }}>
-                  <div style={{ color: '#bbb', fontSize: 13, marginBottom: 14, lineHeight: 1.6 }}>{selected.desc}</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 14 }}>
                     {(selected.genres || []).map(g => (
                       <span key={g} style={{ fontSize: 11, color: '#8B0000', border: '1px solid #8B0000', display: 'inline-block', padding: '2px 10px', borderRadius: 4, background: '#0a0a0a' }}>{g.toUpperCase()}</span>
                     ))}
                   </div>
+                  <div style={{ color: '#bbb', fontSize: 13, lineHeight: 1.6 }}>{selected.desc}</div>
                 </div>
               )}
 
