@@ -117,6 +117,9 @@ export default function App() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState('');
+  // ЗАСВАР #108: сэтгэгдэлд хавсаргах сонгосон стикер, upload хийж буй slot
+  const [selectedSticker, setSelectedSticker] = useState(null);
+  const [stickerUploading, setStickerUploading] = useState(null);
   const [commentSending, setCommentSending] = useState(false);
   // { [mangaId]: [бүлгийн дугаарууд] } — уншсан бүлгүүд
   const [readChapters, setReadChapters] = useState({});
@@ -167,9 +170,6 @@ export default function App() {
   const [recentChapters, setRecentChapters] = useState([]);
   // ШИНЭ: сүүлийн 30 хоногт хамгийн их үзэгдсэн 10 манга (нүүр хэсгийн "Санал болгох" мөр)
   const [topMangaIds, setTopMangaIds] = useState(null); // null = ачаалж дуусаагүй
-  const [scheduleMangaId, setScheduleMangaId] = useState('');
-  const [scheduleDay, setScheduleDay] = useState('6');
-  const [scheduleTime, setScheduleTime] = useState('20:00');
   // ШИНЭ: Бүх гаргалт хуудсыг шинээр эсвэл үзэлтээр эрэмбэлэх
   const [allSort, setAllSort] = useState('default');
   // ЗАСВАР #81: нүүр хэсгийн мөр бүрийн "цааш үзэх" сум зөвхөн тухайн ангиллын
@@ -345,7 +345,7 @@ export default function App() {
 
   // Хэрэглэгчийн role, нэр, avatar-ыг нэг дор татна
   const fetchProfile = useCallback((userId) => {
-    supabase.from('users').select('roles, name, avatar_url, is_vip, vip_expires_at').eq('id', userId).single()
+    supabase.from('users').select('roles, name, avatar_url, is_vip, vip_expires_at, sticker_1, sticker_2, sticker_3').eq('id', userId).single()
       .then(({ data }) => {
         if (data) {
           setUserRoles(data.roles || []);
@@ -590,19 +590,44 @@ export default function App() {
   const postComment = async (parentId = null, textOverride = null) => {
     if (!currentUser) { setAuthPage('login'); return; }
     const text = (textOverride !== null ? textOverride : commentText).trim();
-    if (!text) return;
+    if (!text && !selectedSticker) return;
     setCommentSending(true);
     const { error } = await supabase.from('comments').insert({
       chapter_id: selectedChapter.id,
       user_id: currentUser.id,
       content: text,
       parent_id: parentId,
+      sticker_url: parentId ? null : selectedSticker,
     });
     setCommentSending(false);
     if (error) { notify('Алдаа: ' + error.message); return; }
     if (parentId) { setReplyText(''); setReplyTo(null); }
-    else setCommentText('');
+    else { setCommentText(''); setSelectedSticker(null); }
     fetchComments(selectedChapter.id);
+  };
+
+  // ЗАСВАР #108: профайлдаа хадгалсан 3 стикер upload/устгах
+  const uploadSticker = async (slot, file) => {
+    if (!currentUser || !file) return;
+    const invalid = validateImageFile(file);
+    if (invalid) { notify(invalid); return; }
+    setStickerUploading(slot);
+    try {
+      const ext = file.name.split('.').pop();
+      const url = await uploadToR2(file, `stickers/${currentUser.id}/${slot}-${Date.now()}.${ext}`);
+      const { error } = await supabase.from('users').update({ [`sticker_${slot}`]: url }).eq('id', currentUser.id);
+      if (error) { notify('Алдаа: ' + error.message); } else { fetchProfile(currentUser.id); notify('Стикер нэмэгдлээ! 🎉'); }
+    } catch (e) {
+      notify('Upload алдаа: ' + e.message);
+    }
+    setStickerUploading(null);
+  };
+
+  const deleteSticker = async (slot) => {
+    if (!currentUser) return;
+    const { error } = await supabase.from('users').update({ [`sticker_${slot}`]: null }).eq('id', currentUser.id);
+    if (error) notify('Алдаа: ' + error.message);
+    else fetchProfile(currentUser.id);
   };
 
   // ШИНЭ: профайл зураг (avatar) оруулах
@@ -805,7 +830,7 @@ export default function App() {
           </div>
         )}
         {!showChapter && !m.is_hidden && (STATUS_META[m.status] || DEFAULT_STATUS_META).badge && (
-          <div style={{ position: 'absolute', top: 6, left: 6, background: (STATUS_META[m.status] || DEFAULT_STATUS_META).color, color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase' }}>{(STATUS_META[m.status] || DEFAULT_STATUS_META).badge}</div>
+          <div style={{ position: 'absolute', top: 5, left: 5, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 8, fontWeight: 700, padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase' }}>{(STATUS_META[m.status] || DEFAULT_STATUS_META).badge}</div>
         )}
         {m.is_hidden && (
           <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.8)', color: '#f5a623', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>🙈 НУУГДСАН</div>
@@ -1091,7 +1116,9 @@ export default function App() {
       {/* Main */}
       <div style={{ marginLeft: isMobile ? 0 : 220, flex: 1, minWidth: 0 }}>
 
-        {/* Topbar */}
+        {/* ЗАСВАР #105: Topbar-ыг chapter уншиж байх үед нуув (reader-ийн
+            өөрийн компакт header-тэй давхцаж зай дэмий эзэлдэг байсан). */}
+        {page !== 'reader' && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'nowrap', padding: '0.75rem 1rem', borderBottom: '1px solid #1a1a1a', position: 'sticky', top: 0, background: '#0a0a0a', zIndex: 50, gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, minWidth: 0 }}>
             {isMobile && (
@@ -1167,6 +1194,33 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* ЗАСВАР #108: хэрэглэгчийн 3 хvртэлх стикер (сэтгэгдэлд ашиглана) */}
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>СТИКЕР (сэтгэгдэлд ашиглана, дээд тал нь 3)</div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            {[1, 2, 3].map(slot => {
+                              const url = userProfile?.[`sticker_${slot}`];
+                              return (
+                                <div key={slot} style={{ position: 'relative', width: 56, height: 56 }}>
+                                  {url ? (
+                                    <>
+                                      <img src={url} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10, border: '1px solid #2a2a2a' }} />
+                                      <span onClick={() => deleteSticker(slot)} title="Устгах"
+                                        style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: '#8B0000', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</span>
+                                    </>
+                                  ) : (
+                                    <label style={{ width: 56, height: 56, borderRadius: 10, border: '1px dashed #333', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#555', fontSize: 20 }}>
+                                      {stickerUploading === slot ? '…' : '+'}
+                                      <input type="file" accept="image/*" style={{ display: 'none' }}
+                                        onChange={e => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadSticker(slot, f); }} />
+                                    </label>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
                           {[
                             { label: 'Хадгалсан', value: library.length },
@@ -1204,6 +1258,7 @@ export default function App() {
             )}
           </div>
         </div>
+        )}
 
         {/* HOME PAGE — DB-д манга байхгүй бол (жишээ нь шинэ суулгасан үед) хоосон дэлгэц биш зурвас харуулна */}
         {page === 'home' && allMangas.length === 0 && (
@@ -1329,11 +1384,6 @@ export default function App() {
         {/* ALL PAGE */}
         {page === 'all' && (
           <div style={{ padding: '1.5rem 2rem' }}>
-            {/* ЗАСВАР #97: "Буцах" одоо hardcoded 'home' биш, previousPage руу очно */}
-            <button onClick={() => setPage(previousPage)} title="Буцах"
-              style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', marginBottom: '1.25rem' }}>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
             {/* ЗАСВАР #82: категорийн сумаар орж ирсэн үед хайлт/төрөл/эрэмбэ
                 хэсгүүд шаардлагагүй тул зөвхөн "Бүх гаргалт"-аар (allCategory
                 хоосон) орж ирсэн үед л харуулна. */}
@@ -1429,50 +1479,9 @@ export default function App() {
           <div style={{ padding: '1.5rem 2rem' }}>
             <SectionHeader title="ГАРАХ ХУВААРЬ" onClick={() => {}} />
 
-            {/* Staff: хуваарь тохируулах */}
-            {canModerate && (
-              <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 12, padding: '1.25rem', marginBottom: '1.5rem', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>МАНГА</div>
-                  <select value={scheduleMangaId} onChange={e => setScheduleMangaId(e.target.value)}
-                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', minWidth: 200 }}>
-                    <option value="">-- Манга сонгох --</option>
-                    {dbMangas.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ГАРАГ</div>
-                  <select value={scheduleDay} onChange={e => setScheduleDay(e.target.value)}
-                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }}>
-                    {[1, 2, 3, 4, 5, 6, 0].map(d => <option key={d} value={d}>{DAYS[d]}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ЦАГ</div>
-                  <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
-                    style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '7px 12px', color: '#fff', fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
-                </div>
-                <button onClick={async () => {
-                  if (!scheduleMangaId) { notify('Манга сонгоно уу!'); return; }
-                  const { error } = await supabase.from('mangas').update({
-                    schedule_day: Number(scheduleDay),
-                    schedule_time: scheduleTime,
-                  }).eq('id', scheduleMangaId);
-                  if (error) notify('Алдаа: ' + error.message);
-                  else { notify('Хуваарь хадгалагдлаа! 📅'); fetchMangas(); }
-                }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '9px 20px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                  ХАДГАЛАХ
-                </button>
-                <button onClick={async () => {
-                  if (!scheduleMangaId) { notify('Манга сонгоно уу!'); return; }
-                  const { error } = await supabase.from('mangas').update({ schedule_day: null, schedule_time: null }).eq('id', scheduleMangaId);
-                  if (error) notify('Алдаа: ' + error.message);
-                  else { notify('Хуваарь устгагдлаа'); fetchMangas(); }
-                }} style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '9px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                  УСТГАХ
-                </button>
-              </div>
-            )}
+            {/* ЗАСВАР #107: манга-т гараар хуваарь тавьдаг байсан admin форм-ыг
+                хассан — одоо зөвхөн "БҮЛЭГ НЭМЭХ" дэх "Гарах цаг товлох" талбараар
+                л энэ хуудсанд автоматаар харагдана (dayChapters). */}
 
             {/* ЗАСВАР #28: 7 хоногийг хажуу хажуугаар (багана) биш, доошоо цувсан
                 мөр мөрөөр харуулж, дотор нь нягт жагсаалт (compact) хэлбэрээр
@@ -1952,8 +1961,17 @@ export default function App() {
                       placeholder="Сэтгэгдлээ бичнэ үү..."
                       rows={2}
                       style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-                    <button onClick={() => postComment()} disabled={commentSending || !commentText.trim()}
-                      style={{ marginTop: 6, background: commentText.trim() && !commentSending ? '#8B0000' : '#222', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 8, cursor: commentText.trim() && !commentSending ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 11 }}>
+                    {/* ЗАСВАР #108: профайлд хадгалсан стикерээ сэтгэгдэлдээ хавсаргах */}
+                    {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].some(Boolean) && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                        {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].filter(Boolean).map((url, i) => (
+                          <img key={i} src={url} alt="" onClick={() => setSelectedSticker(prev => prev === url ? null : url)}
+                            style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: selectedSticker === url ? '2px solid #8B0000' : '2px solid transparent', opacity: selectedSticker === url ? 1 : 0.6 }} />
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => postComment()} disabled={commentSending || (!commentText.trim() && !selectedSticker)}
+                      style={{ marginTop: 6, background: (commentText.trim() || selectedSticker) && !commentSending ? '#8B0000' : '#222', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 8, cursor: (commentText.trim() || selectedSticker) && !commentSending ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 11 }}>
                       {commentSending ? 'ИЛГЭЭЖ БАЙНА...' : 'ИЛГЭЭХ'}
                     </button>
                   </div>
@@ -1997,7 +2015,12 @@ export default function App() {
                             )}
                           </span>
                         </div>
-                        <div style={{ fontSize: 12, color: '#dde1ea', lineHeight: 1.45, whiteSpace: 'pre-wrap', marginTop: 3 }}>{c.content}</div>
+                        {c.content && (
+                          <div style={{ fontSize: 12, color: '#dde1ea', lineHeight: 1.45, whiteSpace: 'pre-wrap', marginTop: 3 }}>{c.content}</div>
+                        )}
+                        {c.sticker_url && (
+                          <img src={c.sticker_url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, marginTop: 6 }} />
+                        )}
                         {/* ♡ 0   💬 Хариулах */}
                         <div style={{ display: 'flex', gap: 14, marginTop: 6, alignItems: 'center' }}>
                           <span onClick={() => toggleLike(c)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: liked ? '#e0245e' : '#8a92a6', userSelect: 'none' }}>
@@ -2688,7 +2711,7 @@ export default function App() {
 
               <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>ТӨЛБӨРИЙН МЭДЭЭЛЭЛ</div>
-                <div style={{ fontSize: 12, color: '#8B0000', marginTop: 4, fontWeight: 700 }}>
+                <div style={{ fontSize: 20, color: '#8B0000', marginTop: 6, fontWeight: 800 }}>
                   {(() => {
                     const p = PLANS.find(x => x.key === selectedPlan);
                     return p ? `${p.label} — ${p.price}` : '';
@@ -2724,17 +2747,21 @@ export default function App() {
                 ))}
               </div>
 
-              {/* ЗАСВАР #90: 1,2-р санамжийг нэг өгүүлбэр болгож нэгтгэв, 2-р
-                  тэмдэглэлийг баримт илгээх тухай болгож өөрчилсөн (gmail
-                  бичих давхардлыг арилгав). */}
-              <div style={{ background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.4)', borderRadius: 12, padding: '12px 14px', marginBottom: '1.25rem' }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: '#f5a623', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* ЗАСВАР #106: санамж хэсгийг тус тусад нь мөрлөж, жигд/цэгцтэй харагдацтай болгов */}
+              <div style={{ background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.4)', borderRadius: 12, padding: '14px', marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#f5a623', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f5a623" strokeWidth="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
                   САНАМЖ
                 </div>
-                <div style={{ fontSize: 11, color: '#ccc', lineHeight: 1.7 }}>
-                  · Гүйлгээний утга дээрээ <strong style={{ color: '#fff' }}>gmail хаяг, сарын дугаараа</strong> бичээрэй <span style={{ color: '#8a92a6' }}>(жишээ нь: dolgoon@gmail.com 3)</span><br />
-                  · Гүйлгээ хийсэн баримтаа манай page рүү явуулбал эрх илүү хурдан идэвхжинэ
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12, color: '#ccc', lineHeight: 1.5 }}>
+                    <span style={{ color: '#f5a623', flexShrink: 0 }}>•</span>
+                    <span>Гүйлгээний утга дээрээ <strong style={{ color: '#fff' }}>gmail хаяг, сарын дугаараа</strong> бичээрэй <span style={{ color: '#8a92a6' }}>(жишээ нь: dolgoon@gmail.com 3)</span></span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12, color: '#ccc', lineHeight: 1.5 }}>
+                    <span style={{ color: '#f5a623', flexShrink: 0 }}>•</span>
+                    <span>Гүйлгээ хийсэн баримтаа манай page рүү явуулбал эрх илүү хурдан идэвхжинэ</span>
+                  </div>
                 </div>
               </div>
 
