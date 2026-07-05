@@ -48,6 +48,23 @@ const validateImageFile = (file) => {
   return null;
 };
 
+// ЗАСВАР #94: зургийн upload-ыг Supabase Storage-с Cloudflare R2 руу шилжүүлэв
+// (upload-to-r2 edge function-оор дамжуулж, Secret Access Key browser талд гардаггүй).
+const uploadToR2 = async (file, path) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('path', path);
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-to-r2`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session?.access_token}` },
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Upload алдаа гарлаа');
+  return data.publicUrl;
+};
+
 const IconHome = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -621,10 +638,11 @@ export default function App() {
     setAvatarUploading(true);
     const fileExt = file.name.split('.').pop();
     const fileName = `avatars/${currentUser.id}-${Date.now()}.${fileExt}`;
-    const { error: uploadError } = await supabase.storage.from('manga-site').upload(fileName, file, { upsert: true });
-    if (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); setAvatarUploading(false); return; }
-    const { data: urlData } = supabase.storage.from('manga-site').getPublicUrl(fileName);
-    const { error } = await supabase.from('users').update({ avatar_url: urlData.publicUrl }).eq('id', currentUser.id);
+    let publicUrl;
+    try {
+      publicUrl = await uploadToR2(file, fileName);
+    } catch (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); setAvatarUploading(false); return; }
+    const { error } = await supabase.from('users').update({ avatar_url: publicUrl }).eq('id', currentUser.id);
     setAvatarUploading(false);
     if (error) { notify('Алдаа: ' + error.message); return; }
     fetchProfile(currentUser.id);
@@ -2121,23 +2139,17 @@ export default function App() {
                   if (posterFile) {
                     const fileExt = posterFile.name.split('.').pop();
                     const fileName = `${Date.now()}.${fileExt}`;
-                    const { error: uploadError } = await supabase.storage
-                      .from('manga-site')
-                      .upload(`posters/${fileName}`, posterFile, { upsert: true });
-                    if (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); return; }
-                    const { data: urlData } = supabase.storage.from('manga-site').getPublicUrl(`posters/${fileName}`);
-                    posterUrl = urlData.publicUrl;
+                    try {
+                      posterUrl = await uploadToR2(posterFile, `posters/${fileName}`);
+                    } catch (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); return; }
                   }
                   let bannerUrl = '';
                   if (bannerFile) {
                     const fileExt = bannerFile.name.split('.').pop();
                     const fileName = `${Date.now()}-banner.${fileExt}`;
-                    const { error: uploadError } = await supabase.storage
-                      .from('manga-site')
-                      .upload(`banners/${fileName}`, bannerFile, { upsert: true });
-                    if (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); return; }
-                    const { data: urlData } = supabase.storage.from('manga-site').getPublicUrl(`banners/${fileName}`);
-                    bannerUrl = urlData.publicUrl;
+                    try {
+                      bannerUrl = await uploadToR2(bannerFile, `banners/${fileName}`);
+                    } catch (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); return; }
                   }
                   if (adminManga.genres.length === 0) { notify('Дор хаяж 1 төрөл сонгоно уу!'); return; }
                   const { error } = await supabase.from('mangas').insert({
@@ -2318,12 +2330,9 @@ export default function App() {
                     if (chapterCover) {
                       const cExt = chapterCover.name.split('.').pop();
                       const cName = `chapters/${chapterData.id}/cover.${cExt}`;
-                      const { error: cErr } = await supabase.storage.from('manga-site').upload(cName, chapterCover, { upsert: true });
-                      if (cErr) notify('Cover upload алдаа: ' + cErr.message);
-                      else {
-                        const { data: cUrl } = supabase.storage.from('manga-site').getPublicUrl(cName);
-                        thumbnailUrl = cUrl.publicUrl;
-                      }
+                      try {
+                        thumbnailUrl = await uploadToR2(chapterCover, cName);
+                      } catch (cErr) { notify('Cover upload алдаа: ' + cErr.message); }
                     }
 
                     for (let i = 0; i < chapterFiles.length; i++) {
@@ -2331,16 +2340,13 @@ export default function App() {
                       const fileExt = file.name.split('.').pop();
                       const fileName = `chapters/${chapterData.id}/${i + 1}.${fileExt}`;
 
-                      const { error: uploadError } = await supabase.storage
-                        .from('manga-site')
-                        .upload(fileName, file, { upsert: true });
-
-                      if (uploadError) {
+                      let publicUrl;
+                      try {
+                        publicUrl = await uploadToR2(file, fileName);
+                      } catch (uploadError) {
                         notify(`Зураг ${i + 1} upload алдаа: ` + uploadError.message);
                         continue;
                       }
-
-                      const { data: urlData } = supabase.storage.from('manga-site').getPublicUrl(fileName);
 
                       // ЗАСВАР #63: эхний хуудсыг автоматаар thumbnail болгож хадгалдаг байсныг
                       // хассан — тэр нь дурын (санамсаргүй харагдах) хуудасны зургийг "cover"
@@ -2348,7 +2354,7 @@ export default function App() {
                       // thumbnail болно; оруулаагүй бол харуулах хэсэгт манга poster ашиглана.
                       await supabase.from('chapter_images').insert({
                         chapter_id: chapterData.id,
-                        image_url: urlData.publicUrl,
+                        image_url: publicUrl,
                         page_number: i + 1,
                       });
                     }
@@ -2813,16 +2819,16 @@ export default function App() {
                 if (editPosterFile) {
                   const fileExt = editPosterFile.name.split('.').pop();
                   const fileName = `${Date.now()}.${fileExt}`;
-                  const { error: upErr } = await supabase.storage.from('manga-site').upload(`posters/${fileName}`, editPosterFile, { upsert: true });
-                  if (upErr) { notify('Poster upload алдаа: ' + upErr.message); setEditSaving(false); return; }
-                  updates.poster_url = supabase.storage.from('manga-site').getPublicUrl(`posters/${fileName}`).data.publicUrl;
+                  try {
+                    updates.poster_url = await uploadToR2(editPosterFile, `posters/${fileName}`);
+                  } catch (upErr) { notify('Poster upload алдаа: ' + upErr.message); setEditSaving(false); return; }
                 }
                 if (editBannerFile) {
                   const fileExt = editBannerFile.name.split('.').pop();
                   const fileName = `${Date.now()}-banner.${fileExt}`;
-                  const { error: upErr } = await supabase.storage.from('manga-site').upload(`banners/${fileName}`, editBannerFile, { upsert: true });
-                  if (upErr) { notify('Баннер upload алдаа: ' + upErr.message); setEditSaving(false); return; }
-                  updates.banner_url = supabase.storage.from('manga-site').getPublicUrl(`banners/${fileName}`).data.publicUrl;
+                  try {
+                    updates.banner_url = await uploadToR2(editBannerFile, `banners/${fileName}`);
+                  } catch (upErr) { notify('Баннер upload алдаа: ' + upErr.message); setEditSaving(false); return; }
                 }
                 const { error } = await supabase.from('mangas').update(updates).eq('id', editManga.id);
                 setEditSaving(false);
