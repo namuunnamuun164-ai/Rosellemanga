@@ -135,6 +135,8 @@ export default function App() {
   // ШИНЭ: бүлгийн cover, эрэмбэ, хуваарь, like/reply, countdown
   const [chapterCover, setChapterCover] = useState(null);
   const [chapterSort, setChapterSort] = useState('asc');
+  // ЗАСВАР #111: манга дэлгэрэнгvй хуудсанд бvлгийн дугаараар хайх
+  const [chapterSearch, setChapterSearch] = useState('');
   const [pendingTimes, setPendingTimes] = useState({});
   const [myLikes, setMyLikes] = useState([]);
   // ШИНЭ: сэтгэгдэл бүрийн like-ийн тоо (comment_id -> тоо), aggregate embed-гүйгээр тооцно
@@ -147,6 +149,7 @@ export default function App() {
   const [detailTab, setDetailTab] = useState('info');
   const [mangaRatings, setMangaRatings] = useState([]);
   const [ratingSending, setRatingSending] = useState(false);
+  const [ratingInput, setRatingInput] = useState('');
   const [mangaComments, setMangaComments] = useState([]);
   const [mangaCommentText, setMangaCommentText] = useState('');
   const [mangaCommentSending, setMangaCommentSending] = useState(false);
@@ -154,6 +157,7 @@ export default function App() {
   const [mangaCommentLikeCounts, setMangaCommentLikeCounts] = useState({});
   const [mangaReplyTo, setMangaReplyTo] = useState(null);
   const [mangaReplyText, setMangaReplyText] = useState('');
+  const [mangaSelectedSticker, setMangaSelectedSticker] = useState(null);
 
   // ============ ROLE СИСТЕМ ============
   // admin     — бүх эрх
@@ -544,7 +548,7 @@ export default function App() {
     let cancelled = false;
     fetchMangaRatings(selected.id, () => cancelled);
     fetchMangaComments(selected.id, () => cancelled);
-    setDetailTab('info');
+    setDetailTab('chapters');
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, selected?.id]);
@@ -672,18 +676,19 @@ export default function App() {
   const postMangaComment = async (parentId = null, textOverride = null) => {
     if (!currentUser) { setAuthPage('login'); return; }
     const text = (textOverride !== null ? textOverride : mangaCommentText).trim();
-    if (!text) return;
+    if (!text && !mangaSelectedSticker) return;
     setMangaCommentSending(true);
     const { error } = await supabase.from('comments').insert({
       manga_id: selected.id,
       user_id: currentUser.id,
       content: text,
       parent_id: parentId,
+      sticker_url: parentId ? null : mangaSelectedSticker,
     });
     setMangaCommentSending(false);
     if (error) { notify('Алдаа: ' + error.message); return; }
     if (parentId) { setMangaReplyText(''); setMangaReplyTo(null); }
-    else setMangaCommentText('');
+    else { setMangaCommentText(''); setMangaSelectedSticker(null); }
     fetchMangaComments(selected.id);
   };
 
@@ -1686,9 +1691,9 @@ export default function App() {
             3 tab-тай (Бvлгvvд / Мэдээлэл / Vнэлгээ+сэтгэгдэл) шинэ бvтэц. */}
         {page === 'detail' && selected && (
           <div>
-            <div style={{ position: 'relative', height: 200, overflow: 'hidden' }}>
-              <img src={selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', filter: 'blur(20px)', transform: 'scale(1.2)' }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)' }} />
+            <div style={{ position: 'relative', height: 220, overflow: 'hidden' }}>
+              <img src={selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', filter: 'blur(6px)', transform: 'scale(1.15)' }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(10,10,10,0.9))' }} />
 
               <button onClick={() => setPage(previousPage)} title="Буцах"
                 style={{ position: 'absolute', top: 16, left: 16, zIndex: 5, width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', cursor: 'pointer', backdropFilter: 'blur(6px)' }}>
@@ -1702,8 +1707,8 @@ export default function App() {
             </div>
 
             {/* Голлосон том cover */}
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: -84, position: 'relative', zIndex: 2 }}>
-              <img src={selected.poster} alt="" style={{ width: 168, height: 228, objectFit: 'cover', borderRadius: 14, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', border: '3px solid #0a0a0a' }} />
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: -110, position: 'relative', zIndex: 2 }}>
+              <img src={selected.poster} alt="" style={{ width: 200, height: 272, objectFit: 'cover', borderRadius: 16, boxShadow: '0 14px 36px rgba(0,0,0,0.6)', border: '3px solid #0a0a0a' }} />
             </div>
 
             {/* Staff vйлдлvvд — голлуулсан */}
@@ -1798,6 +1803,22 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* ЗАСВАР #111: гарч байгаа төлөв + vзэлт + бvлгийн тоог эндvv шилжvvлэв */}
+                  <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#aaa', flexWrap: 'wrap', justifyContent: 'center', marginBottom: 20 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                      {dbChapters.length > 0 ? dbChapters.length : selected.chapters} бүлэг
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      {selected.views || 0}
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px', color: (STATUS_META[selected.status] || DEFAULT_STATUS_META).color }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+                      {selected.status}
+                    </span>
+                  </div>
+
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 4, height: 20, background: '#8B0000', borderRadius: 2 }} />
@@ -1812,8 +1833,14 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* ЗАСВАР #111: бvлгийн дугаараар хайх */}
+                  <input value={chapterSearch} onChange={e => setChapterSearch(e.target.value)}
+                    type="number" placeholder="Бvлгийн дугаараар хайх..."
+                    style={{ width: '100%', background: '#161b26', border: '1px solid #232a38', borderRadius: 10, padding: '9px 14px', color: '#fff', fontSize: 13, outline: 'none', marginBottom: 14, boxSizing: 'border-box' }} />
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     {dbChapters.length > 0 ? [...dbChapters]
+                      .filter(ch => !chapterSearch.trim() || String(ch.chapter_number).includes(chapterSearch.trim()))
                       .sort((a, b) => chapterSort === 'asc' ? a.chapter_number - b.chapter_number : b.chapter_number - a.chapter_number)
                       .map(ch => {
                         const isLast = history.find(h => h.mangaId === selected.id)?.chapter === ch.chapter_number;
@@ -1890,28 +1917,16 @@ export default function App() {
                 </>
               )}
 
-              {/* ЗАСВАР #110: "Мэдээлэл" tab — товч тайлбар, vзэлт, төрөл */}
+              {/* ЗАСВАР #111: "Мэдээлэл" tab — товч тайлбарыг хvрээтэй дөрвөлжин
+                  карт болгож, талуудаас нь жигд зайтай болгов. Vзэлт/төлвийн
+                  pill-vvдийг "Бvлгvvд" tab руу зөөсөн тул энд зөвхөн тайлбар+төрөл. */}
               {detailTab === 'info' && (
-                <div>
-                  <div style={{ color: '#bbb', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>{selected.desc}</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+                <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: '1.25rem' }}>
+                  <div style={{ color: '#bbb', fontSize: 13, marginBottom: 14, lineHeight: 1.6 }}>{selected.desc}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {(selected.genres || []).map(g => (
                       <span key={g} style={{ fontSize: 11, color: '#8B0000', border: '1px solid #8B0000', display: 'inline-block', padding: '2px 10px', borderRadius: 4, background: '#0a0a0a' }}>{g.toUpperCase()}</span>
                     ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#aaa', flexWrap: 'wrap' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                      {dbChapters.length > 0 ? dbChapters.length : selected.chapters} бүлэг
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                      {selected.views || 0}
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px', color: (STATUS_META[selected.status] || DEFAULT_STATUS_META).color }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
-                      {selected.status}
-                    </span>
                   </div>
                 </div>
               )}
@@ -1919,22 +1934,34 @@ export default function App() {
               {/* ЗАСВАР #110: "Vнэлгээ" tab — 1-10 vнэлгээ + манганы ерөнхий сэтгэгдэл */}
               {detailTab === 'rating' && (
                 <div>
-                  <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: '1.25rem', marginBottom: '2rem', textAlign: 'center' }}>
+                  {/* ЗАСВАР #111: 10 товчны оронд тоо бичдэг, илvv загварлаг vнэлгээний карт */}
+                  <div style={{ background: 'linear-gradient(160deg, #1a1210, #111)', border: '1px solid #2a1e1a', borderRadius: 18, padding: '1.75rem 1.25rem', marginBottom: '2rem', textAlign: 'center' }}>
                     {(() => {
                       const count = mangaRatings.length;
                       const avg = count > 0 ? (mangaRatings.reduce((s, r) => s + r.score, 0) / count) : 0;
                       const myScore = mangaRatings.find(r => r.user_id === currentUser?.id)?.score || 0;
                       return (
                         <>
-                          <div style={{ fontSize: 32, fontWeight: 900, color: '#f5a623' }}>{avg.toFixed(1)} <span style={{ fontSize: 16, color: '#666', fontWeight: 700 }}>/ 10</span></div>
-                          <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>{count} санал</div>
-                          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
-                            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-                              <button key={n} disabled={ratingSending} onClick={() => submitMangaRating(n)}
-                                style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: ratingSending ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, background: n <= myScore ? '#8B0000' : '#222', color: '#fff' }}>
-                                {n}
-                              </button>
-                            ))}
+                          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 20, color: '#f5a623' }}>★</span>
+                            <div style={{ fontSize: 40, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{avg.toFixed(1)}</div>
+                            <span style={{ fontSize: 16, color: '#666', fontWeight: 700 }}>/ 10</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#888', marginTop: 6, marginBottom: 20 }}>{count} санал{myScore ? ` · Таны vнэлгээ: ${myScore}` : ''}</div>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center' }}>
+                            <input type="number" min="1" max="10" value={ratingInput}
+                              onChange={e => setRatingInput(e.target.value)}
+                              placeholder={myScore ? String(myScore) : '1-10'}
+                              style={{ width: 70, textAlign: 'center', background: '#1a1a1a', border: '1px solid #333', borderRadius: 10, padding: '10px 0', color: '#fff', fontSize: 16, fontWeight: 700, outline: 'none' }} />
+                            <button disabled={ratingSending} onClick={() => {
+                              const n = Number(ratingInput);
+                              if (!n || n < 1 || n > 10) { notify('1-10 хooрондох бvхэл тоо оруулна уу!'); return; }
+                              submitMangaRating(n);
+                              setRatingInput('');
+                            }}
+                              style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '11px 22px', borderRadius: 10, cursor: ratingSending ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
+                              {ratingSending ? '...' : (myScore ? 'ӨӨРЧЛӨХ' : 'ҮНЭЛЭХ')}
+                            </button>
                           </div>
                         </>
                       );
@@ -1954,8 +1981,17 @@ export default function App() {
                           placeholder="Энэ манганы тухай сэтгэгдлээ бичнэ vv..."
                           rows={2}
                           style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-                        <button onClick={() => postMangaComment()} disabled={mangaCommentSending || !mangaCommentText.trim()}
-                          style={{ marginTop: 6, background: mangaCommentText.trim() && !mangaCommentSending ? '#8B0000' : '#222', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 8, cursor: mangaCommentText.trim() && !mangaCommentSending ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 11 }}>
+                        {/* ЗАСВАР #111: профайлд хадгалсан стикерээ сэтгэгдэлдээ хавсаргах */}
+                        {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].some(Boolean) && (
+                          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                            {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].filter(Boolean).map((url, i) => (
+                              <img key={i} src={url} alt="" onClick={() => setMangaSelectedSticker(prev => prev === url ? null : url)}
+                                style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: mangaSelectedSticker === url ? '2px solid #8B0000' : '2px solid transparent', opacity: mangaSelectedSticker === url ? 1 : 0.6 }} />
+                            ))}
+                          </div>
+                        )}
+                        <button onClick={() => postMangaComment()} disabled={mangaCommentSending || (!mangaCommentText.trim() && !mangaSelectedSticker)}
+                          style={{ marginTop: 6, background: (mangaCommentText.trim() || mangaSelectedSticker) && !mangaCommentSending ? '#8B0000' : '#222', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 8, cursor: (mangaCommentText.trim() || mangaSelectedSticker) && !mangaCommentSending ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 11 }}>
                           {mangaCommentSending ? 'ИЛГЭЭЖ БАЙНА...' : 'ИЛГЭЭХ'}
                         </button>
                       </div>
@@ -1997,6 +2033,9 @@ export default function App() {
                             </div>
                             {c.content && (
                               <div style={{ fontSize: 12, color: '#dde1ea', lineHeight: 1.45, whiteSpace: 'pre-wrap', marginTop: 3 }}>{c.content}</div>
+                            )}
+                            {c.sticker_url && (
+                              <img src={c.sticker_url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, marginTop: 6 }} />
                             )}
                             <div style={{ display: 'flex', gap: 14, marginTop: 6, alignItems: 'center' }}>
                               <span onClick={() => toggleMangaCommentLike(c)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: liked ? '#e0245e' : '#8a92a6', userSelect: 'none' }}>
