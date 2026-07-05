@@ -143,6 +143,18 @@ export default function App() {
   const [replyText, setReplyText] = useState('');
   const [nowTs, setNowTs] = useState(Date.now());
 
+  // ЗАСВАР #109: манга дэлгэрэнгүй хуудасны tab, vнэлгээ, манганы ерөнхий сэтгэгдэл
+  const [detailTab, setDetailTab] = useState('info');
+  const [mangaRatings, setMangaRatings] = useState([]);
+  const [ratingSending, setRatingSending] = useState(false);
+  const [mangaComments, setMangaComments] = useState([]);
+  const [mangaCommentText, setMangaCommentText] = useState('');
+  const [mangaCommentSending, setMangaCommentSending] = useState(false);
+  const [myMangaLikes, setMyMangaLikes] = useState([]);
+  const [mangaCommentLikeCounts, setMangaCommentLikeCounts] = useState({});
+  const [mangaReplyTo, setMangaReplyTo] = useState(null);
+  const [mangaReplyText, setMangaReplyText] = useState('');
+
   // ============ ROLE СИСТЕМ ============
   // admin     — бүх эрх
   // moderator — манга/бүлэг нэмэх, Editor-ийн хүсэлт батлах/татгалзах, сэтгэгдэл устгах, report шалгах (манга устгах эрхгүй)
@@ -525,6 +537,18 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, selected?.id]);
 
+  // ЗАСВАР #109: манга дэлгэрэнгүй хуудсанд орох бvрт vнэлгээ + манганы
+  // ерөнхий сэтгэгдлийг татна (tab солиход дахин дуудахгvйгээр урьдчилж бэлдэнэ).
+  useEffect(() => {
+    if (page !== 'detail' || !selected) return;
+    let cancelled = false;
+    fetchMangaRatings(selected.id, () => cancelled);
+    fetchMangaComments(selected.id, () => cancelled);
+    setDetailTab('info');
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, selected?.id]);
+
   useEffect(() => {
     if (page !== 'reader' || !selectedChapter) return;
     // ЗАСВАР #10: бүлэг хурдан сольход хуучин зураг/сэтгэгдлийн хүсэлт хожуу ирж
@@ -604,6 +628,100 @@ export default function App() {
     if (parentId) { setReplyText(''); setReplyTo(null); }
     else { setCommentText(''); setSelectedSticker(null); }
     fetchComments(selectedChapter.id);
+  };
+
+  // ЗАСВАР #109: манганы ерөнхий (chapter-гvй) сэтгэгдэл — bvлгийн сэтгэгдэлтэй
+  // адил логиктой, гэхдээ tусдаа state ашиглана (page тус бvр дээр зэрэг
+  // ажиллах шаардлагагvй ч, chapter-comment feature-ийг эвдэхгvйгээр найдвартай байлгах үvднээс).
+  const fetchMangaComments = (mangaId, isCancelled = () => false) => {
+    supabase.from('comments')
+      .select('*, users!user_id(name, avatar_url, roles)')
+      .eq('manga_id', mangaId)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (isCancelled()) return;
+        if (error) { console.error('Манганы сэтгэгдэл татах алдаа:', error); return; }
+        const list = data || [];
+        setMangaComments(list);
+        if (list.length === 0) { setMangaCommentLikeCounts({}); return; }
+        supabase.from('comment_likes').select('comment_id').in('comment_id', list.map(c => c.id))
+          .then(({ data: likeRows }) => {
+            if (isCancelled()) return;
+            const counts = {};
+            (likeRows || []).forEach(r => { counts[r.comment_id] = (counts[r.comment_id] || 0) + 1; });
+            setMangaCommentLikeCounts(counts);
+          });
+      });
+    if (currentUser) {
+      supabase.from('comment_likes').select('comment_id').eq('user_id', currentUser.id)
+        .then(({ data }) => { if (!isCancelled()) setMyMangaLikes((data || []).map(x => x.comment_id)); });
+    }
+  };
+
+  const toggleMangaCommentLike = async (c) => {
+    if (!currentUser) { setAuthPage('login'); return; }
+    if (myMangaLikes.includes(c.id)) {
+      await supabase.from('comment_likes').delete().eq('comment_id', c.id).eq('user_id', currentUser.id);
+    } else {
+      const { error } = await supabase.from('comment_likes').insert({ comment_id: c.id, user_id: currentUser.id });
+      if (error) { notify('Алдаа: ' + error.message); return; }
+    }
+    fetchMangaComments(selected.id);
+  };
+
+  const postMangaComment = async (parentId = null, textOverride = null) => {
+    if (!currentUser) { setAuthPage('login'); return; }
+    const text = (textOverride !== null ? textOverride : mangaCommentText).trim();
+    if (!text) return;
+    setMangaCommentSending(true);
+    const { error } = await supabase.from('comments').insert({
+      manga_id: selected.id,
+      user_id: currentUser.id,
+      content: text,
+      parent_id: parentId,
+    });
+    setMangaCommentSending(false);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    if (parentId) { setMangaReplyText(''); setMangaReplyTo(null); }
+    else setMangaCommentText('');
+    fetchMangaComments(selected.id);
+  };
+
+  const deleteMangaComment = async (c) => {
+    if (!window.confirm('Сэтгэгдлийг устгах уу?')) return;
+    const { error } = await supabase.from('comments').delete().eq('id', c.id);
+    if (error) notify('Алдаа: ' + error.message);
+    else fetchMangaComments(selected.id);
+  };
+
+  const reportMangaComment = async (c) => {
+    if (!currentUser) { setAuthPage('login'); return; }
+    const reason = window.prompt('Шалтгаанаа бичнэ vv (заавал биш):');
+    if (reason === null) return;
+    const { error } = await supabase.from('reports').insert({
+      comment_id: c.id,
+      reporter_id: currentUser.id,
+      reason: reason || '',
+    });
+    if (error) notify('Алдаа: ' + error.message);
+    else notify('Мэдэгдэл илгээгдлээ. Модератор шалгах болно 🚩');
+  };
+
+  // ЗАСВАР #109: 1-10 vнэлгээ — татах болон санал өгөх (upsert, дараа нь өөрчилж болно)
+  const fetchMangaRatings = (mangaId, isCancelled = () => false) => {
+    supabase.from('manga_ratings').select('user_id, score').eq('manga_id', mangaId)
+      .then(({ data }) => { if (!isCancelled()) setMangaRatings(data || []); });
+  };
+
+  const submitMangaRating = async (score) => {
+    if (!currentUser) { setAuthPage('login'); return; }
+    setRatingSending(true);
+    const { error } = await supabase.from('manga_ratings')
+      .upsert({ user_id: currentUser.id, manga_id: selected.id, score, updated_at: new Date().toISOString() }, { onConflict: 'user_id,manga_id' });
+    setRatingSending(false);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    notify('Vнэлгээ хадгалагдлаа! 🎉');
+    fetchMangaRatings(selected.id);
   };
 
   // ЗАСВАР #108: профайлдаа хадгалсан 3 стикер upload/устгах
@@ -1563,250 +1681,365 @@ export default function App() {
           </div>
         )}
 
-        {/* DETAIL PAGE */}
+        {/* DETAIL PAGE — ЗАСВАР #110: cover-с vvсгэсэн бvдэгрvvлсэн дэвсгэр, том
+            голлосон cover, орчуулагчийн нэрийг энгийн (хvрээгvй) мөр болгож,
+            3 tab-тай (Бvлгvvд / Мэдээлэл / Vнэлгээ+сэтгэгдэл) шинэ бvтэц. */}
         {page === 'detail' && selected && (
           <div>
-            {/* ЗАСВАР #29: тайлбар урт үед хэсэг нь тасарч харагдахгүй болдог байсныг
-                засав — өмнө нь мэдээллийн блок (poster+нэр+тайлбар+товч) 400px-ээр
-                хатуу хязгаарлагдсан, overflow:hidden банерийн ДОТОР absolute
-                байрлалтай байсан тул урт тайлбар дээшээ ургаад таслагддаг байсан.
-                Одоо банер зөвхөн чимэглэлийн дэвсгэр (тогтмол өндөртэй), мэдээллийн
-                блок нь ердийн урсгалд (overflow хийхгүй, хэдий ч урт байсан бүрэн
-                харагдана) байрлана. */}
-            <div style={{ position: 'relative', height: 220, overflow: 'hidden' }}>
-              <img src={selected.banner_url || selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', filter: 'blur(2px)', transform: 'scale(1.05)' }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)' }} />
+            <div style={{ position: 'relative', height: 200, overflow: 'hidden' }}>
+              <img src={selected.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', filter: 'blur(20px)', transform: 'scale(1.2)' }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)' }} />
 
-              {/* ЗАСВАР #37/#61: буцах товчийг банер дээр бас нэгийг тавьж, доод
-                  мөрийн товчнуудаас үл хамааран үргэлж харагдаж байхаар болгосон.
-                  Одоо үргэлж "Нүүр" биш, орж ирсэн хуудас руугаа буцаана. */}
               <button onClick={() => setPage(previousPage)} title="Буцах"
                 style={{ position: 'absolute', top: 16, left: 16, zIndex: 5, width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', cursor: 'pointer', backdropFilter: 'blur(6px)' }}>
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
 
-              {/* ЗАСВАР #77: "Дараагийн бүлэг" countdown-ыг буланд харуулахаа больж,
-                  түүний оронд Хадгалах товчийг floating байдлаар тавив. */}
               <button onClick={() => toggleLibrary(selected.id)}
                 style={{ position: 'absolute', top: 16, right: 16, zIndex: 5, background: library.includes(selected.id) ? 'rgba(139,0,0,0.85)' : 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '8px 16px', borderRadius: 6, fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(6px)', fontWeight: 700 }}>
                 {library.includes(selected.id) ? '★ Хадгалсан' : '☆ Хадгалах'}
               </button>
             </div>
 
-            {/* ЗАСВАР #66: cover зурган хажууд төрөл badge + хадгалах товчийг зөөв,
-                гарчгийг жижигрүүлж, ★4.9 үнэлгээг бүр мөсөн хассан, "Уншиж
-                эхлэх"/"Хадгалах" текст товчнуудыг мөрнөөс хассан (Хадгалах
-                нь cover-ийн доор жижиг товч болов), суллагдсан зайд admin
-                бичдэг тэмдэглэлийн хэсэг нэмсэн. */}
-            <div style={{ padding: '0 2rem 1.5rem', marginTop: -60, position: 'relative', zIndex: 2 }}>
-              {/* ЗАСВАР #78: жанр + орчуулагчийн нэр (admin_note)-г cover-ийн ДООР биш,
-                  cover-ийн ХАЖУУД (баруун талын хоосон зайд) байрлуулав — доор нь
-                  бүтэн өргөнөөр гарчиг/тайлбар зэргийг тусад нь мөрлөв. */}
-              <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 16 }}>
-                <img src={selected.poster} alt="" style={{ width: 130, height: 178, objectFit: 'cover', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {/* Голлосон том cover */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: -84, position: 'relative', zIndex: 2 }}>
+              <img src={selected.poster} alt="" style={{ width: 168, height: 228, objectFit: 'cover', borderRadius: 14, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', border: '3px solid #0a0a0a' }} />
+            </div>
+
+            {/* Staff vйлдлvvд — голлуулсан */}
+            {(canModerate || isAdmin) && dbMangas.find(d => d.id === selected.id) && (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', padding: '1rem 2rem 0' }}>
+                {canModerate && (
+                  <button onClick={async () => {
+                    const nv = !selected.is_hidden;
+                    const { error } = await supabase.from('mangas').update({ is_hidden: nv }).eq('id', selected.id);
+                    if (error) { notify('Алдаа: ' + error.message); return; }
+                    setSelected({ ...selected, is_hidden: nv });
+                    fetchMangas();
+                    notify(nv ? 'Манга нуугдлаа 🙈' : 'Манга ил боллоо 👁');
+                  }}
+                    style={{ background: selected.is_hidden ? '#1e5c2e' : 'rgba(139,0,0,0.25)', color: '#fff', border: '1px solid #444', padding: '9px 20px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>
+                    {selected.is_hidden ? '👁 ИЛ БОЛГОХ' : '🙈 НУУХ'}
+                  </button>
+                )}
+                {isAdmin && (
+                  <button onClick={async () => {
+                    const nv = !selected.is_recommended;
+                    const { error } = await supabase.from('mangas').update({ is_recommended: nv }).eq('id', selected.id);
+                    if (error) { notify('Алдаа: ' + error.message); return; }
+                    setSelected({ ...selected, is_recommended: nv });
+                    fetchMangas();
+                    notify(nv ? 'Санал болгох хэсэгт нэмэгдлээ ⭐' : 'Санал болгох хэсгээс хасагдлаа');
+                  }}
+                    style={{ background: selected.is_recommended ? '#8B0000' : 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '9px 20px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>
+                    {selected.is_recommended ? '⭐ САНАЛ БОЛГОСОН' : '☆ САНАЛ БОЛГОХ'}
+                  </button>
+                )}
+                {canModerate && (
+                  <button onClick={() => {
+                    setEditMangaForm({ title: selected.title, desc: selected.desc || '', genres: selected.genres || [], status: selected.status });
+                    setEditPosterFile(null);
+                    setEditBannerFile(null);
+                    setEditManga(selected);
+                  }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '9px 20px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+                    ЗАСАХ
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Tab bar — Бvлгvvд / Мэдээлэл / Vнэлгээ+сэтгэгдэл */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 56, borderBottom: '1px solid #1c2230', marginTop: '1.5rem' }}>
+              {[
+                { key: 'chapters', icon: (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>) },
+                { key: 'info', icon: (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>) },
+                { key: 'rating', icon: (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>) },
+              ].map(t => (
+                <div key={t.key} onClick={() => setDetailTab(t.key)}
+                  style={{ padding: '12px 4px 10px', cursor: 'pointer', color: detailTab === t.key ? '#fff' : '#555', borderBottom: detailTab === t.key ? '2px solid #fff' : '2px solid transparent' }}>
+                  {t.icon}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ padding: '1.5rem 2rem' }}>
+              {/* ЗАСВАР #110: "Бvлгvvд" tab — гарчиг + орчуулагчийн нэр (энгийн, хvрээгvй) + бvлгийн жагсаалт */}
+              {detailTab === 'chapters' && (
+                <>
+                  <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                    <div style={{ fontSize: 22, fontWeight: 800 }}>{selected.title}</div>
+                    {(selected.admin_note || canModerate) && (
+                      <div style={{ marginTop: 8 }}>
+                        {mangaNoteEditing ? (
+                          <div style={{ background: '#111', border: '1px solid #222', borderRadius: 10, padding: 12, textAlign: 'left' }}>
+                            <textarea value={mangaNoteDraft} onChange={e => setMangaNoteDraft(e.target.value)}
+                              rows={2} placeholder="Орчуулагчдын нэрс (жишээ нь: Бат, Болд)..."
+                              style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                              <button onClick={async () => {
+                                const { error } = await supabase.from('mangas').update({ admin_note: mangaNoteDraft.trim() || null }).eq('id', selected.id);
+                                if (error) { notify('Алдаа: ' + error.message); return; }
+                                setSelected({ ...selected, admin_note: mangaNoteDraft.trim() || null });
+                                setMangaNoteEditing(false);
+                              }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ХАДГАЛАХ</button>
+                              <button onClick={() => setMangaNoteEditing(false)}
+                                style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ЦУЦЛАХ</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div onClick={() => canModerate && (setMangaNoteDraft(selected.admin_note || ''), setMangaNoteEditing(true))}
+                            style={{ fontSize: 13, color: '#8a92a6', cursor: canModerate ? 'pointer' : 'default' }}>
+                            {selected.admin_note || (canModerate ? '+ Орчуулагчдын нэр нэмэх' : '')}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 4, height: 20, background: '#8B0000', borderRadius: 2 }} />
+                      <span style={{ fontWeight: 800, fontSize: 18 }}>БҮЛГҮҮД</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <div onClick={() => setChapterSort(s => s === 'asc' ? 'desc' : 'asc')}
+                        style={{ background: '#161b26', border: '1px solid #232a38', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700, color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        ⇅ {chapterSort === 'asc' ? `1-${dbChapters.length}` : `${dbChapters.length}-1`}
+                      </div>
+                      <span style={{ fontSize: 14, color: '#888', fontWeight: 700 }}>{dbChapters.length}/{dbChapters.length}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {dbChapters.length > 0 ? [...dbChapters]
+                      .sort((a, b) => chapterSort === 'asc' ? a.chapter_number - b.chapter_number : b.chapter_number - a.chapter_number)
+                      .map(ch => {
+                        const isLast = history.find(h => h.mangaId === selected.id)?.chapter === ch.chapter_number;
+                        const locked = chapterLocked(ch);
+                        const needsVip = ch.is_vip && !isVip;
+                        return (
+                          <div key={ch.id}
+                            onClick={() => openReader(selected, ch)}
+                            style={{ background: '#10141d', borderRadius: 16, padding: '14px 18px', cursor: 'pointer', border: (needsVip || locked) ? '1px solid rgba(245,166,35,0.45)' : isLast ? '1px solid #8B0000' : '1px solid #1c2230', display: 'flex', alignItems: 'center', gap: 16, position: 'relative', transition: 'background 0.2s' }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#161b26'}
+                            onMouseLeave={e => e.currentTarget.style.background = '#10141d'}>
+                            {ch.thumbnail_url ? (
+                              <img src={ch.thumbnail_url} alt="" style={{ width: 96, height: 64, borderRadius: 12, objectFit: 'cover', objectPosition: 'top', flexShrink: 0 }} />
+                            ) : (
+                              <div style={{ width: 96, height: 64, borderRadius: 12, background: 'rgba(139,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20, color: '#8B0000', flexShrink: 0 }}>{ch.chapter_number}</div>
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 14, fontWeight: 500, color: '#dde1ea' }}>{ch.chapter_number}-р бүлэг</span>
+                                {ch.label && (
+                                  <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#f5a623', border: '1px solid rgba(245,166,35,0.4)', background: 'rgba(245,166,35,0.08)', padding: '3px 12px', borderRadius: 20 }}>{ch.label}</span>
+                                )}
+                                {isStaff && ch.status === 'pending' && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>ХҮЛЭЭГДЭЖ БУЙ</span>}
+                                {isStaff && ch.status === 'rejected' && <span style={{ fontSize: 10, color: '#8B0000', fontWeight: 700 }}>ТАТГАЛЗСАН</span>}
+                                {isStaff && ch.is_hidden && <span style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>🙈 НУУГДСАН</span>}
+                              </div>
+                              <div style={{ fontSize: 12, color: locked ? '#f5a623' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
+                                {locked ? (
+                                  <span>⏳ {formatRemaining(new Date(ch.publish_at).getTime() - nowTs)}</span>
+                                ) : (
+                                  <span>{formatNumericDate(ch.created_at)}</span>
+                                )}
+                              </div>
+                            </div>
+                            {isLast && (
+                              <div style={{ position: 'absolute', top: -8, left: 14, background: '#8B0000', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 10, letterSpacing: 0.5 }}>СҮҮЛД УНШСАН</div>
+                            )}
+                            {canModerate && (
+                              <span onClick={async (e) => {
+                                e.stopPropagation();
+                                const nv = !ch.is_hidden;
+                                const { error } = await supabase.from('chapters').update({ is_hidden: nv }).eq('id', ch.id);
+                                if (error) { notify('Алдаа: ' + error.message); return; }
+                                setDbChapters(prev => prev.map(x => x.id === ch.id ? { ...x, is_hidden: nv } : x));
+                              }} title={ch.is_hidden ? 'Ил болгох' : 'Нуух'}
+                                style={{ fontSize: 16, cursor: 'pointer', padding: 4 }}>
+                                {ch.is_hidden ? '👁' : '🙈'}
+                              </span>
+                            )}
+                            {canModerate && (
+                              <span onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бүрмөсөн устгах уу? Энэ үйлдлийг буцаах боломжгүй.`)) return;
+                                const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
+                                if (error) { notify('Алдаа: ' + error.message); return; }
+                                setDbChapters(prev => prev.filter(x => x.id !== ch.id));
+                                notify('Бүлэг устгагдлаа 🗑');
+                              }} title="Устгах"
+                                style={{ fontSize: 16, cursor: 'pointer', padding: 4, color: '#8B0000' }}>
+                                🗑
+                              </span>
+                            )}
+                            {(needsVip || locked) ? (
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f5a623" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            ) : (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                            )}
+                          </div>
+                        );
+                      }) : (
+                      <div style={{ color: '#555', fontSize: 14 }}>Одоогоор бүлэг ороогүй байна.</div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* ЗАСВАР #110: "Мэдээлэл" tab — товч тайлбар, vзэлт, төрөл */}
+              {detailTab === 'info' && (
+                <div>
+                  <div style={{ color: '#bbb', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>{selected.desc}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
                     {(selected.genres || []).map(g => (
                       <span key={g} style={{ fontSize: 11, color: '#8B0000', border: '1px solid #8B0000', display: 'inline-block', padding: '2px 10px', borderRadius: 4, background: '#0a0a0a' }}>{g.toUpperCase()}</span>
                     ))}
                   </div>
+                  <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#aaa', flexWrap: 'wrap' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                      {dbChapters.length > 0 ? dbChapters.length : selected.chapters} бүлэг
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      {selected.views || 0}
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px', color: (STATUS_META[selected.status] || DEFAULT_STATUS_META).color }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+                      {selected.status}
+                    </span>
+                  </div>
+                </div>
+              )}
 
-                  {(selected.admin_note || canModerate) && (
-                    <div>
-                      {mangaNoteEditing ? (
-                        <div style={{ background: '#111', border: '1px solid #222', borderRadius: 10, padding: 12 }}>
-                          <textarea value={mangaNoteDraft} onChange={e => setMangaNoteDraft(e.target.value)}
-                            rows={2} placeholder="Орчуулагчийн нэр (жишээ нь: Орчуулагч: Бат, Болд)..."
-                            style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                            <button onClick={async () => {
-                              const { error } = await supabase.from('mangas').update({ admin_note: mangaNoteDraft.trim() || null }).eq('id', selected.id);
-                              if (error) { notify('Алдаа: ' + error.message); return; }
-                              setSelected({ ...selected, admin_note: mangaNoteDraft.trim() || null });
-                              setMangaNoteEditing(false);
-                            }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ХАДГАЛАХ</button>
-                            <button onClick={() => setMangaNoteEditing(false)}
-                              style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>ЦУЦЛАХ</button>
+              {/* ЗАСВАР #110: "Vнэлгээ" tab — 1-10 vнэлгээ + манганы ерөнхий сэтгэгдэл */}
+              {detailTab === 'rating' && (
+                <div>
+                  <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: '1.25rem', marginBottom: '2rem', textAlign: 'center' }}>
+                    {(() => {
+                      const count = mangaRatings.length;
+                      const avg = count > 0 ? (mangaRatings.reduce((s, r) => s + r.score, 0) / count) : 0;
+                      const myScore = mangaRatings.find(r => r.user_id === currentUser?.id)?.score || 0;
+                      return (
+                        <>
+                          <div style={{ fontSize: 32, fontWeight: 900, color: '#f5a623' }}>{avg.toFixed(1)} <span style={{ fontSize: 16, color: '#666', fontWeight: 700 }}>/ 10</span></div>
+                          <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>{count} санал</div>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
+                            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                              <button key={n} disabled={ratingSending} onClick={() => submitMangaRating(n)}
+                                style={{ width: 30, height: 30, borderRadius: 8, border: 'none', cursor: ratingSending ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, background: n <= myScore ? '#8B0000' : '#222', color: '#fff' }}>
+                                {n}
+                              </button>
+                            ))}
                           </div>
-                        </div>
-                      ) : (
-                        <div onClick={() => canModerate && (setMangaNoteDraft(selected.admin_note || ''), setMangaNoteEditing(true))}
-                          style={{ borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#dde1ea', lineHeight: 1.6, cursor: canModerate ? 'pointer' : 'default' }}>
-                          <span style={{ fontWeight: 400, color: '#fff' }}>Admin: </span>
-                          {selected.admin_note || (canModerate ? '+ Орчуулагчийн нэр нэмэх (дарж бичнэ үү)' : '')}
-                        </div>
-                      )}
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.25rem' }}>
+                    <div style={{ width: 4, height: 18, background: '#8B0000', borderRadius: 2 }} />
+                    <span style={{ fontWeight: 800, fontSize: 15 }}>СЭТГЭГДЭЛ ({mangaComments.length})</span>
+                  </div>
+
+                  {currentUser ? (
+                    <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem', alignItems: 'flex-start' }}>
+                      <Avatar url={userProfile?.avatar_url} letter={currentUser.email[0]} size={28} />
+                      <div style={{ flex: 1 }}>
+                        <textarea value={mangaCommentText} onChange={e => setMangaCommentText(e.target.value)}
+                          placeholder="Энэ манганы тухай сэтгэгдлээ бичнэ vv..."
+                          rows={2}
+                          style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+                        <button onClick={() => postMangaComment()} disabled={mangaCommentSending || !mangaCommentText.trim()}
+                          style={{ marginTop: 6, background: mangaCommentText.trim() && !mangaCommentSending ? '#8B0000' : '#222', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 8, cursor: mangaCommentText.trim() && !mangaCommentSending ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 11 }}>
+                          {mangaCommentSending ? 'ИЛГЭЭЖ БАЙНА...' : 'ИЛГЭЭХ'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', fontSize: 12, color: '#888' }}>
+                      Сэтгэгдэл бичихийн тулд <span onClick={() => setAuthPage('login')} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>нэвтэрнэ vv</span>
                     </div>
                   )}
-                </div>
-              </div>
-              <div style={{ paddingBottom: 4 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>{selected.title}</div>
-                <div style={{ color: '#bbb', fontSize: 13, marginBottom: 12, lineHeight: 1.6 }}>{selected.desc}</div>
-                <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#aaa', marginBottom: 16, flexWrap: 'wrap' }}>
-                  {/* ЗАСВАР #6: DB-гийн мангад "0 бүлэг" гэж гардаг байсныг
-                      бодит бүлгийн тоог харуулдаг болгосон */}
-                  {/* ЗАСВАР #49: энгийн текст биш, жижиг pill badge хэлбэрээр цэгцтэй харуулна */}
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                    {dbChapters.length > 0 ? dbChapters.length : selected.chapters} бүлэг
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px' }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                    {selected.views || 0}
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#161b26', border: '1px solid #232a38', borderRadius: 20, padding: '4px 12px', color: (STATUS_META[selected.status] || DEFAULT_STATUS_META).color }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
-                    {selected.status}
-                  </span>
-                </div>
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {/* ШИНЭ: манга нуух/ил болгох (moderator/admin, зөвхөн DB манга) */}
-                  {canModerate && dbMangas.find(d => d.id === selected.id) && (
-                    <button onClick={async () => {
-                      const nv = !selected.is_hidden;
-                      const { error } = await supabase.from('mangas').update({ is_hidden: nv }).eq('id', selected.id);
-                      if (error) { notify('Алдаа: ' + error.message); return; }
-                      setSelected({ ...selected, is_hidden: nv });
-                      fetchMangas();
-                      notify(nv ? 'Манга нуугдлаа 🙈' : 'Манга ил боллоо 👁');
-                    }}
-                      style={{ background: selected.is_hidden ? '#1e5c2e' : 'rgba(139,0,0,0.25)', color: '#fff', border: '1px solid #444', padding: '10px 24px', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 700 }}>
-                      {selected.is_hidden ? '👁 ИЛ БОЛГОХ' : '🙈 НУУХ'}
-                    </button>
-                  )}
-                  {/* ЗАСВАР #71: нүүр хэсгийн "Санал болгох" hero-д гараар нэмэх/хасах (зөвхөн admin) */}
-                  {isAdmin && dbMangas.find(d => d.id === selected.id) && (
-                    <button onClick={async () => {
-                      const nv = !selected.is_recommended;
-                      const { error } = await supabase.from('mangas').update({ is_recommended: nv }).eq('id', selected.id);
-                      if (error) { notify('Алдаа: ' + error.message); return; }
-                      setSelected({ ...selected, is_recommended: nv });
-                      fetchMangas();
-                      notify(nv ? 'Санал болгох хэсэгт нэмэгдлээ ⭐' : 'Санал болгох хэсгээс хасагдлаа');
-                    }}
-                      style={{ background: selected.is_recommended ? '#8B0000' : 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '10px 24px', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 700 }}>
-                      {selected.is_recommended ? '⭐ САНАЛ БОЛГОСОН' : '☆ САНАЛ БОЛГОХ'}
-                    </button>
-                  )}
-                  {/* ШИНЭ: оруулсан мангаг засах */}
-                  {canModerate && dbMangas.find(d => d.id === selected.id) && (
-                    <button onClick={() => {
-                      setEditMangaForm({ title: selected.title, desc: selected.desc || '', genres: selected.genres || [], status: selected.status });
-                      setEditPosterFile(null);
-                      setEditBannerFile(null);
-                      setEditManga(selected);
-                    }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', padding: '10px 24px', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 700 }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
-                      ЗАСАХ
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div style={{ padding: '1.5rem 2rem' }}>
-              {/* ШИНЭ ЗАГВАР: гарчиг + эрэмбэ + тоолуур */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 4, height: 20, background: '#8B0000', borderRadius: 2 }} />
-                  <span style={{ fontWeight: 800, fontSize: 18 }}>БҮЛГҮҮД</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div onClick={() => setChapterSort(s => s === 'asc' ? 'desc' : 'asc')}
-                    style={{ background: '#161b26', border: '1px solid #232a38', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700, color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    ⇅ {chapterSort === 'asc' ? `1-${dbChapters.length}` : `${dbChapters.length}-1`}
-                  </div>
-                  <span style={{ fontSize: 14, color: '#888', fontWeight: 700 }}>{dbChapters.length}/{dbChapters.length}</span>
-                </div>
-              </div>
+                  {(() => {
+                    const topLevel = mangaComments.filter(c => !c.parent_id);
+                    const repliesOf = (id) => mangaComments.filter(c => c.parent_id === id).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {dbChapters.length > 0 ? [...dbChapters]
-                  .sort((a, b) => chapterSort === 'asc' ? a.chapter_number - b.chapter_number : b.chapter_number - a.chapter_number)
-                  .map(ch => {
-                    const isLast = history.find(h => h.mangaId === selected.id)?.chapter === ch.chapter_number;
-                    const locked = chapterLocked(ch);
-                    const needsVip = ch.is_vip && !isVip;
-                    return (
-                      <div key={ch.id}
-                        onClick={() => openReader(selected, ch)}
-                        style={{ background: '#10141d', borderRadius: 16, padding: '14px 18px', cursor: 'pointer', border: (needsVip || locked) ? '1px solid rgba(245,166,35,0.45)' : isLast ? '1px solid #8B0000' : '1px solid #1c2230', display: 'flex', alignItems: 'center', gap: 16, position: 'relative', transition: 'background 0.2s' }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#161b26'}
-                        onMouseLeave={e => e.currentTarget.style.background = '#10141d'}>
-                        {/* Бүлгийн cover зураг */}
-                        {ch.thumbnail_url ? (
-                          <img src={ch.thumbnail_url} alt="" style={{ width: 96, height: 64, borderRadius: 12, objectFit: 'cover', objectPosition: 'top', flexShrink: 0 }} />
-                        ) : (
-                          <div style={{ width: 96, height: 64, borderRadius: 12, background: 'rgba(139,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20, color: '#8B0000', flexShrink: 0 }}>{ch.chapter_number}</div>
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          {/* ЗАСВАР #69: бүлгийн нэрийг хассан, дугаарыг "N-р бүлэг" гэж жижигдүү,
-                              нарийхан фонтоор харуулна. Доод мөрөнд: түгжээтэй бол үлдсэн
-                              хугацаа, нийтлэгдсэн бол цэвэрхэн тоон огноо (жишээ 2026.07.13). */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 14, fontWeight: 500, color: '#dde1ea' }}>{ch.chapter_number}-р бүлэг</span>
-                            {/* ЗАСВАР #60: "ҮНЭГҮЙ"/"VIP" гэсэн текст badge-үүдийг хассан (VIP хориг
-                                хэвээрээ padlock дүрсээр баруун талд харагдана), оронд нь admin-ийн
-                                оруулсан дурын тэмдэглэгээ (жишээ нь "S1 END") гарч ирнэ */}
-                            {ch.label && (
-                              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#f5a623', border: '1px solid rgba(245,166,35,0.4)', background: 'rgba(245,166,35,0.08)', padding: '3px 12px', borderRadius: 20 }}>{ch.label}</span>
+                    const renderMangaComment = (c, isReply) => {
+                      const likeCount = mangaCommentLikeCounts[c.id] || 0;
+                      const liked = myMangaLikes.includes(c.id);
+                      return (
+                        <div key={c.id} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-start', marginLeft: isReply ? 32 : 0 }}>
+                          {c.users?.avatar_url ? (
+                            <img src={c.users.avatar_url} alt="" style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #2a3142' }} />
+                          ) : (
+                            <div style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: isReply ? 11 : 13, color: '#fff', flexShrink: 0 }}>
+                              {(c.users?.name || '?')[0].toUpperCase()}
+                            </div>
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 800, fontSize: 12 }}>{c.users?.name || 'Хэрэглэгч'}</span>
+                              <span style={{ fontSize: 11, color: '#6b7385' }}>{formatMnDate(c.created_at)}</span>
+                              <span style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+                                {currentUser && (c.user_id === currentUser.id || canModerate) && (
+                                  <span onClick={() => deleteMangaComment(c)} title="Устгах" style={{ cursor: 'pointer', fontSize: 11, color: '#8B0000' }}>🗑</span>
+                                )}
+                                {currentUser && c.user_id !== currentUser.id && (
+                                  <span onClick={() => reportMangaComment(c)} title="Мэдэгдэх" style={{ cursor: 'pointer', fontSize: 11, color: '#555' }}>🚩</span>
+                                )}
+                              </span>
+                            </div>
+                            {c.content && (
+                              <div style={{ fontSize: 12, color: '#dde1ea', lineHeight: 1.45, whiteSpace: 'pre-wrap', marginTop: 3 }}>{c.content}</div>
                             )}
-                            {isStaff && ch.status === 'pending' && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>ХҮЛЭЭГДЭЖ БУЙ</span>}
-                            {isStaff && ch.status === 'rejected' && <span style={{ fontSize: 10, color: '#8B0000', fontWeight: 700 }}>ТАТГАЛЗСАН</span>}
-                            {isStaff && ch.is_hidden && <span style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>🙈 НУУГДСАН</span>}
-                          </div>
-                          <div style={{ fontSize: 12, color: locked ? '#f5a623' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
-                            {locked ? (
-                              <span>⏳ {formatRemaining(new Date(ch.publish_at).getTime() - nowTs)}</span>
-                            ) : (
-                              <span>{formatNumericDate(ch.created_at)}</span>
+                            <div style={{ display: 'flex', gap: 14, marginTop: 6, alignItems: 'center' }}>
+                              <span onClick={() => toggleMangaCommentLike(c)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: liked ? '#e0245e' : '#8a92a6', userSelect: 'none' }}>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill={liked ? '#e0245e' : 'none'} stroke={liked ? '#e0245e' : '#8a92a6'} strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                                {likeCount}
+                              </span>
+                              {!isReply && (
+                                <span onClick={() => { setMangaReplyTo(mangaReplyTo === c.id ? null : c.id); setMangaReplyText(''); }}
+                                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#8a92a6', userSelect: 'none' }}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a92a6" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                  Хариулах
+                                </span>
+                              )}
+                            </div>
+                            {mangaReplyTo === c.id && (
+                              <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                                <input value={mangaReplyText} onChange={e => setMangaReplyText(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') postMangaComment(c.id, mangaReplyText); }}
+                                  placeholder={`${c.users?.name || 'Хэрэглэгч'}-д хариулах...`}
+                                  autoFocus
+                                  style={{ flex: 1, background: '#10141d', border: '1px solid #232a38', borderRadius: 10, padding: '9px 14px', color: '#fff', fontSize: 13, outline: 'none' }} />
+                                <button onClick={() => postMangaComment(c.id, mangaReplyText)} disabled={!mangaReplyText.trim()}
+                                  style={{ background: mangaReplyText.trim() ? '#8B0000' : '#222', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: mangaReplyText.trim() ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 12 }}>
+                                  ИЛГЭЭХ
+                                </button>
+                              </div>
                             )}
+                            <div style={{ marginTop: repliesOf(c.id).length > 0 ? 16 : 0 }}>
+                              {repliesOf(c.id).map(r => renderMangaComment(r, true))}
+                            </div>
                           </div>
                         </div>
-                        {isLast && (
-                          <div style={{ position: 'absolute', top: -8, left: 14, background: '#8B0000', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 10, letterSpacing: 0.5 }}>СҮҮЛД УНШСАН</div>
-                        )}
-                        {/* ШИНЭ: бүлэг нуух товч (moderator/admin) */}
-                        {canModerate && (
-                          <span onClick={async (e) => {
-                            e.stopPropagation();
-                            const nv = !ch.is_hidden;
-                            const { error } = await supabase.from('chapters').update({ is_hidden: nv }).eq('id', ch.id);
-                            if (error) { notify('Алдаа: ' + error.message); return; }
-                            setDbChapters(prev => prev.map(x => x.id === ch.id ? { ...x, is_hidden: nv } : x));
-                          }} title={ch.is_hidden ? 'Ил болгох' : 'Нуух'}
-                            style={{ fontSize: 16, cursor: 'pointer', padding: 4 }}>
-                            {ch.is_hidden ? '👁' : '🙈'}
-                          </span>
-                        )}
-                        {/* ЗАСВАР #38: бүлэг устгах (admin/moderator) */}
-                        {canModerate && (
-                          <span onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бүрмөсөн устгах уу? Энэ үйлдлийг буцаах боломжгүй.`)) return;
-                            const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
-                            if (error) { notify('Алдаа: ' + error.message); return; }
-                            setDbChapters(prev => prev.filter(x => x.id !== ch.id));
-                            notify('Бүлэг устгагдлаа 🗑');
-                          }} title="Устгах"
-                            style={{ fontSize: 16, cursor: 'pointer', padding: 4, color: '#8B0000' }}>
-                            🗑
-                          </span>
-                        )}
-                        {/* Баруун талын icon: түгжээ эсвэл сум */}
-                        {(needsVip || locked) ? (
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f5a623" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                        ) : (
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
-                        )}
+                      );
+                    };
+
+                    return topLevel.length > 0 ? topLevel.map(c => renderMangaComment(c, false)) : (
+                      <div style={{ color: '#555', fontSize: 13, textAlign: 'center', padding: '1.5rem 0' }}>
+                        Одоогоор сэтгэгдэл алга. Анхны сэтгэгдлийг vлдээгээрэй! 💬
                       </div>
                     );
-                  }) : (
-                  <div style={{ color: '#555', fontSize: 14 }}>Одоогоор бүлэг ороогүй байна.</div>
-                )}
-              </div>
+                  })()}
+                </div>
+              )}
             </div>
           </div>
         )}
