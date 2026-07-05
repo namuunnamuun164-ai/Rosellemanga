@@ -69,6 +69,15 @@ export default function App() {
   const [chapterNumber, setChapterNumber] = useState('');
   const [chapterTitle, setChapterTitle] = useState('');
   const [chapterFiles, setChapterFiles] = useState([]);
+  // ЗАСВАР #118: URL.createObjectURL-ийг render болгонд шинээр үүсгэдэг байсан
+  // memory leak-ийг засав — blob URL-уудыг файл өөрчлөгдөх үед л нэг удаа
+  // үүсгэж, хуучныг нь revoke хийнэ.
+  const [chapterFileUrls, setChapterFileUrls] = useState([]);
+  useEffect(() => {
+    const urls = chapterFiles.map(f => URL.createObjectURL(f));
+    setChapterFileUrls(urls);
+    return () => urls.forEach(u => URL.revokeObjectURL(u));
+  }, [chapterFiles]);
   // ШИНЭ: upload хийхийн өмнө сонгосон зургуудыг бүлэг уншиж байгаа мэт бүтнээр нь харах
   const [chapterPreviewOpen, setChapterPreviewOpen] = useState(false);
   // ШИНЭ: уншиж байгаа хуудасны дээд талд бүлгийн дугаар дарахад бусад бүлгүүд жагсаана
@@ -237,7 +246,19 @@ export default function App() {
   // ЗАСВАР #95: нэвтрэхэд Supabase-с хадгалсан манга + унших явцыг татаж ирнэ;
   // гарахад (logout) локал state-ийг цэвэрлэнэ (DB-д хэвээрээ үлдэнэ).
   useEffect(() => {
-    if (!currentUser) { setLibrary([]); setHistory([]); setReadChapters({}); return; }
+    // ЗАСВАР #118: нэвтрээгүй (зочин) хэрэглэгчийн түүх/уншсан бүлэг refresh
+    // хийхэд алга болдог байсан — зочинд localStorage-с сэргээдэг болгов.
+    if (!currentUser) {
+      setLibrary([]);
+      try {
+        setHistory(JSON.parse(localStorage.getItem('guest_history') || '[]'));
+        setReadChapters(JSON.parse(localStorage.getItem('guest_read_chapters') || '{}'));
+      } catch {
+        setHistory([]);
+        setReadChapters({});
+      }
+      return;
+    }
     supabase.from('user_library').select('manga_id').eq('user_id', currentUser.id)
       .then(({ data }) => setLibrary((data || []).map(r => r.manga_id)));
     supabase.from('reading_progress').select('manga_id, last_chapter, read_chapters, updated_at').eq('user_id', currentUser.id)
@@ -297,7 +318,6 @@ export default function App() {
           status: m.status,
           poster: m.poster_url,
           banner_url: m.banner_url, // ШИНЭ: нүүр хэсгийн "Санал болгох" мөрөнд ашиглах урт нарийн зураг
-          rating: 4.9,
           views: m.views || 0, // ШИНЭ: "Бүх гаргалт" хуудсыг үзэлтээр эрэмбэлэхэд ашиглана
           chapters: 0, // жинхэнэ тоог detail хуудсанд dbChapters-ээс харуулна (ЗАСВАР #6)
           is_hidden: m.is_hidden || false,
@@ -615,12 +635,13 @@ export default function App() {
       .select('*, users!user_id(name, avatar_url, roles)')
       .eq('chapter_id', chapterId)
       .order('created_at', { ascending: false })
+      .limit(200) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
       .then(({ data, error }) => {
         if (isCancelled()) return;
         if (error) { console.error('Сэтгэгдэл татах алдаа:', error); notify('Алдаа: сэтгэгдэл татахад алдаа гарлаа (' + error.message + ')'); return; }
         const commentsList = data || [];
         setComments(commentsList);
-        if (commentsList.length === 0) { setCommentLikeCounts({}); return; }
+        if (commentsList.length === 0) { setCommentLikeCounts({}); setMyLikes([]); return; }
         supabase.from('comment_likes').select('comment_id').in('comment_id', commentsList.map(c => c.id))
           .then(({ data: likeRows }) => {
             if (isCancelled()) return;
@@ -628,11 +649,15 @@ export default function App() {
             (likeRows || []).forEach(r => { counts[r.comment_id] = (counts[r.comment_id] || 0) + 1; });
             setCommentLikeCounts(counts);
           });
+        // ЗАСВАР #118: өмнө нь хэрэглэгчийн САЙТ ДАЯАРХ бүх like-ийг татдаг
+        // байсан — одоо зөвхөн энэ жагсаалтын сэтгэгдлүүдээр хязгаарлана.
+        if (currentUser) {
+          supabase.from('comment_likes').select('comment_id')
+            .eq('user_id', currentUser.id)
+            .in('comment_id', commentsList.map(c => c.id))
+            .then(({ data: mine }) => { if (!isCancelled()) setMyLikes((mine || []).map(x => x.comment_id)); });
+        }
       });
-    if (currentUser) {
-      supabase.from('comment_likes').select('comment_id').eq('user_id', currentUser.id)
-        .then(({ data }) => { if (!isCancelled()) setMyLikes((data || []).map(x => x.comment_id)); });
-    }
   };
 
   // ШИНЭ: like дарах/болих
@@ -675,12 +700,13 @@ export default function App() {
       .select('*, users!user_id(name, avatar_url, roles)')
       .eq('manga_id', mangaId)
       .order('created_at', { ascending: false })
+      .limit(200) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
       .then(({ data, error }) => {
         if (isCancelled()) return;
         if (error) { console.error('Манганы сэтгэгдэл татах алдаа:', error); return; }
         const list = data || [];
         setMangaComments(list);
-        if (list.length === 0) { setMangaCommentLikeCounts({}); return; }
+        if (list.length === 0) { setMangaCommentLikeCounts({}); setMyMangaLikes([]); return; }
         supabase.from('comment_likes').select('comment_id').in('comment_id', list.map(c => c.id))
           .then(({ data: likeRows }) => {
             if (isCancelled()) return;
@@ -688,11 +714,14 @@ export default function App() {
             (likeRows || []).forEach(r => { counts[r.comment_id] = (counts[r.comment_id] || 0) + 1; });
             setMangaCommentLikeCounts(counts);
           });
+        // ЗАСВАР #118: миний like-ийг зөвхөн энэ жагсаалтын сэтгэгдлүүдээр хязгаарлана
+        if (currentUser) {
+          supabase.from('comment_likes').select('comment_id')
+            .eq('user_id', currentUser.id)
+            .in('comment_id', list.map(c => c.id))
+            .then(({ data: mine }) => { if (!isCancelled()) setMyMangaLikes((mine || []).map(x => x.comment_id)); });
+        }
       });
-    if (currentUser) {
-      supabase.from('comment_likes').select('comment_id').eq('user_id', currentUser.id)
-        .then(({ data }) => { if (!isCancelled()) setMyMangaLikes((data || []).map(x => x.comment_id)); });
-    }
   };
 
   const toggleMangaCommentLike = async (c) => {
@@ -765,12 +794,13 @@ export default function App() {
   // ЗАСВАР #113: reel-vvдийг манга мэдээлэл + like-ийн тоотой нь татна
   const fetchReels = (isCancelled = () => false) => {
     supabase.from('reels').select('*').order('created_at', { ascending: false })
+      .limit(30) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
       .then(({ data, error }) => {
         if (isCancelled()) return;
         if (error) { console.error('Reel татах алдаа:', error); return; }
         const list = data || [];
         setDbReels(list);
-        if (list.length === 0) { setReelLikeCounts({}); return; }
+        if (list.length === 0) { setReelLikeCounts({}); setMyReelLikes([]); return; }
         supabase.from('reel_likes').select('reel_id').in('reel_id', list.map(r => r.id))
           .then(({ data: likeRows }) => {
             if (isCancelled()) return;
@@ -778,11 +808,14 @@ export default function App() {
             (likeRows || []).forEach(r => { counts[r.reel_id] = (counts[r.reel_id] || 0) + 1; });
             setReelLikeCounts(counts);
           });
+        // ЗАСВАР #118: миний like-ийг зөвхөн энэ жагсаалтын reel-үүдээр хязгаарлана
+        if (currentUser) {
+          supabase.from('reel_likes').select('reel_id')
+            .eq('user_id', currentUser.id)
+            .in('reel_id', list.map(r => r.id))
+            .then(({ data: mine }) => { if (!isCancelled()) setMyReelLikes((mine || []).map(x => x.reel_id)); });
+        }
       });
-    if (currentUser) {
-      supabase.from('reel_likes').select('reel_id').eq('user_id', currentUser.id)
-        .then(({ data }) => { if (!isCancelled()) setMyReelLikes((data || []).map(x => x.reel_id)); });
-    }
   };
 
   // ЗАСВАР #113: зvрх дарах/болих — feed дэхь video-г дахин ачаалуулж тоглуулалтыг
@@ -965,15 +998,17 @@ export default function App() {
     setSelected(manga);
     setSelectedChapter(chapter);
     setPage('reader');
-    setHistory(prev => [
+    const nextHistory = [
       { mangaId: manga.id, chapter: chapter.chapter_number, date: Date.now() },
-      ...prev.filter(h => h.mangaId !== manga.id),
-    ]);
-    // ШИНЭ: энэ бүлгийг "уншсан" гэж тэмдэглэнэ (нэвтэрсэн бол Supabase-д хадгална)
+      ...history.filter(h => h.mangaId !== manga.id),
+    ];
+    setHistory(nextHistory);
+    // ШИНЭ: энэ бүлгийг "уншсан" гэж тэмдэглэнэ (нэвтэрсэн бол Supabase-д,
+    // ЗАСВАР #118: зочин бол localStorage-д — refresh хийхэд алга болохгүй)
+    const existing = readChapters[manga.id] || [];
+    const nextRead = existing.includes(chapter.chapter_number) ? existing : [...existing, chapter.chapter_number];
+    setReadChapters(prev => ({ ...prev, [manga.id]: nextRead }));
     if (currentUser) {
-      const existing = readChapters[manga.id] || [];
-      const nextRead = existing.includes(chapter.chapter_number) ? existing : [...existing, chapter.chapter_number];
-      setReadChapters(prev => ({ ...prev, [manga.id]: nextRead }));
       supabase.from('reading_progress').upsert({
         user_id: currentUser.id,
         manga_id: manga.id,
@@ -981,6 +1016,11 @@ export default function App() {
         read_chapters: nextRead,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id,manga_id' }).then(({ error }) => { if (error) notify('Алдаа: ' + error.message); });
+    } else {
+      try {
+        localStorage.setItem('guest_history', JSON.stringify(nextHistory));
+        localStorage.setItem('guest_read_chapters', JSON.stringify({ ...readChapters, [manga.id]: nextRead }));
+      } catch { /* localStorage боломжгүй үед чимээгүй өнгөрнө */ }
     }
   };
 
@@ -2565,6 +2605,9 @@ export default function App() {
                 </div>
                 <button onClick={async () => {
                   if (!adminManga.title) { notify('Гарчиг оруулна уу!'); return; }
+                  // ЗАСВАР #118: төрлийн шалгалтыг upload-ын ӨМНӨ зөөв — өмнө нь
+                  // зургууд R2 руу орсны ДАРАА шалгалт унаж, орфон файл үлддэг байсан.
+                  if (adminManga.genres.length === 0) { notify('Дор хаяж 1 төрөл сонгоно уу!'); return; }
                   const badFile = [posterFile, bannerFile].filter(Boolean).map(validateImageFile).find(Boolean);
                   if (badFile) { notify(badFile); return; }
                   let posterUrl = '';
@@ -2583,7 +2626,6 @@ export default function App() {
                       bannerUrl = await uploadToR2(bannerFile, `banners/${fileName}`);
                     } catch (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); return; }
                   }
-                  if (adminManga.genres.length === 0) { notify('Дор хаяж 1 төрөл сонгоно уу!'); return; }
                   const { error } = await supabase.from('mangas').insert({
                     title: adminManga.title,
                     description: adminManga.desc,
@@ -2661,7 +2703,7 @@ export default function App() {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, maxHeight: 320, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
                       {chapterFiles.map((file, i) => (
                         <div key={i} style={{ position: 'relative', width: 76 }}>
-                          <img src={URL.createObjectURL(file)} alt={`${i + 1}`}
+                          <img src={chapterFileUrls[i]} alt={`${i + 1}`}
                             style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
                           <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{i + 1}</div>
                           <span onClick={() => setChapterFiles(prev => prev.filter((_, idx) => idx !== i))}
@@ -3268,7 +3310,7 @@ export default function App() {
               <div style={{ width: 80 }} />
             </div>
             {chapterFiles.map((file, i) => (
-              <img key={i} src={URL.createObjectURL(file)} alt={`${i + 1}`}
+              <img key={i} src={chapterFileUrls[i]} alt={`${i + 1}`}
                 style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
             ))}
           </div>
@@ -3331,8 +3373,11 @@ export default function App() {
                 if (!editMangaForm.title.trim()) { notify('Гарчиг оруулна уу!'); return; }
                 const badFile = [editPosterFile, editBannerFile].filter(Boolean).map(validateImageFile).find(Boolean);
                 if (badFile) { notify(badFile); return; }
-                setEditSaving(true);
+                // ЗАСВАР #118: төрлийн шалгалтыг setEditSaving(true)-ийн ӨМНӨ зөөв —
+                // өмнө нь шалгалт унахад editSaving true хэвээр үлдэж, товч
+                // "ХАДГАЛЖ БАЙНА..." дээр үүрд гацдаг байсан.
                 if (editMangaForm.genres.length === 0) { notify('Дор хаяж 1 төрөл сонгоно уу!'); return; }
+                setEditSaving(true);
                 const updates = {
                   title: editMangaForm.title,
                   description: editMangaForm.desc,
