@@ -154,6 +154,23 @@ create table if not exists public.payment_requests (
   reviewed_by uuid references public.users(id)
 );
 
+-- ЗАСВАР #9 (migration_9): "Хадгалсан манга"/"Түүх"/"Уншсан бүлэг" — localStorage-с шилжив
+create table if not exists public.user_library (
+  user_id uuid not null references public.users(id) on delete cascade,
+  manga_id bigint not null references public.mangas(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, manga_id)
+);
+
+create table if not exists public.reading_progress (
+  user_id uuid not null references public.users(id) on delete cascade,
+  manga_id bigint not null references public.mangas(id) on delete cascade,
+  last_chapter numeric not null,
+  read_chapters numeric[] not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (user_id, manga_id)
+);
+
 -- ============================================================
 -- 8) Үзэлт (views) — атомаар нэмэгдүүлэх функц + сүүлийн 30 хоногийн
 --    цаг тэмдэгтэй бүртгэл (нүүр хэсгийн "Санал болгох" мөрийг тооцоход)
@@ -241,6 +258,8 @@ alter table public.comments enable row level security;
 alter table public.comment_likes enable row level security;
 alter table public.reports enable row level security;
 alter table public.payment_requests enable row level security;
+alter table public.user_library enable row level security;
+alter table public.reading_progress enable row level security;
 
 -- users
 drop policy if exists "users_select_all" on public.users;
@@ -361,6 +380,15 @@ create policy "payment_requests_select_own_or_admin" on public.payment_requests 
 drop policy if exists "payment_requests_update_admin" on public.payment_requests;
 create policy "payment_requests_update_admin" on public.payment_requests for update
   using (exists (select 1 from public.users u where u.id = auth.uid() and 'admin' = any(u.roles)));
+
+-- user_library / reading_progress
+drop policy if exists "user_library_own" on public.user_library;
+create policy "user_library_own" on public.user_library for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "reading_progress_own" on public.reading_progress;
+create policy "reading_progress_own" on public.reading_progress for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ============================================================
 -- 11) STORAGE — "manga-site" bucket (avatar/poster/banner/chapter зургууд)

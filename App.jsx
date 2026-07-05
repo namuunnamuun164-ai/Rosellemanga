@@ -1,107 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
-
-const genres = ['Action', 'Historical', 'Modern', 'Smut', 'BL', 'Horror', 'Romance'];
-
-// ЗАСВАР #75: "Дууссан"/"Үргэлжилж байна" 2-оос гадна "Завсарлага авсан",
-// "Гаргалт зогссон" 2 төлөв нэмэв. Өнгө/бэлгэдлийг нэг газар тодорхойлж,
-// MangaCard болон Detail хуудас хоёулаа үүнээс уншина (давхардуулахгүйн тулд).
-const MANGA_STATUSES = ['Гарч байгаа', 'Дууссан', 'Завсарлага авсан', 'Гаргалт гүйцсэн'];
-const STATUS_META = {
-  'Дууссан': { color: '#4caf50', badge: 'ДУУССАН' },
-  'Гарч байгаа': { color: '#3b82f6', badge: 'Гарч байгаа' },
-  'Завсарлага авсан': { color: '#f5a623', badge: 'ЗАВСАРЛАГА' },
-  'Гаргалт гүйцсэн': { color: '#888', badge: 'Гаргалт гүйцсэн' },
-};
-// ЗАСВАР #92: MANGA_STATUSES/STATUS_META-д байхгүй (жишээ нь хуучин/устгагдсан
-// нэрээр хадгалагдсан) төлөвтэй манга таарвал .badge дээр crash хийхээс сэргийлж,
-// тодорхой нэр рүү биш ямар ч байдлаар найдвартай нөөц утга руу шилждэг болгов.
-const DEFAULT_STATUS_META = { color: '#8B0000', badge: '' };
-// ЗАСВАР #3: Үнийн мэдээллийг нэг газар тодорхойлж, VIP хуудас болон popup хоёулаа
-// эндээс уншдаг болгосон (өмнө нь 6 сарын багц 25,000₮ / 50,000₮ гэж зөрж байсан).
-const PLANS = [
-  { key: '1sar', label: '1 САР', price: '5,000₮', features: ['Бүх манхва унших', 'HD чанар'], recommended: false },
-  { key: '3sar', label: '3 САР', price: '13,500₮', features: ['Бүх манхва унших', 'HD чанар', '10% хэмнэлт'], recommended: true },
-  { key: '6sar', label: '6 САР', price: '25,000₮', features: ['Бүх манхва унших', 'HD чанар', '1 сар үнэгүй'], recommended: false },
-];
-// ЗАСВАР #91: "Төлбөр төлсөн" хүсэлт батлахад багц тус бүрийн VIP хоногийг тооцоход ашиглана
-const PLAN_DAYS = { '1sar': 30, '3sar': 90, '6sar': 180 };
-
-// ЗАСВАР #11: upload хийхийн өмнө файлын төрлийг шалгах нэг цэгтэй функц
-// (өмнө нь <input accept="image/*"> л байсан бөгөөд энэ нь зөвхөн UI-д зориулсан
-// зөвлөмж тул хэрэглэгч ямар ч файл сонгож upload хийж болдог байсан).
-// ЗАСВАР #17: хэмжээний (8MB) хязгаарлалтыг хассан — жинхэнэ hosting (Supabase
-// Storage) холбогдсон тул бүлгийн өндөр чанартай том зургийг хориглох шаардлагагүй.
-const validateImageFile = (file) => {
-  if (!file) return 'Файл сонгогдоогүй байна.';
-  if (!file.type.startsWith('image/')) return 'Зөвхөн зургийн файл (jpg, png, webp г.м.) оруулна уу.';
-  return null;
-};
-
-// ЗАСВАР #94: зургийн upload-ыг Supabase Storage-с Cloudflare R2 руу шилжүүлэв
-// (upload-to-r2 edge function-оор дамжуулж, Secret Access Key browser талд гардаггүй).
-const uploadToR2 = async (file, path) => {
-  const { data: { session } } = await supabase.auth.getSession();
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('path', path);
-  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-to-r2`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${session?.access_token}` },
-    body: formData,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Upload алдаа гарлаа');
-  return data.publicUrl;
-};
-
-const IconHome = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-  </svg>
-);
-const IconGrid = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-    <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
-  </svg>
-);
-const IconBookmark = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-  </svg>
-);
-const IconSearch = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-  </svg>
-);
-// ШИНЭ: утасны hamburger цэсний icon
-const IconMenu = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-  </svg>
-);
-
-// ШИНЭ: нууц үг оруулах талбар — нүд дарж харуулах/нуух товчтой
-const PasswordField = ({ value, onChange, placeholder, onKeyDown }) => {
-  const [show, setShow] = useState(false);
-  return (
-    <div style={{ position: 'relative' }}>
-      <input type={show ? 'text' : 'password'} value={value} onChange={onChange} onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 44px 10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-      <span onClick={() => setShow(s => !s)} title={show ? 'Нууц үг нуух' : 'Нууц үг харуулах'}
-        style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#888', fontSize: 15, userSelect: 'none' }}>
-        {show ? (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-        ) : (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        )}
-      </span>
-    </div>
-  );
-};
+import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS } from './constants';
+import { validateImageFile, uploadToR2, formatMnDate, formatNumericDate, formatRemaining } from './helpers';
+import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu } from './icons';
+import { PasswordField } from './PasswordField';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -171,6 +73,23 @@ export default function App() {
   const [chapterPreviewOpen, setChapterPreviewOpen] = useState(false);
   // ШИНЭ: уншиж байгаа хуудасны дээд талд бүлгийн дугаар дарахад бусад бүлгүүд жагсаана
   const [chapterSwitcherOpen, setChapterSwitcherOpen] = useState(false);
+  // ЗАСВАР #102: бүлэг уншихад zoom (томруулах/жижигрvvлэх) хэсэг, 100%-с эхэлнэ
+  const [readerZoom, setReaderZoom] = useState(100);
+  // ЗАСВАР #102: доошоо гvйлгэхэд толгой хэсгийг нуух, дээшээ гvйлгэхэд харуулах
+  const [readerHeaderVisible, setReaderHeaderVisible] = useState(true);
+  const lastScrollY = useRef(0);
+  useEffect(() => {
+    if (page !== 'reader') return;
+    lastScrollY.current = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y > lastScrollY.current && y > 80) setReaderHeaderVisible(false);
+      else if (y < lastScrollY.current) setReaderHeaderVisible(true);
+      lastScrollY.current = y;
+    };
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [page, selectedChapter]);
   // ЗАСВАР #58: удирдлагын панелийг доошоо жагсаасан олон карт биш, хажуу тийш
   // жигсаасан таб (each) хэсэгтэй болгосон
   const [adminTab, setAdminTab] = useState('manga');
@@ -264,33 +183,6 @@ export default function App() {
   // Хуудас солигдох бүрт утасны цэсийг автоматаар хаана
   useEffect(() => { setSidebarOpen(false); }, [page]);
 
-  const DAYS = ['Ням', 'Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба'];
-
-  // "2026 оны 6-р сарын 25" маягийн огноо
-  const formatMnDate = (dateStr) => {
-    const d = new Date(dateStr);
-    return `${d.getFullYear()} оны ${d.getMonth() + 1}-р сарын ${d.getDate()}`;
-  };
-
-  // ЗАСВАР #68: "2026.07.13" маягийн цэвэрхэн тоон огноо (бүлгийн жагсаалтад ашиглана)
-  const formatNumericDate = (dateStr) => {
-    const d = new Date(dateStr);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}.${mm}.${dd}`;
-  };
-
-  // Үлдсэн хугацааг "2 өдөр 3 цаг" маягаар
-  const formatRemaining = (ms) => {
-    if (ms <= 0) return '';
-    const mins = Math.ceil(ms / 60000);
-    const days = Math.floor(mins / 1440);
-    const hours = Math.floor((mins % 1440) / 60);
-    const m = mins % 60;
-    if (days > 0) return `${days} өдөр ${hours} цаг`;
-    if (hours > 0) return `${hours} цаг ${m} мин`;
-    return `${m} мин`;
-  };
 
   // Долоо хоногийн хуваариас дараагийн гарах огноог тооцно
   const nextScheduleDate = (day, time) => {
@@ -428,6 +320,7 @@ export default function App() {
 
   // ЗАСВАР #57: full-width hero-г автоматаар эргүүлнэ (жижиг карт мөрийн scroll-ийн оронд)
   const [heroIndex, setHeroIndex] = useState(0);
+  const heroTouchX = useRef(null);
   useEffect(() => {
     if (page !== 'home' || recommendedMangas.length === 0) return;
     const timer = setInterval(() => {
@@ -526,6 +419,79 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, [fetchProfile]);
+
+  // ЗАСВАР #99: URL routing — хуудас бүр өөрийн URL-тэй болгож, browser-ийн
+  // native буцах/урагшаа товч (мөн refresh) зөв ажилладаг болгов. Өмнө нь
+  // бүх навигац зөвхөн React state-ээр (URL хэзээ ч солигдохгvй) хийгддэг
+  // байсан тул browser буцах товч дарахад сайтаас шууд гардаг байсан.
+  const isPopStateNav = useRef(false);
+  const didInitialRestore = useRef(false);
+  // ЗАСВАР #100: deep-link (жишээ нь /manga/2 руу шууд орох эсвэл refresh хийх)
+  // үед dbMangas ирэхээс ӨМНӨ sync effect ажиллаж, URL-ыг '/' болгож дарж бичдэг
+  // байсан bug-ыг засав — одоо анхны сэргээлт дуустал sync хийхгvй хvлээнэ.
+  const [routeReady, setRouteReady] = useState(() => window.location.pathname === '/');
+
+  const computePath = useCallback(() => {
+    if (page === 'detail' && selected) return `/manga/${selected.id}`;
+    if (page === 'reader' && selected && selectedChapter) return `/manga/${selected.id}/chapter/${selectedChapter.chapter_number}`;
+    if (page === 'home') return '/';
+    return `/${page}`;
+  }, [page, selected, selectedChapter]);
+
+  const restoreFromPath = useCallback((pathname) => {
+    const chMatch = pathname.match(/^\/manga\/(\d+)\/chapter\/([\d.]+)$/);
+    const mMatch = pathname.match(/^\/manga\/(\d+)$/);
+    if (chMatch || mMatch) {
+      const mangaId = Number((chMatch || mMatch)[1]);
+      const manga = dbMangas.find(m => m.id === mangaId);
+      if (!manga) { setPage('home'); return; }
+      setSelected(manga);
+      if (chMatch) {
+        supabase.from('chapters').select('*').eq('manga_id', mangaId).eq('chapter_number', Number(chMatch[2])).maybeSingle()
+          .then(({ data }) => { if (data) { setSelectedChapter(data); setPage('reader'); } else setPage('detail'); });
+      } else {
+        setPage('detail');
+      }
+      return;
+    }
+    const seg = pathname.replace(/^\//, '');
+    setPage(['all', 'schedule', 'vip', 'library', 'admin'].includes(seg) ? seg : 'home');
+  }, [dbMangas]);
+
+  // Анх ачаалахад (эсвэл dbMangas ирэхэд) одоогийн URL-аас хуудсыг сэргээнэ
+  useEffect(() => {
+    if (didInitialRestore.current || dbMangas.length === 0) return;
+    didInitialRestore.current = true;
+    const pathname = window.location.pathname;
+    if (pathname && pathname !== '/') {
+      isPopStateNav.current = true;
+      restoreFromPath(pathname);
+    }
+    setRouteReady(true);
+  }, [dbMangas, restoreFromPath]);
+
+  // Browser-ийн буцах/урагшаа товч дарахад URL-аас дахин state сэргээнэ
+  useEffect(() => {
+    const onPopState = () => {
+      isPopStateNav.current = true;
+      restoreFromPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [restoreFromPath]);
+
+  // Хуудас/манга/бүлэг солигдох бүрт URL-ыг синк хийнэ (popstate-с үүдсэн
+  // өөрчлөлт бол шинэ history entry нэмэхгvй, зөвхөн жинхэнэ навигацид нэмнэ)
+  useEffect(() => {
+    if (!routeReady) return;
+    const path = computePath();
+    if (window.location.pathname === path) return;
+    if (isPopStateNav.current) {
+      isPopStateNav.current = false;
+    } else {
+      window.history.pushState(null, '', path);
+    }
+  }, [computePath, routeReady]);
 
   useEffect(() => {
     if (page !== 'detail' || !selected) return;
@@ -999,7 +965,7 @@ export default function App() {
                       email: authForm.email,
                       password: authForm.password,
                     });
-                    if (error) notify('Алдаа: ' + error.message);
+                    if (error) notify('Алдаа: Нэвтрэх имэйл эсвэл нууц үг буруу байна');
                     else {
                       setAuthPage(null);
                       notify('Амжилттай нэвтэрлээ! 🎉');
@@ -1123,7 +1089,7 @@ export default function App() {
                 <IconMenu />
               </span>
             )}
-            <img src="/logo.png" alt="logo" style={{ height: isMobile ? 26 : 36, width: 'auto', maxWidth: 120, objectFit: 'contain', flexShrink: 0 }} />
+            <img src="/logo.png" alt="logo" style={{ height: isMobile ? 34 : 36, width: 'auto', maxWidth: 140, objectFit: 'contain', flexShrink: 0 }} />
           </div>
 
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
@@ -1241,39 +1207,50 @@ export default function App() {
                 хассан, гарчгийн фонтыг жижигрүүлж, БҮХЭЛ slide-ыг дархад манга
                 хуудас руу ордог болгосон (өмнө нь зөвхөн гарчиг л дархад ажилладаг,
                 бусад хэсэгт дарахад юу ч болдоггүй байсан). */}
+            {/* ЗАСВАР #101: hero-г бүтэн-хэмжээ (edge-to-edge) биш, хvрээтэй/
+                бага хэмжээтэй цэгцтэй карт болгов; доод талын цэг (dots)
+                заагчийг хассан, оронд нь гар/хулгана chvvргэх (swipe/drag)
+                дэмжлэг нэмэв. */}
             {heroManga && (
-              <div onClick={() => goToDetail(heroManga)} style={{ position: 'relative', height: 320, overflow: 'hidden', cursor: 'pointer' }}>
-                {recommendedMangas.map((m, i) => (
-                  <div key={m.id} style={{ position: 'absolute', inset: 0, opacity: heroIndex === i ? 1 : 0, transition: 'opacity 0.9s ease' }}>
-                    <img src={m.banner_url || m.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
-                    <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(10,10,10,0.95) 15%, rgba(10,10,10,0.2) 60%, rgba(10,10,10,0.5))' }} />
+              <div style={{ padding: '1.25rem 1.5rem 0' }}>
+                <div
+                  onClick={() => goToDetail(heroManga)}
+                  onTouchStart={e => { heroTouchX.current = e.touches[0].clientX; }}
+                  onTouchEnd={e => {
+                    if (heroTouchX.current == null || recommendedMangas.length < 2) return;
+                    const delta = e.changedTouches[0].clientX - heroTouchX.current;
+                    if (Math.abs(delta) > 50) {
+                      if (delta < 0) setHeroIndex(prev => (prev + 1) % recommendedMangas.length);
+                      else setHeroIndex(prev => (prev - 1 + recommendedMangas.length) % recommendedMangas.length);
+                    }
+                    heroTouchX.current = null;
+                  }}
+                  style={{ position: 'relative', height: 220, overflow: 'hidden', cursor: 'pointer', borderRadius: 16, border: '1px solid #232a38' }}>
+                  {recommendedMangas.map((m, i) => (
+                    <div key={m.id} style={{ position: 'absolute', inset: 0, opacity: heroIndex === i ? 1 : 0, transition: 'opacity 0.9s ease' }}>
+                      <img src={m.banner_url || m.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
+                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(10,10,10,0.95) 15%, rgba(10,10,10,0.2) 60%, rgba(10,10,10,0.5))' }} />
+                    </div>
+                  ))}
+                  <div style={{ position: 'absolute', bottom: '1.25rem', left: '1.5rem', right: '1.5rem', zIndex: 2 }}>
+                    <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.2, maxWidth: 640 }}>
+                      {heroManga.title}
+                    </div>
                   </div>
-                ))}
-                <div style={{ position: 'absolute', bottom: '2rem', left: '2rem', right: '2rem', zIndex: 2 }}>
-                  <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.2, marginBottom: 14, maxWidth: 640 }}>
-                    {heroManga.title}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {recommendedMangas.map((_, i) => (
-                      <div key={i} onClick={e => { e.stopPropagation(); setHeroIndex(i); }}
-                        style={{ width: heroIndex === i ? 24 : 8, height: 8, borderRadius: 4, background: heroIndex === i ? '#fff' : 'rgba(255,255,255,0.3)', cursor: 'pointer', transition: 'all 0.3s' }} />
-                    ))}
-                  </div>
+                  {/* ЗАСВАР #98: зvvн/баруун гар товчийг зөвхөн эхний hero панелд нэмэв */}
+                  {recommendedMangas.length > 1 && (
+                    <>
+                      <button onClick={e => { e.stopPropagation(); setHeroIndex(prev => (prev - 1 + recommendedMangas.length) % recommendedMangas.length); }}
+                        className="scroll-arrow scroll-arrow-left" aria-label="Өмнөх">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); setHeroIndex(prev => (prev + 1) % recommendedMangas.length); }}
+                        className="scroll-arrow scroll-arrow-right" aria-label="Дараах">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                      </button>
+                    </>
+                  )}
                 </div>
-                {/* ЗАСВАР #98: зvvн/баруун гар товчийг зөвхөн эхний hero панелд нэмэв
-                    (жижиг манга-картын мөрvvдээс хассан) */}
-                {recommendedMangas.length > 1 && (
-                  <>
-                    <button onClick={e => { e.stopPropagation(); setHeroIndex(prev => (prev - 1 + recommendedMangas.length) % recommendedMangas.length); }}
-                      className="scroll-arrow scroll-arrow-left" aria-label="Өмнөх">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); setHeroIndex(prev => (prev + 1) % recommendedMangas.length); }}
-                      className="scroll-arrow scroll-arrow-right" aria-label="Дараах">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-                    </button>
-                  </>
-                )}
               </div>
             )}
 
@@ -1866,7 +1843,7 @@ export default function App() {
                 дахин дээшлүүлж байж л дарж болдог байсан. */}
             {/* ЗАСВАР #70: гарчиг төвд биш, бүлгийн дугаарыг дан тоогоор баруун
                 дээд буланд байрлуулав (буцах товч зүүн талдаа хэвээрээ) */}
-            <div style={{ position: 'sticky', padding: '1rem', top: 0, zIndex: 60, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ position: 'sticky', padding: '1rem', top: 0, zIndex: 60, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transform: readerHeaderVisible ? 'translateY(0)' : 'translateY(-100%)', opacity: readerHeaderVisible ? 1 : 0, transition: 'transform 0.25s ease, opacity 0.25s ease' }}>
               <button onClick={() => setPage('detail')} title="Буцах"
                 style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -1895,6 +1872,18 @@ export default function App() {
                   </>
                 )}
               </div>
+              {/* ЗАСВАР #102: zoom (томруулах/жижигрvvлэх) товч, 100%-с эхэлнэ */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
+                  style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
+                  −
+                </button>
+                <span style={{ fontSize: 11, color: '#aaa', minWidth: 34, textAlign: 'center' }}>{readerZoom}%</span>
+                <button onClick={() => setReaderZoom(z => Math.min(200, z + 10))} title="Томруулах"
+                  style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
+                  +
+                </button>
+              </div>
             </div>
 
             {/* ЗАСВАР #85: бүлгийн зургийг татаж авахаас сэргийлэв (right-click
@@ -1902,12 +1891,14 @@ export default function App() {
                 (screenshot-с сэргийлэх боломжгүй), гэвч энгийн татаж авахыг
                 нэлээд төвөгтэй болгоно. */}
             {chapterImages.length > 0 ? (
-              chapterImages.map(img => (
-                <img key={img.id} src={img.image_url} alt={`Page ${img.page_number}`}
-                  onContextMenu={e => e.preventDefault()}
-                  draggable={false}
-                  style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }} />
-              ))
+              <div style={{ zoom: `${readerZoom}%` }}>
+                {chapterImages.map(img => (
+                  <img key={img.id} src={img.image_url} alt={`Page ${img.page_number}`}
+                    onContextMenu={e => e.preventDefault()}
+                    draggable={false}
+                    style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }} />
+                ))}
+              </div>
             ) : (
               <div style={{ color: '#555', textAlign: 'center', marginTop: '3rem' }}>Зураг ачааллаж байна эсвэл байхгүй байна...</div>
             )}
