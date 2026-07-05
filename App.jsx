@@ -90,6 +90,16 @@ export default function App() {
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, [page, selectedChapter]);
+
+  // ЗАСВАР #103: бүлэг уншиж байх үед гараар (pinch) zoom хийж болохоор
+  // viewport хязгаарлалтыг түр сулруулна; бусад хуудсанд буцаагаад хориглоно.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    meta.setAttribute('content', page === 'reader'
+      ? 'width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes'
+      : 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+  }, [page]);
   // ЗАСВАР #58: удирдлагын панелийг доошоо жагсаасан олон карт биш, хажуу тийш
   // жигсаасан таб (each) хэсэгтэй болгосон
   const [adminTab, setAdminTab] = useState('manga');
@@ -795,7 +805,7 @@ export default function App() {
           </div>
         )}
         {!showChapter && !m.is_hidden && (STATUS_META[m.status] || DEFAULT_STATUS_META).badge && (
-          <div style={{ position: 'absolute', top: 6, left: 6, background: (STATUS_META[m.status] || DEFAULT_STATUS_META).color, color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>{(STATUS_META[m.status] || DEFAULT_STATUS_META).badge}</div>
+          <div style={{ position: 'absolute', top: 6, left: 6, background: (STATUS_META[m.status] || DEFAULT_STATUS_META).color, color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase' }}>{(STATUS_META[m.status] || DEFAULT_STATUS_META).badge}</div>
         )}
         {m.is_hidden && (
           <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.8)', color: '#f5a623', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>🙈 НУУГДСАН</div>
@@ -1330,9 +1340,6 @@ export default function App() {
             {!allCategory && (
               <>
                 <div style={{ display: 'flex', gap: 12, marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <input value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Манга хайх..."
-                    style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '8px 16px', color: '#fff', fontSize: 13, outline: 'none', width: 240 }} />
                   <div style={{ position: 'relative' }}>
                     <div onClick={() => setGenreOpen(prev => !prev)}
                       style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '8px 16px', color: '#fff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 24, minWidth: 160 }}>
@@ -1836,7 +1843,7 @@ export default function App() {
 
         {/* READER PAGE — ЗАСВАР #19: 100% өргөнөөр (edge-to-edge) харагдана, ойртуулах (pinch-zoom) хориглосон */}
         {page === 'reader' && selectedChapter && (
-          <div style={{ touchAction: 'pan-y' }}>
+          <div style={{ touchAction: 'pan-y pinch-zoom' }}>
             {/* ЗАСВАР #34: доошоо гүйлгэсэн ч буцах товч үргэлж хүрч болохоор
                 sticky (шидэгдэж) байрлалтай болгосон — өмнө нь энгийн урсгалд
                 байсан тул урт бүлгийг доош гүйлгэхэд буцах товч дэлгэцээс гарч
@@ -1978,13 +1985,8 @@ export default function App() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 800, fontSize: 12 }}>{c.users?.name || 'Хэрэглэгч'}</span>
-                          {/* ЗАСВАР #42: staff (admin/moderator/editor) сэтгэгдлийн хажууд эрхийн бэлгэдэл */}
-                          {c.users?.roles?.includes('admin') && (
-                            <span style={{ fontSize: 8, fontWeight: 800, color: '#8B0000', border: '1px solid #8B0000', padding: '1px 6px', borderRadius: 8, letterSpacing: 0.5 }}>АДМИН</span>
-                          )}
-                          {!c.users?.roles?.includes('admin') && c.users?.roles?.some(r => ['moderator', 'editor'].includes(r)) && (
-                            <span style={{ fontSize: 8, fontWeight: 800, color: '#f5a623', border: '1px solid #f5a623', padding: '1px 6px', borderRadius: 8, letterSpacing: 0.5 }}>{c.users.roles.includes('moderator') ? 'МОДЕРАТОР' : 'ЭДИТОР'}</span>
-                          )}
+                          {/* ЗАСВАР #104: chapter уншиж буй хуудсанд admin/moderator/editor
+                              бэлгэдлийг харуулахгvй болгов */}
                           <span style={{ fontSize: 11, color: '#6b7385' }}>{formatMnDate(c.created_at)}</span>
                           <span style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
                             {currentUser && (c.user_id === currentUser.id || canModerate) && (
