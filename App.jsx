@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS } from './constants';
-import { validateImageFile, uploadToR2, formatMnDate, formatNumericDate, formatRemaining } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu } from './icons';
 import { PasswordField } from './PasswordField';
 
@@ -48,6 +48,8 @@ export default function App() {
   const [adminWorkerEmail, setAdminWorkerEmail] = useState('');
   // ЗАСВАР #31: цуглуулга болсон — олон staff role-ийг зэрэг чеклэж болно
   const [adminWorkerRoles, setAdminWorkerRoles] = useState([]);
+  // ЗАСВАР #121: одоо модератор/эдитор эрхтэй хэрэглэгчдийн жагсаалт (эрхийг хураах товчтой)
+  const [staffUsers, setStaffUsers] = useState([]);
   // ШИНЭ: VIP олгох (role-оос тусад нь, хоногийн хугацаатай)
   const [vipEmail, setVipEmail] = useState('');
   const [vipDays, setVipDays] = useState('30');
@@ -61,6 +63,35 @@ export default function App() {
   const [editPosterFile, setEditPosterFile] = useState(null);
   const [editBannerFile, setEditBannerFile] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
+  // ЗАСВАР #124: оруулсан бvлгийг засах (cover зураг солих, хуудсын зураг нэмэх/хасах/дараалал солих)
+  const [editChapter, setEditChapter] = useState(null);
+  const [editChapterForm, setEditChapterForm] = useState({ chapter_number: '', title: '', label: '', is_vip: false });
+  const [editChapterCoverFile, setEditChapterCoverFile] = useState(null);
+  const [editChapterExistingImages, setEditChapterExistingImages] = useState([]); // DB-д байгаа [{id, image_url, page_number}]
+  const [editChapterNewFiles, setEditChapterNewFiles] = useState([]); // шинээр нэмэх файлууд
+  const [editChapterSaving, setEditChapterSaving] = useState(false);
+  const [editChapterNewFileUrls, setEditChapterNewFileUrls] = useState([]);
+  useEffect(() => {
+    const urls = editChapterNewFiles.map(f => URL.createObjectURL(f));
+    setEditChapterNewFileUrls(urls);
+    return () => urls.forEach(u => URL.revokeObjectURL(u));
+  }, [editChapterNewFiles]);
+
+  // ЗАСВАР #124: хадгалахдаа анх татсан зурагнуудаас алийг нь хассаныг мэдэхийн тулд
+  // анхны id-нуудыг тусад нь хадгална (устгагдсан мөрийг ганцаарчлан хасахын тулд)
+  const editChapterInitialImageIds = useRef([]);
+  // ЗАСВАР #124: бvлэг засах цонхыг нээж, тухайн бvлгийн одоогийн зургуудыг татна
+  const openEditChapter = (ch) => {
+    setEditChapterForm({ chapter_number: String(ch.chapter_number), title: ch.title || '', label: ch.label || '', is_vip: ch.is_vip || false });
+    setEditChapterCoverFile(null);
+    setEditChapterNewFiles([]);
+    setEditChapter(ch);
+    supabase.from('chapter_images').select('*').eq('chapter_id', ch.id).order('page_number')
+      .then(({ data }) => {
+        setEditChapterExistingImages(data || []);
+        editChapterInitialImageIds.current = (data || []).map(img => img.id);
+      });
+  };
   // ШИНЭ: "Хувиар" тусдаа хуудас байхаа больж, avatar дээр дарахад буланд гарч ирэх жижиг цонх боллоо
   const [profileOpen, setProfileOpen] = useState(false);
   // ШИНЭ: site-тэй өнгө нийцсэн мэдэгдлийн карт (toast) — browser notify()-ийг орлоно
@@ -140,6 +171,8 @@ export default function App() {
   const [chapterPublishAt, setChapterPublishAt] = useState('');
   const [pendingChapters, setPendingChapters] = useState([]);
   const [reportsList, setReportsList] = useState([]);
+  // ЗАСВАР #125: moderator/editor-ийн устгах хvсэлт илгээсэн бvлгvvд (зөвхөн admin баталгаажуулна)
+  const [pendingDeleteChapters, setPendingDeleteChapters] = useState([]);
 
   // ШИНЭ: бүлгийн cover, эрэмбэ, хуваарь, like/reply, countdown
   const [chapterCover, setChapterCover] = useState(null);
@@ -176,6 +209,9 @@ export default function App() {
   const [adminReelManga, setAdminReelManga] = useState('');
   const [reelVideoFile, setReelVideoFile] = useState(null);
   const [reelUploading, setReelUploading] = useState(false);
+
+  // ЗАСВАР #117: сэтгэгдэл дэх стикер зургийг дарж томруулж vзэх (lightbox)
+  const [zoomedSticker, setZoomedSticker] = useState(null);
 
   // ============ ROLE СИСТЕМ ============
   // admin     — бүх эрх
@@ -549,14 +585,30 @@ export default function App() {
     }
   }, [computePath, routeReady]);
 
+  // ЗАСВАР #123: browser native scroll restoration идэвхгvй болгож (тэр нь
+  // хуучин, тохирохгvй болсон scroll байрлалыг сэргээж, "дундаа хаягдсан" мэт
+  // харагдуулж байсан), хуудас солигдох бvрт дээшээ (0,0) шилжvvлнэ — ингэснээр
+  // Буцах (native эсвэл in-app) дарахад vргэлж хуудасны эхнээс эхэлнэ.
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+  }, []);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [page, selected?.id, selectedChapter?.id]);
+
   useEffect(() => {
     if (page !== 'detail' || !selected) return;
     // ЗАСВАР #10: манга хурдан сольход хуучин хүсэлт хожуу ирж шинэ жагсаалтыг
     // дарж бичихээс сэргийлнэ (race condition).
     let cancelled = false;
-    // Энгийн хэрэглэгч зөвхөн нийтлэгдсэн бүлгийг харна; staff бүгдийг харна
+    // Энгийн хэрэглэгч зөвхөн нийтлэгдсэн, нуугдаагvй бүлгийг харна; staff бүгдийг харна
+    // ЗАСВАР #119: is_hidden шvvлтvvр дутуу байсан тул "Нуух" товч дарсан ч
+    // энгийн хэрэглэгчид тухайн бvлэг хэвээр харагдаж, нээгдэж байсан bug-ыг засав.
     let q = supabase.from('chapters').select('*').eq('manga_id', selected.id);
-    if (!isStaff) q = q.eq('status', 'published');
+    // ЗАСВАР #119: is_hidden багана хуучин бvлгvvдэд NULL байж болох тул
+    // "is_hidden.eq.false"-той хамт NULL-ийг ч бас "нуугдаагvй" гэж vзнэ
+    // ЗАСВАР #125: устгах хvсэлт илгээгдсэн (pending_delete) бvлгийг ч бас нуана
+    if (!isStaff) q = q.eq('status', 'published').eq('pending_delete', false).or('is_hidden.is.null,is_hidden.eq.false');
     q.order('chapter_number').then(({ data }) => { if (!cancelled) setDbChapters(data || []); });
     return () => { cancelled = true; };
   }, [page, selected, isStaff]);
@@ -565,7 +617,12 @@ export default function App() {
   // ("Бүх гаргалт" хуудсанд үзэлтээр эрэмбэлэхэд ашиглана)
   useEffect(() => {
     if (page !== 'detail' || !selected) return;
-    supabase.rpc('increment_manga_views', { input_id: selected.id });
+    // ЗАСВАР #120: supabase-js-ийн query builder нь "lazy thenable" тул .then()
+    // дуудаагvй бол бодит HTTP хvсэлт ОГТ явдаггvй (bare дуудлага чимээгvй
+    // юу ч хийдэггvй байсан) — тиймээс vзэлт бодит DB-д хэзээ ч нэмэгдэхгvй,
+    // харин client талд л түр (session доторх) нэмэгдсэн мэт харагддаг байв.
+    supabase.rpc('increment_manga_views', { input_id: selected.id })
+      .then(({ error }) => { if (error) console.error('Vзэлт нэмэгдvvлэх алдаа:', error); });
     setDbMangas(prev => prev.map(m => m.id === selected.id ? { ...m, views: (m.views || 0) + 1 } : m));
     setSelected(prev => prev && prev.id === selected.id ? { ...prev, views: (prev.views || 0) + 1 } : prev);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -798,7 +855,13 @@ export default function App() {
       .then(({ data, error }) => {
         if (isCancelled()) return;
         if (error) { console.error('Reel татах алдаа:', error); return; }
-        const list = data || [];
+        // ЗАСВАР #122: reel feed-ийг санамсаргvй (random) дараалалтай болгов
+        // (Fisher-Yates shuffle, client талд — DB талын дараалал хэвээрээ)
+        const list = [...(data || [])];
+        for (let i = list.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [list[i], list[j]] = [list[j], list[i]];
+        }
         setDbReels(list);
         if (list.length === 0) { setReelLikeCounts({}); setMyReelLikes([]); return; }
         supabase.from('reel_likes').select('reel_id').in('reel_id', list.map(r => r.id))
@@ -912,6 +975,28 @@ export default function App() {
       .then(({ data }) => setPaymentRequests(data || []));
   }, []);
 
+  // ЗАСВАР #125: moderator/editor-ийн устгах хvсэлт илгээсэн бvлгvvд (зөвхөн admin)
+  const fetchPendingDeleteChapters = useCallback(() => {
+    supabase.from('chapters').select('*, mangas(title), users!delete_requested_by(name, email)').eq('pending_delete', true).order('delete_requested_at')
+      .then(({ data, error }) => { if (error) console.error('Устгах хvсэлт татах алдаа:', error); else setPendingDeleteChapters(data || []); });
+  }, []);
+
+  // ЗАСВАР #121: одоо Модератор/Эдитор эрхтэй хэрэглэгчдийг татна (эрх хураах жагсаалт)
+  const fetchStaffUsers = useCallback(() => {
+    supabase.from('users').select('id, email, name, roles').overlaps('roles', ['moderator', 'editor']).order('email')
+      .then(({ data, error }) => { if (error) console.error('Staff татах алдаа:', error); else setStaffUsers(data || []); });
+  }, []);
+
+  // ЗАСВАР #121: эрх хураах — moderator/editor-г л массиваас хасна (admin эрх хэвээр vлдэнэ)
+  const revokeStaffRole = async (user) => {
+    if (!window.confirm(`${user.email} хэрэглэгчийн Модератор/Эдитор эрхийг хураах уу?`)) return;
+    const newRoles = (user.roles || []).filter(r => r !== 'moderator' && r !== 'editor');
+    const { error } = await supabase.from('users').update({ roles: newRoles }).eq('id', user.id);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    notify('Эрх хураагдлаа.');
+    fetchStaffUsers();
+  };
+
   // Удирдлагын хуудас нээгдэхэд бодит статистик татна
   useEffect(() => {
     if (page === 'admin' && isStaff) {
@@ -929,8 +1014,10 @@ export default function App() {
     }
     if (page === 'admin' && isAdmin) {
       fetchPaymentRequests();
+      fetchStaffUsers();
+      fetchPendingDeleteChapters();
     }
-  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests]);
+  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters]);
 
   // ЗАСВАР #21: тодорхой цагт (publish_at) товлогдсон ирээдүйн бүлгүүдийг татаж,
   // хуваарийн хуудсанд манга-түвшний долоо хоногийн хуваариас гадна харуулна
@@ -1563,7 +1650,7 @@ export default function App() {
                 <SectionHeader title="ШИНЭ БҮЛЭГ" onClick={() => { setPreviousPage('home'); setAllCategory('recentChapter'); setPage('all'); }} />
                 <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
                   {recentChapters
-                    .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !chapterLocked(ch)))
+                    .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader({ id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
@@ -1673,7 +1760,7 @@ export default function App() {
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
                   {recentChapters
-                    .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !chapterLocked(ch)))
+                    .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader({ id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
@@ -1688,7 +1775,7 @@ export default function App() {
                       </div>
                     ))}
                 </div>
-                {recentChapters.filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !chapterLocked(ch))).length === 0 && (
+                {recentChapters.filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch))).length === 0 && (
                   <div style={{ color: '#555', textAlign: 'center', marginTop: '4rem' }}>Илэрц олдсонгүй</div>
                 )}
               </>
@@ -2024,6 +2111,7 @@ export default function App() {
                                 {isStaff && ch.status === 'pending' && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>ХҮЛЭЭГДЭЖ БУЙ</span>}
                                 {isStaff && ch.status === 'rejected' && <span style={{ fontSize: 10, color: '#8B0000', fontWeight: 700 }}>ТАТГАЛЗСАН</span>}
                                 {isStaff && ch.is_hidden && <span style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>🙈 НУУГДСАН</span>}
+                                {isStaff && ch.pending_delete && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>⏳ УСТГАХ ХvЛЭЭГДЭЖ БУЙ</span>}
                               </div>
                               <div style={{ fontSize: 12, color: locked ? '#f5a623' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
                                 {locked ? (
@@ -2037,6 +2125,12 @@ export default function App() {
                               <div style={{ position: 'absolute', top: -8, left: 14, background: '#8B0000', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 10, letterSpacing: 0.5 }}>СҮҮЛД УНШСАН</div>
                             )}
                             {canModerate && (
+                              <span onClick={(e) => { e.stopPropagation(); openEditChapter(ch); }} title="Засах"
+                                style={{ fontSize: 15, cursor: 'pointer', padding: 4 }}>
+                                ✏️
+                              </span>
+                            )}
+                            {canModerate && (
                               <span onClick={async (e) => {
                                 e.stopPropagation();
                                 const nv = !ch.is_hidden;
@@ -2048,17 +2142,32 @@ export default function App() {
                                 {ch.is_hidden ? '👁' : '🙈'}
                               </span>
                             )}
-                            {canModerate && (
+                            {/* ЗАСВАР #125: admin шууд устгана (R2-с зурагны хамт), moderator/editor
+                                зөвхөн ХvСЭЛТ vvсгэнэ — admin "УСТГАХ ХvСЭЛТ" tab-аас баталгаажуулна. */}
+                            {isStaff && (
                               <span onClick={async (e) => {
                                 e.stopPropagation();
-                                if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бүрмөсөн устгах уу? Энэ үйлдлийг буцаах боломжгүй.`)) return;
-                                const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
-                                if (error) { notify('Алдаа: ' + error.message); return; }
-                                setDbChapters(prev => prev.filter(x => x.id !== ch.id));
-                                notify('Бүлэг устгагдлаа 🗑');
-                              }} title="Устгах"
-                                style={{ fontSize: 16, cursor: 'pointer', padding: 4, color: '#8B0000' }}>
-                                🗑
+                                if (isAdmin) {
+                                  if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бvрмөсөн устгах уу? Энэ vйлдлийг БУЦААХ БОЛОМЖГvЙ (зурагнууд R2-с ч устна).`)) return;
+                                  const { data: images } = await supabase.from('chapter_images').select('image_url').eq('chapter_id', ch.id);
+                                  const urls = [...(images || []).map(i => i.image_url), ch.thumbnail_url].filter(Boolean);
+                                  try { await deleteFromR2(urls); } catch (err) { notify('Анхаар: зарим файл R2-с устгагдсангvй (' + err.message + ').'); }
+                                  await supabase.from('chapter_images').delete().eq('chapter_id', ch.id);
+                                  const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
+                                  if (error) { notify('Алдаа: ' + error.message); return; }
+                                  setDbChapters(prev => prev.filter(x => x.id !== ch.id));
+                                  notify('Бүлэг бvрмөсөн устгагдлаа 🗑');
+                                } else {
+                                  if (ch.pending_delete) { notify('Энэ бvлэг аль хэдийн устгах хvсэлттэй, админ шалгах хvртэл хvлээнэ vv.'); return; }
+                                  if (!window.confirm(`Бvлэг ${ch.chapter_number}-ийг устгах хvсэлт илгээх vv? Админ баталгаажуулах хvртэл хvлээгдэнэ.`)) return;
+                                  const { error } = await supabase.from('chapters').update({ pending_delete: true, delete_requested_by: currentUser.id, delete_requested_at: new Date().toISOString() }).eq('id', ch.id);
+                                  if (error) { notify('Алдаа: ' + error.message); return; }
+                                  setDbChapters(prev => prev.map(x => x.id === ch.id ? { ...x, pending_delete: true } : x));
+                                  notify('Устгах хvсэлт илгээгдлээ. Админ баталгаажуулах хvртэл хvлээнэ vv.');
+                                }
+                              }} title={ch.pending_delete ? 'Устгах хvсэлттэй' : 'Устгах'}
+                                style={{ fontSize: 16, cursor: 'pointer', padding: 4, color: ch.pending_delete ? '#f5a623' : '#8B0000' }}>
+                                {ch.pending_delete ? '⏳' : '🗑'}
                               </span>
                             )}
                             {(needsVip || locked) ? (
@@ -2193,7 +2302,8 @@ export default function App() {
                               <div style={{ fontSize: 12, color: '#dde1ea', lineHeight: 1.45, whiteSpace: 'pre-wrap', marginTop: 3 }}>{c.content}</div>
                             )}
                             {c.sticker_url && (
-                              <img src={c.sticker_url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, marginTop: 6 }} />
+                              <img src={c.sticker_url} alt="" onClick={() => setZoomedSticker(c.sticker_url)}
+                                style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, marginTop: 6, cursor: 'zoom-in' }} />
                             )}
                             <div style={{ display: 'flex', gap: 14, marginTop: 6, alignItems: 'center' }}>
                               <span onClick={() => toggleMangaCommentLike(c)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: liked ? '#e0245e' : '#8a92a6', userSelect: 'none' }}>
@@ -2337,13 +2447,20 @@ export default function App() {
                 (screenshot-с сэргийлэх боломжгүй), гэвч энгийн татаж авахыг
                 нэлээд төвөгтэй болгоно. */}
             {chapterImages.length > 0 ? (
-              <div style={{ zoom: `${readerZoom}%` }}>
-                {chapterImages.map(img => (
-                  <img key={img.id} src={img.image_url} alt={`Page ${img.page_number}`}
-                    onContextMenu={e => e.preventDefault()}
-                    draggable={false}
-                    style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }} />
-                ))}
+              // ЗАСВАР #118: CSS "zoom" нь стандарт бус тул Firefox болон Safari (тэр
+              // дундаа iPhone) дээр огт ажилладаггvй байсан (зөвхөн Chrome/Edge дэмждэг),
+              // мөн компьютер/notebook-ийн өргөн дэлгэцэд зураг ирмэг хvртэл (edge-to-edge)
+              // сунаж хэт том харагддаг байсан. Одоо бvх browser дээр ажилладаг "width: %"
+              // аргаар зуми хэрэгжvvлж, унших багана (720px)-аар хязгаарлав.
+              <div style={{ maxWidth: 720, margin: '0 auto' }}>
+                <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
+                  {chapterImages.map(img => (
+                    <img key={img.id} src={img.image_url} alt={`Page ${img.page_number}`}
+                      onContextMenu={e => e.preventDefault()}
+                      draggable={false}
+                      style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }} />
+                  ))}
+                </div>
               </div>
             ) : (
               <div style={{ color: '#555', textAlign: 'center', marginTop: '3rem' }}>Зураг ачааллаж байна эсвэл байхгүй байна...</div>
@@ -2449,7 +2566,8 @@ export default function App() {
                           <div style={{ fontSize: 12, color: '#dde1ea', lineHeight: 1.45, whiteSpace: 'pre-wrap', marginTop: 3 }}>{c.content}</div>
                         )}
                         {c.sticker_url && (
-                          <img src={c.sticker_url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, marginTop: 6 }} />
+                          <img src={c.sticker_url} alt="" onClick={() => setZoomedSticker(c.sticker_url)}
+                            style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, marginTop: 6, cursor: 'zoom-in' }} />
                         )}
                         {/* ♡ 0   💬 Хариулах */}
                         <div style={{ display: 'flex', gap: 14, marginTop: 6, alignItems: 'center' }}>
@@ -2536,6 +2654,7 @@ export default function App() {
                 { key: 'vip', label: 'VIP ОЛГОХ', show: isAdmin },
                 { key: 'payments', label: `ТӨЛБӨРИЙН ХҮСЭЛТ (${paymentRequests.length})`, show: isAdmin },
                 { key: 'pending', label: `ХҮЛЭЭГДЭЖ БУЙ (${pendingChapters.length})`, show: canModerate },
+                { key: 'deleteRequests', label: `УСТГАХ ХҮСЭЛТ (${pendingDeleteChapters.length})`, show: isAdmin },
                 { key: 'reports', label: `МЭДЭГДЭЛ (${reportsList.length})`, show: canModerate },
               ].filter(t => t.show).map(t => (
                 <div key={t.key} onClick={() => setAdminTab(t.key)}
@@ -2990,10 +3109,38 @@ export default function App() {
                     notify(`${label} эрх амжилттай олгогдлоо! 🎉`);
                     setAdminWorkerEmail('');
                     setAdminWorkerRoles([]);
+                    fetchStaffUsers();
                   }
                 }} style={{ width: '100%', background: '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
                   ЭРХ ОЛГОХ
                 </button>
+
+                {/* ЗАСВАР #121: одоо Модератор/Эдитор эрхтэй хэрэглэгчдийн жагсаалт + хураах товч */}
+                <div style={{ marginTop: '1.5rem' }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>МОДЕРАТОР/ЭДИТОР ЭРХТЭЙ ХЭРЭГЛЭГЧИД ({staffUsers.length})</div>
+                  {staffUsers.length === 0 ? (
+                    <div style={{ fontSize: 12, color: '#555' }}>Одоогоор модератор/эдитор эрхтэй хэрэглэгч алга байна.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {staffUsers.map(u => (
+                        <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#1a1a1a', borderRadius: 8, padding: '8px 12px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || u.email}</div>
+                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 3 }}>
+                              {u.roles.map(r => (
+                                <span key={r} style={{ fontSize: 9, fontWeight: 700, color: '#8B0000', border: '1px solid #8B0000', padding: '1px 8px', borderRadius: 10 }}>{(ROLE_LABELS[r] || r).toUpperCase()}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <button onClick={() => revokeStaffRole(u)}
+                            style={{ background: 'transparent', border: '1px solid #8B0000', color: '#8B0000', padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+                            ХУРААХ
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <div style={{ marginTop: '1rem', padding: '1rem', background: '#1a1a1a', borderRadius: 8, fontSize: 11, color: '#777', lineHeight: 1.7 }}>
                   💡 Мөн Supabase Dashboard → Table Editor → users хүснэгтээс role баганыг шууд засаж болно.
@@ -3170,6 +3317,60 @@ export default function App() {
               </div>
             )}
 
+            {/* ЗАСВАР #125: устгах хvсэлт — moderator/editor дарсан "Устгах" зөвхөн энд ирнэ, admin л бодитоор устгана */}
+            {adminTab === 'deleteRequests' && isAdmin && (
+              <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
+                  УСТГАХ ХҮСЭЛТ ({pendingDeleteChapters.length})
+                </div>
+                {pendingDeleteChapters.length === 0 ? (
+                  <div style={{ fontSize: 13, color: '#555' }}>Устгах хүсэлт алга ✓</div>
+                ) : pendingDeleteChapters.map(ch => (
+                  <div key={ch.id} style={{ padding: '12px 14px', background: '#1a1a1a', borderRadius: 10, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      {ch.thumbnail_url && <img src={ch.thumbnail_url} alt="" style={{ width: 60, height: 40, borderRadius: 8, objectFit: 'cover', objectPosition: 'top' }} />}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {ch.mangas?.title || 'Манга'} — Бүлэг {ch.chapter_number}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                          Хүссэн: {ch.users?.name || ch.users?.email || 'Хэрэглэгч'}{ch.delete_requested_at ? ` — ${formatMnDate(ch.delete_requested_at)}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                      <button onClick={async () => {
+                        if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бvрмөсөн устгах уу? Энэ vйлдлийг БУЦААХ БОЛОМЖГvЙ (зурагнууд R2-с ч устна).`)) return;
+                        const { data: images } = await supabase.from('chapter_images').select('image_url').eq('chapter_id', ch.id);
+                        const urls = [...(images || []).map(i => i.image_url), ch.thumbnail_url].filter(Boolean);
+                        try {
+                          await deleteFromR2(urls);
+                        } catch (e) {
+                          notify('Анхаар: зарим файл R2-с устгагдсангvй (' + e.message + '), гэхдээ мэдээллийг vргэлжлvvлж устгана.');
+                        }
+                        await supabase.from('chapter_images').delete().eq('chapter_id', ch.id);
+                        const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
+                        if (error) { notify('Алдаа: ' + error.message); return; }
+                        notify('Бvлэг бvрмөсөн устгагдлаа 🗑');
+                        fetchPendingDeleteChapters();
+                      }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                        ✓ БАТАЛГААЖУУЛАХ (УСТГАХ)
+                      </button>
+                      <button onClick={async () => {
+                        const { error } = await supabase.from('chapters').update({ pending_delete: false, delete_requested_by: null, delete_requested_at: null }).eq('id', ch.id);
+                        if (error) { notify('Алдаа: ' + error.message); return; }
+                        notify('Устгах хvсэлт татгалзагдлаа, бvлэг сэргэлээ ✓');
+                        fetchPendingDeleteChapters();
+                      }} style={{ background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                        ✕ ТАТГАЛЗАХ
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* ШИНЭ: REPORT ШАЛГАХ — moderator/admin */}
             {adminTab === 'reports' && canModerate && (
               <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
@@ -3316,6 +3517,14 @@ export default function App() {
           </div>
         )}
 
+        {/* ЗАСВАР #117: сэтгэгдэл дэх стикер зургийг дарж томруулж vзэх (lightbox) */}
+        {zoomedSticker && (
+          <div onClick={() => setZoomedSticker(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 24, cursor: 'zoom-out' }}>
+            <img src={zoomedSticker} alt="" style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 12 }} />
+          </div>
+        )}
+
         {/* ШИНЭ: МАНГА ЗАСАХ цонх */}
         {editManga && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 16 }}>
@@ -3407,6 +3616,152 @@ export default function App() {
                 notify('Манга шинэчлэгдлээ! 🎉');
               }} style={{ width: '100%', background: editSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
                 {editSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #124: БҮЛЭГ ЗАСАХ цонх — cover зураг солих, хуудсын зураг нэмэх/хасах/дараалал солих */}
+        {editChapter && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 16 }}>
+            <div style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', background: '#111', border: '1px solid #222', borderRadius: 20, padding: '2rem', position: 'relative', boxSizing: 'border-box' }}>
+              <span onClick={() => setEditChapter(null)} style={{ position: 'absolute', top: 16, right: 20, cursor: 'pointer', fontSize: 20, color: '#555' }}>✕</span>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: '1.5rem' }}>БҮЛЭГ ЗАСАХ</div>
+
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БҮЛГИЙН ДУГААР</div>
+                  <input type="number" value={editChapterForm.chapter_number} onChange={e => setEditChapterForm({ ...editChapterForm, chapter_number: e.target.value })}
+                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ flex: 2 }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БҮЛГИЙН НЭР</div>
+                  <input value={editChapterForm.title} onChange={e => setEditChapterForm({ ...editChapterForm, title: e.target.value })}
+                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ТЭМДЭГЛЭГЭЭ (заавал биш, жишээ нь: S1 END)</div>
+                <input value={editChapterForm.label} onChange={e => setEditChapterForm({ ...editChapterForm, label: e.target.value })}
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, cursor: 'pointer', fontSize: 13, color: '#aaa' }}>
+                <input type="checkbox" checked={editChapterForm.is_vip} onChange={e => setEditChapterForm({ ...editChapterForm, is_vip: e.target.checked })}
+                  style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
+                VIP бүлэг (зөвхөн эрхтэй хэрэглэгч уншина)
+              </label>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>COVER ЗУРАГ (заавал биш — солихгvй бол хуучнаараа vлдэнэ)</div>
+                {editChapter.thumbnail_url && (
+                  <img src={editChapter.thumbnail_url} alt="" style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, marginBottom: 8, display: 'block', border: '1px solid #2a2a2a' }} />
+                )}
+                <input type="file" accept="image/*" onChange={e => setEditChapterCoverFile(e.target.files[0] || null)}
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ОДОО БАЙГАА ЗУРАГНУУД ({editChapterExistingImages.length})</div>
+                {editChapterExistingImages.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: 260, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
+                    {editChapterExistingImages.map((img, i) => (
+                      <div key={img.id} style={{ position: 'relative', width: 76 }}>
+                        <img src={img.image_url} alt={`${i + 1}`} style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
+                        <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{i + 1}</div>
+                        <span onClick={() => setEditChapterExistingImages(prev => prev.filter((_, idx) => idx !== i))}
+                          title="Устгах"
+                          style={{ position: 'absolute', top: 3, right: 3, background: 'rgba(139,0,0,0.9)', color: '#fff', fontSize: 11, width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, gap: 4 }}>
+                          <span onClick={() => i > 0 && setEditChapterExistingImages(prev => { const arr = [...prev]; [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; return arr; })}
+                            title="Зvvн тийш зөөх"
+                            style={{ flex: 1, textAlign: 'center', cursor: i > 0 ? 'pointer' : 'default', opacity: i > 0 ? 1 : 0.25, fontSize: 12, color: '#ccc', padding: '3px 0', background: '#1a1a1a', borderRadius: 4 }}>◀</span>
+                          <span onClick={() => i < editChapterExistingImages.length - 1 && setEditChapterExistingImages(prev => { const arr = [...prev]; [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]; return arr; })}
+                            title="Баруун тийш зөөх"
+                            style={{ flex: 1, textAlign: 'center', cursor: i < editChapterExistingImages.length - 1 ? 'pointer' : 'default', opacity: i < editChapterExistingImages.length - 1 ? 1 : 0.25, fontSize: 12, color: '#ccc', padding: '3px 0', background: '#1a1a1a', borderRadius: 4 }}>▶</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: '#555' }}>Зураг алга.</div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ШИНЭ ЗУРАГ НЭМЭХ (жагсаалтын төгсгөлд нэмэгдэнэ)</div>
+                <input type="file" accept="image/*" multiple
+                  onChange={e => { const picked = Array.from(e.target.files); setEditChapterNewFiles(prev => [...prev, ...picked]); e.target.value = ''; }}
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
+                {editChapterNewFiles.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, maxHeight: 260, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
+                    {editChapterNewFiles.map((file, i) => (
+                      <div key={i} style={{ position: 'relative', width: 76 }}>
+                        <img src={editChapterNewFileUrls[i]} alt="" style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
+                        <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{editChapterExistingImages.length + i + 1}</div>
+                        <span onClick={() => setEditChapterNewFiles(prev => prev.filter((_, idx) => idx !== i))}
+                          title="Устгах"
+                          style={{ position: 'absolute', top: 3, right: 3, background: 'rgba(139,0,0,0.9)', color: '#fff', fontSize: 11, width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button disabled={editChapterSaving} onClick={async () => {
+                if (!editChapterForm.chapter_number) { notify('Бvлгийн дугаар оруулна уу!'); return; }
+                if (editChapterExistingImages.length === 0 && editChapterNewFiles.length === 0) { notify('Дор хаяж 1 зураг vлдэх ёстой!'); return; }
+                const badFile = [editChapterCoverFile, ...editChapterNewFiles].filter(Boolean).map(validateImageFile).find(Boolean);
+                if (badFile) { notify(badFile); return; }
+                setEditChapterSaving(true);
+
+                const updates = {
+                  chapter_number: Number(editChapterForm.chapter_number),
+                  title: editChapterForm.title.trim() || `Бvлэг ${editChapterForm.chapter_number}`,
+                  label: editChapterForm.label.trim() || null,
+                  is_vip: editChapterForm.is_vip,
+                };
+                if (editChapterCoverFile) {
+                  const ext = editChapterCoverFile.name.split('.').pop();
+                  try {
+                    updates.thumbnail_url = await uploadToR2(editChapterCoverFile, `chapters/${editChapter.id}/cover-${Date.now()}.${ext}`);
+                  } catch (e) { notify('Cover upload алдаа: ' + e.message); setEditChapterSaving(false); return; }
+                }
+
+                const { error: chError } = await supabase.from('chapters').update(updates).eq('id', editChapter.id);
+                if (chError) { notify('Алдаа: ' + chError.message); setEditChapterSaving(false); return; }
+
+                // Устгагдсан (жагсаалтаас хассан) зургуудыг DB-с хасна
+                const keptIds = editChapterExistingImages.map(img => img.id);
+                const removedIds = editChapterInitialImageIds.current.filter(id => !keptIds.includes(id));
+                if (removedIds.length > 0) {
+                  await supabase.from('chapter_images').delete().in('id', removedIds);
+                }
+                // Vлдсэн зургуудын дарааллыг (page_number) шинэчилнэ
+                for (let i = 0; i < editChapterExistingImages.length; i++) {
+                  const img = editChapterExistingImages[i];
+                  if (img.page_number !== i + 1) {
+                    await supabase.from('chapter_images').update({ page_number: i + 1 }).eq('id', img.id);
+                  }
+                }
+                // Шинэ зургуудыг upload хийж, vлдсэн зургуудын араас дараалуулж нэмнэ
+                let nextPage = editChapterExistingImages.length + 1;
+                for (const file of editChapterNewFiles) {
+                  const ext = file.name.split('.').pop();
+                  try {
+                    const url = await uploadToR2(file, `chapters/${editChapter.id}/${Date.now()}-${nextPage}.${ext}`);
+                    await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage });
+                    nextPage++;
+                  } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); }
+                }
+
+                setEditChapterSaving(false);
+                setDbChapters(prev => prev.map(x => x.id === editChapter.id ? { ...x, ...updates } : x));
+                setEditChapter(null);
+                notify('Бvлэг шинэчлэгдлээ! 🎉');
+              }} style={{ width: '100%', background: editChapterSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editChapterSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
+                {editChapterSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
               </button>
             </div>
           </div>

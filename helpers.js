@@ -30,6 +30,22 @@ export const uploadToR2 = async (file, path) => {
   return data.publicUrl;
 };
 
+// ЗАСВАР #125: R2 дээрх бодит файлыг устгах (зөвхөн админ, серверт дахин шалгагдана).
+// urls нь uploadToR2-с буцсан бvтэн public URL-ууд байна — path-ыг нь server
+// талд R2_PUBLIC_BASE_URL-аар нь тайрч тооцно.
+export const deleteFromR2 = async (urls) => {
+  if (!urls || urls.length === 0) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-to-r2`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Устгах алдаа гарлаа');
+  return data;
+};
+
 // "2026 оны 6-р сарын 25" маягийн огноо
 export const formatMnDate = (dateStr) => {
   const d = new Date(dateStr);
