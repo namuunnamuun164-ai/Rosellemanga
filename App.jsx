@@ -30,7 +30,7 @@ export default function App() {
   const [dbMangas, setDbMangas] = useState([]);
   const [authPage, setAuthPage] = useState(null);
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
-  // ШИНЭ: нууц үг сэргээх урсгал (имэйлээр 6 оронтой код)
+  // ШИНЭ: нууц үг сэргээх урсгал (имэйлээр 8 оронтой код)
   const [resetCode, setResetCode] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [resetSending, setResetSending] = useState(false);
@@ -520,7 +520,7 @@ export default function App() {
       });
   }, []);
 
-  // ШИНЭ: нууц үг сэргээх — имэйл рүү 6 оронтой код илгээнэ
+  // ШИНЭ: нууц үг сэргээх — имэйл рүү 8 оронтой код илгээнэ
   // (Supabase талд Authentication → Email Templates → Reset Password загварт
   // холбоос ({{ .ConfirmationURL }})-ны оронд {{ .Token }} гэж тавьсан байх ёстой,
   // эс тэгвэл имэйлд код биш холбоос ирнэ).
@@ -535,7 +535,7 @@ export default function App() {
     setResetNewPassword('');
     setAuthPage('reset');
     setResendCooldown(30); // ЗАСВАР #40: дахин илгээхэд 30 секундын хүлээлт
-    notify('Танд 6 оронтой баталгаажуулах код имэйлээр илгээгдлээ 📧');
+    notify('Танд 8 оронтой баталгаажуулах код имэйлээр илгээгдлээ 📧');
   };
 
   // Дахин илгээх хүлээлтийн секундыг 1 секунд тутам бууруулна
@@ -547,7 +547,7 @@ export default function App() {
 
   // ШИНЭ: илгээсэн кодыг шалгаад шинэ нууц үгийг хадгална
   const confirmResetCode = async () => {
-    if (resetCode.trim().length !== 6) { notify('6 оронтой кодоо бүрэн оруулна уу!'); return; }
+    if (resetCode.trim().length !== 8) { notify('8 оронтой кодоо бүрэн оруулна уу!'); return; }
     if (resetNewPassword.length < 6) { notify('Шинэ нууц үг 6-с дээш тэмдэгттэй байх ёстой!'); return; }
     setResetSending(true);
     const { error: verifyError } = await supabase.auth.verifyOtp({
@@ -1150,7 +1150,9 @@ export default function App() {
     let cancelled = false;
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const threeDaysAhead = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
-    supabase.from('chapters').select('*, mangas(title, poster_url)')
+    // ЗАСВАР #151: is_hidden-г ч сонгоно — эс тэгвэл нуугдсан манганы бvлэг
+    // guest хэрэглэгчид "нэргvй" (ch.mangas null болж) харагдах эрсдэлтэй
+    supabase.from('chapters').select('*, mangas(title, poster_url, is_hidden)')
       .not('publish_at', 'is', null)
       .gte('publish_at', threeDaysAgo)
       .lte('publish_at', threeDaysAhead)
@@ -1475,7 +1477,7 @@ export default function App() {
             {authPage === 'forgot' && (
               <>
                 <div style={{ fontSize: 13, color: '#888', marginBottom: 16, lineHeight: 1.6 }}>
-                  Бүртгэлтэй имэйлээ оруулна уу. Бид танд 6 оронтой баталгаажуулах код илгээх болно.
+                  Бүртгэлтэй имэйлээ оруулна уу. Бид танд 8 оронтой баталгаажуулах код илгээх болно.
                 </div>
                 <div style={{ marginBottom: '1.5rem' }}>
                   <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>ИМЭЙЛ</div>
@@ -1497,13 +1499,13 @@ export default function App() {
             {authPage === 'reset' && (
               <>
                 <div style={{ fontSize: 13, color: '#888', marginBottom: 16, lineHeight: 1.6 }}>
-                  <strong style={{ color: '#fff' }}>{authForm.email}</strong> хаяг руу илгээсэн 6 оронтой кодыг оруулна уу.
+                  <strong style={{ color: '#fff' }}>{authForm.email}</strong> хаяг руу илгээсэн 8 оронтой кодыг оруулна уу.
                 </div>
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>6 ОРОНТОЙ КОД</div>
-                  <input value={resetCode} inputMode="numeric" maxLength={6}
-                    onChange={e => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="000000"
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>8 ОРОНТОЙ КОД</div>
+                  <input value={resetCode} inputMode="numeric" maxLength={8}
+                    onChange={e => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="00000000"
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 20, letterSpacing: 8, textAlign: 'center', outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ marginBottom: '1.5rem' }}>
@@ -1776,7 +1778,7 @@ export default function App() {
                 <SectionHeader title="ШИНЭ БҮЛЭГ" onClick={() => { setPreviousPage('home'); setAllCategory('recentChapter'); setPage('all'); }} />
                 <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                   {recentChapters
-                    .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
+                    .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader({ id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
@@ -1886,7 +1888,7 @@ export default function App() {
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
                   {recentChapters
-                    .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
+                    .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader({ id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
@@ -1901,7 +1903,7 @@ export default function App() {
                       </div>
                     ))}
                 </div>
-                {recentChapters.filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch))).length === 0 && (
+                {recentChapters.filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch))).length === 0 && (
                   <div style={{ color: '#555', textAlign: 'center', marginTop: '4rem' }}>Илэрц олдсонгүй</div>
                 )}
               </>
@@ -1955,7 +1957,9 @@ export default function App() {
                 // ЗАСВАР #21: тухайн долоо хоногт унах тодорхой цагт товлогдсон бүлгүүд
                 // (scheduledChapters аль хэдийн ±3 хоногийн цонхонд хязгаарлагдсан тул
                 // getDay()-ээр хуваарилах нь давхцалгvй найдвартай)
-                const dayChapters = scheduledChapters.filter(ch => new Date(ch.publish_at).getDay() === d);
+                // ЗАСВАР #151: нуугдсан манганы бvлгийг (staff-аас бусдад) харуулахгvй —
+                // эс тэгвэл ch.mangas RLS-ээр null болж, гарчиг/зураггvй "хоосон" мөр харагдана
+                const dayChapters = scheduledChapters.filter(ch => new Date(ch.publish_at).getDay() === d && (isStaff || (ch.mangas && !ch.mangas.is_hidden)));
                 const isToday = d === new Date().getDay();
                 return (
                   <div style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid rgba(139,0,0,0.4)' : '1px solid #1c2230', borderRadius: 14, padding: '1rem' }}>
@@ -3820,8 +3824,12 @@ export default function App() {
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={() => {
+                  // ЗАСВАР #152: selected-ийг null болгодог байсныг хассан —
+                  // хэрэв previousPage нь 'detail' байвал (өөр манга хуудаснаас
+                  // энд орсон vед) page='detail' + selected=null гэсэн эвдэрсэн
+                  // төлөвт орж, "мэдээлэл дутуу" манга хуудас харагддаг байсан.
+                  // Бусад "Буцах" товчнуудтай адил зөвхөн page-г л сэргээнэ.
                   setSmutWarningOpen(false);
-                  setSelected(null);
                   setPage(previousPage);
                 }} style={{ flex: 1, background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', padding: '10px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
                   БУЦАХ
