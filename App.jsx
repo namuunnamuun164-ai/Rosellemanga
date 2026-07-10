@@ -1649,7 +1649,7 @@ export default function App() {
                     }
                     heroTouchX.current = null;
                   }}
-                  style={{ position: 'relative', height: 220, overflow: 'hidden', cursor: 'pointer', borderRadius: 16, border: '1px solid #232a38' }}>
+                  style={{ position: 'relative', height: isMobile ? 220 : 400, overflow: 'hidden', cursor: 'pointer', borderRadius: 16, border: '1px solid #232a38' }}>
                   {recommendedMangas.map((m, i) => (
                     <div key={m.id} style={{ position: 'absolute', inset: 0, opacity: heroIndex === i ? 1 : 0, transition: 'opacity 0.9s ease' }}>
                       <img src={m.banner_url || m.poster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
