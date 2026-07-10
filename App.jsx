@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu } from './icons';
 import { PasswordField } from './PasswordField';
 
@@ -67,7 +67,7 @@ export default function App() {
   const [editSaving, setEditSaving] = useState(false);
   // ЗАСВАР #124: оруулсан бvлгийг засах (cover зураг солих, хуудсын зураг нэмэх/хасах/дараалал солих)
   const [editChapter, setEditChapter] = useState(null);
-  const [editChapterForm, setEditChapterForm] = useState({ chapter_number: '', title: '', label: '', is_vip: false });
+  const [editChapterForm, setEditChapterForm] = useState({ chapter_number: '', title: '', label: '', is_vip: false, publish_at: '' });
   const [editChapterCoverFile, setEditChapterCoverFile] = useState(null);
   const [editChapterExistingImages, setEditChapterExistingImages] = useState([]); // DB-д байгаа [{id, image_url, page_number}]
   const [editChapterNewFiles, setEditChapterNewFiles] = useState([]); // шинээр нэмэх файлууд
@@ -82,9 +82,21 @@ export default function App() {
   // ЗАСВАР #124: хадгалахдаа анх татсан зурагнуудаас алийг нь хассаныг мэдэхийн тулд
   // анхны id-нуудыг тусад нь хадгална (устгагдсан мөрийг ганцаарчлан хасахын тулд)
   const editChapterInitialImageIds = useRef([]);
+  // ЗАСВАР #145: гарах цагийг эдитлээд өөрчилсөн эсэхийг мэдэхийн тулд анхны
+  // (DB-д байгаа) утгыг хадгална — өөрчилсөн vед л created_at-ыг "одоо" болгож,
+  // бvлгийг шинэ мэт "ШИНЭ БvЛЭГ" мөрөнд дахин гаргана.
+  const editChapterInitialPublishAt = useRef(null);
+  // datetime-local input-д тохирох "YYYY-MM-DDTHH:mm" (локал цагийн бvс) формат руу хөрвvvлнэ
+  const toLocalDateTimeInput = (isoString) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
   // ЗАСВАР #124: бvлэг засах цонхыг нээж, тухайн бvлгийн одоогийн зургуудыг татна
   const openEditChapter = (ch) => {
-    setEditChapterForm({ chapter_number: String(ch.chapter_number), title: ch.title || '', label: ch.label || '', is_vip: ch.is_vip || false });
+    setEditChapterForm({ chapter_number: String(ch.chapter_number), title: ch.title || '', label: ch.label || '', is_vip: ch.is_vip || false, publish_at: toLocalDateTimeInput(ch.publish_at) });
+    editChapterInitialPublishAt.current = ch.publish_at || null;
     setEditChapterCoverFile(null);
     setEditChapterNewFiles([]);
     setEditChapter(ch);
@@ -257,6 +269,14 @@ export default function App() {
 
   // ШИНЭ: тодорхой цагт (publish_at) товлогдсон бүлгүүд — хуваарийн хуудсанд харуулна
   const [scheduledChapters, setScheduledChapters] = useState([]);
+  // ЗАСВАР #147: Хуваарь хуудсыг comic app шиг өдөр тус бvрийн ТАБ (тухайн
+  // vед зөвхөн 1 өдрийн агуулга харагдана) болгов — 7 хоногийн дараалал нь
+  // Даваа-с (хэвийн долоо хоногийн дараалал) хэвээрээ, гэхдээ хуудас нээгдэх
+  // бvрт ЭНЭ ӨДРИЙН таб автоматаар сонгогдоно.
+  const [scheduleDay, setScheduleDay] = useState(() => new Date().getDay());
+  useEffect(() => {
+    if (page === 'schedule') setScheduleDay(new Date().getDay());
+  }, [page]);
   // ЗАСВАР #44: нүүр хэсгийн "ШИНЭ БҮЛЭГ" одоо мангаар биш, БҮЛЭГ бүрээр (өөрийн
   // cover зурагтайгаа) харуулна — 1 манга 10 бүлэг гаргавал 10 тусдаа карт гарна
   const [recentChapters, setRecentChapters] = useState([]);
@@ -274,6 +294,17 @@ export default function App() {
     const t = setInterval(() => setNowTs(Date.now()), 30000);
     return () => clearInterval(t);
   }, []);
+
+  // ЗАСВАР #146: Хуваарь хуудсанд секунд бvрээр тоологддог (жишээ нь 12:15:28)
+  // цаг харуулах тул зөвхөн тэр хуудсан дээр байх vед л 1 секунд тутам сэргээнэ
+  // (бусад хуудсанд 30 сек хангалттай тул илишдэн re-render хийхгvй).
+  const [scheduleNowTs, setScheduleNowTs] = useState(Date.now());
+  useEffect(() => {
+    if (page !== 'schedule') return;
+    setScheduleNowTs(Date.now());
+    const t = setInterval(() => setScheduleNowTs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [page]);
 
   // ШИНЭ: цонхны хэмжээгээр утас/компьютер горимыг мэдэрнэ (hamburger цэс)
   useEffect(() => {
@@ -300,6 +331,24 @@ export default function App() {
 
   // Товлосон цаг нь болоогүй бүлэг эсэх
   const chapterLocked = (ch) => ch.publish_at && new Date(ch.publish_at).getTime() > nowTs;
+
+  // ЗАСВАР #146: admin "ГАРАХ ХУВААРЬ" хуудаснаас тодорхой бvлгийн товлолтыг
+  // (эсвэл манганы 7 хоног бvрийн давтагдах хуваарийг) гараар устгаж болно —
+  // бvлэг/мангаг vvнээр бvрэн устгахгvй, зөвхөн ХУВААРИАС нь хасна.
+  const removeChapterSchedule = async (ch) => {
+    if (!window.confirm(`Бvлэг ${ch.chapter_number}-ийн товлолтыг хуваариас хасах уу?`)) return;
+    const { error } = await supabase.from('chapters').update({ publish_at: null }).eq('id', ch.id);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    setScheduledChapters(prev => prev.filter(x => x.id !== ch.id));
+    notify('Товлолт хуваариас хасагдлаа.');
+  };
+  const removeMangaSchedule = async (m) => {
+    if (!window.confirm(`"${m.title}"-ийн 7 хоног бvрийн хуваарийг хасах уу?`)) return;
+    const { error } = await supabase.from('mangas').update({ schedule_day: null, schedule_time: null }).eq('id', m.id);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    setDbMangas(prev => prev.map(x => x.id === m.id ? { ...x, schedule_day: null, schedule_time: null } : x));
+    notify('Хуваариас хасагдлаа.');
+  };
 
   // ЗАСВАР #95: нэвтрэхэд Supabase-с хадгалсан манга + унших явцыг татаж ирнэ;
   // гарахад (logout) локал state-ийг цэвэрлэнэ (DB-д хэвээрээ үлдэнэ).
@@ -1075,16 +1124,23 @@ export default function App() {
     }
   }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters]);
 
-  // ЗАСВАР #21: тодорхой цагт (publish_at) товлогдсон ирээдүйн бүлгүүдийг татаж,
+  // ЗАСВАР #21: тодорхой цагт (publish_at) товлогдсон бvлгvvдийг татаж,
   // хуваарийн хуудсанд манга-түвшний долоо хоногийн хуваариас гадна харуулна
   // (өмнө нь энэ хуудас зөвхөн mangas.schedule_day ашигладаг байсан тул нэг
   // өдөрт олон бүлэг товлогдсон ч харагддаггүй байсан).
+  // ЗАСВАР #146: өмнө нь зөвхөн ИРЭЭДvЙН (гарч амжаагvй) бvлгvvдийг татдаг байсан
+  // тул гарсны дараа шууд алга болдог байв. Одоо өнгөрсөн 3 хоног + ирээдvйн
+  // 3 хоногийн (нийт 7 хоногийн) цонхыг л татна — 3 хоногоос хэтэрсэн өнгөрсөн
+  // мэдээлэл автоматаар (дараагийн ачаалалтаас) харагдахгvй болно.
   useEffect(() => {
     if (page !== 'schedule') return;
     let cancelled = false;
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const threeDaysAhead = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     supabase.from('chapters').select('*, mangas(title, poster_url)')
       .not('publish_at', 'is', null)
-      .gte('publish_at', new Date().toISOString())
+      .gte('publish_at', threeDaysAgo)
+      .lte('publish_at', threeDaysAhead)
       .order('publish_at')
       .then(({ data }) => { if (!cancelled) setScheduledChapters(data || []); });
     return () => { cancelled = true; };
@@ -1856,19 +1912,36 @@ export default function App() {
                 хассан — одоо зөвхөн "БҮЛЭГ НЭМЭХ" дэх "Гарах цаг товлох" талбараар
                 л энэ хуудсанд автоматаар харагдана (dayChapters). */}
 
-            {/* ЗАСВАР #28: 7 хоногийг хажуу хажуугаар (багана) биш, доошоо цувсан
-                мөр мөрөөр харуулж, дотор нь нягт жагсаалт (compact) хэлбэрээр
-                бүлгийн cover зураг + нэр + бүлгийн дугаар + цагийг харуулна. */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* ЗАСВАР #147: 7 хоногийг доошоо 7 карт биш, comic app-vvдийн шиг
+                дээшээ мөр болгож ТАБ-аар сонгодог болгов — дараалал нь хэвийн
+                долоо хоногийн Даваа-с эхэлдэг дараалал хэвээрээ, гэхдээ хуудас
+                нээгдэх бvрт ӨНӨӨДРИЙН таб автоматаар сонгогдоно. */}
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: '1.25rem' }} className="scroll-row">
               {[1, 2, 3, 4, 5, 6, 0].map(d => {
+                const isToday = d === new Date().getDay();
+                const isSelected = d === scheduleDay;
+                return (
+                  <div key={d} onClick={() => setScheduleDay(d)}
+                    style={{ flexShrink: 0, cursor: 'pointer', padding: '8px 16px', borderRadius: 10, textAlign: 'center', background: isSelected ? '#8B0000' : '#0f1219', border: isSelected ? '1px solid #8B0000' : '1px solid #1c2230' }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: '#fff' }}>{DAYS[d]}</div>
+                    {isToday && <div style={{ fontSize: 8, color: isSelected ? '#fff' : '#8B0000', fontWeight: 700, marginTop: 2 }}>ӨНӨӨДӨР</div>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {(() => {
+                const d = scheduleDay;
                 {/* ЗАСВАР #72: schedule_day нь NULL үед Number(null) === 0 болж, хуваарьгүй
                     манга бүгд "Ням" гарагт орж ирдэг байсан алдааг засав */}
                 const dayMangas = dbMangas.filter(m => m.schedule_day != null && Number(m.schedule_day) === d);
                 // ЗАСВАР #21: тухайн долоо хоногт унах тодорхой цагт товлогдсон бүлгүүд
+                // (scheduledChapters аль хэдийн ±3 хоногийн цонхонд хязгаарлагдсан тул
+                // getDay()-ээр хуваарилах нь давхцалгvй найдвартай)
                 const dayChapters = scheduledChapters.filter(ch => new Date(ch.publish_at).getDay() === d);
-                const isToday = new Date().getDay() === d;
+                const isToday = d === new Date().getDay();
                 return (
-                  <div key={d} style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid #8B0000' : '1px solid #1c2230', borderRadius: 14, padding: '1rem' }}>
+                  <div style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid #8B0000' : '1px solid #1c2230', borderRadius: 14, padding: '1rem' }}>
                     <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8, color: isToday ? '#8B0000' : '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
                       {DAYS[d]}
                       {isToday && <span style={{ fontSize: 9, background: '#8B0000', color: '#fff', padding: '2px 8px', borderRadius: 10 }}>ӨНӨӨДӨР</span>}
@@ -1879,41 +1952,72 @@ export default function App() {
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         {dayMangas.map((m, i) => {
                           const next = nextScheduleDate(m.schedule_day, m.schedule_time);
+                          const remainingMs = next ? next.getTime() - scheduleNowTs : null;
                           return (
                             <div key={`m${m.id}`} onClick={() => goToDetail(m)}
                               style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', padding: '8px 0', borderTop: i > 0 ? '1px solid #1c2230' : 'none' }}>
                               <img src={m.poster} alt="" style={{ width: 46, height: 62, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
-                                <div style={{ fontSize: 11, color: '#fff', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                  {String(m.schedule_time).slice(0, 5)}{next ? ` · Үлдсэн: ${formatRemaining(next.getTime() - nowTs)}` : ''}
-                                </div>
+                                {/* ЗАСВАР #146: schedule_time тохируулаагvй vед (жишээ нь зөвхөн
+                                    өдөр сонгосон) харагдаж болзошгvй байсан эвдэрсэн ("null")
+                                    бичвэрийг арилгаж, цаг байгаа vед л мөрийг харуулна */}
+                                {m.schedule_time && (
+                                  <div style={{ fontSize: 11, color: '#fff', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                    {String(m.schedule_time).slice(0, 5)}
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                                {/* ЗАСВАР #146: баруун дээд буланд цэвэрхэн "цаг:минут:секунд"
+                                    countdown (шар биш цагаан, жижиг, "мин" гэх мэт vггvй) */}
+                                {remainingMs != null && remainingMs > 0 && (
+                                  <div style={{ fontSize: 10, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</div>
+                                )}
+                                {isAdmin && (
+                                  <span onClick={e => { e.stopPropagation(); removeMangaSchedule(m); }} title="Хуваариас хасах"
+                                    style={{ fontSize: 13, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
+                                )}
                               </div>
                             </div>
                           );
                         })}
-                        {dayChapters.map((ch, i) => (
-                          <div key={`c${ch.id}`} onClick={() => goToDetail({ id: ch.manga_id, title: ch.mangas?.title, poster: ch.mangas?.poster_url })}
-                            style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', padding: '8px 0', borderTop: (dayMangas.length > 0 || i > 0) ? '1px solid #1c2230' : 'none' }}>
-                            <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: 46, height: 62, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {ch.mangas?.title || 'Манга'} — Бүлэг {ch.chapter_number}
+                        {dayChapters.map((ch, i) => {
+                          const remainingMs = new Date(ch.publish_at).getTime() - scheduleNowTs;
+                          // ЗАСВАР #146: бvлэгт өөрийн гэсэн нэр (default "Бvлэг N"-ээс өөр)
+                          // оруулсан бол мангeны нэр + бvлгийн дугаарын хамт харуулна
+                          const hasCustomTitle = ch.title && ch.title.trim() && ch.title.trim() !== `Бvлэг ${ch.chapter_number}`;
+                          return (
+                            <div key={`c${ch.id}`} onClick={() => goToDetail({ id: ch.manga_id, title: ch.mangas?.title, poster: ch.mangas?.poster_url })}
+                              style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', padding: '8px 0', borderTop: (dayMangas.length > 0 || i > 0) ? '1px solid #1c2230' : 'none' }}>
+                              <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: 46, height: 62, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {ch.mangas?.title || 'Манга'} — Бүлэг {ch.chapter_number}{hasCustomTitle ? ` · ${ch.title}` : ''}
+                                </div>
+                                <div style={{ fontSize: 11, color: '#fff', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                  {String(ch.publish_at).slice(11, 16)}
+                                </div>
                               </div>
-                              <div style={{ fontSize: 11, color: '#fff', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                {String(ch.publish_at).slice(11, 16)} · Үлдсэн: {formatRemaining(new Date(ch.publish_at).getTime() - nowTs)}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                                {remainingMs > 0 && (
+                                  <div style={{ fontSize: 10, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</div>
+                                )}
+                                {isAdmin && (
+                                  <span onClick={e => { e.stopPropagation(); removeChapterSchedule(ch); }} title="Хуваариас хасах"
+                                    style={{ fontSize: 13, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
+                                )}
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
                 );
-              })}
-            </div>
+              })()}
           </div>
         )}
 
@@ -1941,7 +2045,14 @@ export default function App() {
                   <video
                     ref={el => { if (el) reelVideoRefs.current[reel.id] = el; else delete reelVideoRefs.current[reel.id]; }}
                     src={reel.video_url} muted={reelsMuted} loop playsInline
-                    onClick={e => { e.currentTarget.paused ? e.currentTarget.play().catch(() => {}) : e.currentTarget.pause(); }}
+                    // ЗАСВАР #143: реел дээр дарахад тоглуулах/зогсоохоос гадна дуугvй
+                    // (бvгд өгөгдмөлөөр дуугvй эхэлдэг, browser-ийн autoplay
+                    // бодлогын улмаас) байвал дууг нь ч нээнэ — өмнө нь зөвхөн
+                    // буланд байрлах жижиг дуут дvрс дарж л дуу нээгддэг байсан.
+                    onClick={e => {
+                      if (reelsMuted) setReelsMuted(false);
+                      e.currentTarget.paused ? e.currentTarget.play().catch(() => {}) : e.currentTarget.pause();
+                    }}
                     style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', cursor: 'pointer' }} />
 
                   <button onClick={() => setPage('home')} title="Буцах"
@@ -3400,23 +3511,31 @@ export default function App() {
                         style={{ background: '#111', border: '1px solid #2a2a2a', borderRadius: 8, padding: '6px 10px', color: '#fff', fontSize: 12, outline: 'none', colorScheme: 'dark' }} />
                       <button onClick={async () => {
                         const t = pendingTimes[ch.id];
-                        const { error } = await supabase.from('chapters').update({
+                        // ЗАСВАР #144: олон moderator зэрэг нэг цонхыг нээж байвал, нэг
+                        // moderator шийдвэрлэсний дараа нөгөөгийнх нь жагсаалт (realtime
+                        // бус тул) шинэчлэгдэхгvй хуучин хэвээрээ vлдэнэ — тэр vед
+                        // хоёр дахь moderator дахин "БАТЛАХ" дарвал .eq('status','pending')
+                        // нэмж шалгаж, аль хэдийн шийдвэрлэгдсэн бол давхар өөрчлөхгvй.
+                        const { data, error } = await supabase.from('chapters').update({
                           status: 'published',
                           publish_at: t ? new Date(t).toISOString() : null,
-                        }).eq('id', ch.id);
-                        if (error) notify('Алдаа: ' + error.message);
-                        else {
+                        }).eq('id', ch.id).eq('status', 'pending').select();
+                        if (error) { notify('Алдаа: ' + error.message); return; }
+                        if (!data || data.length === 0) {
+                          notify('Энэ бvлгийг өөр moderator аль хэдийн шалгасан байна.');
+                        } else {
                           notify(t ? `Батлагдлаа! ${formatMnDate(t)}-нд нийтлэгдэнэ 🕐` : 'Бүлэг шууд нийтлэгдлээ! ✅');
-                          fetchPending();
                         }
+                        fetchPending();
                       }} style={{ background: '#1e5c2e', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                         ✓ БАТЛАХ
                       </button>
                       <button onClick={async () => {
                         if (!window.confirm('Энэ бүлгийг татгалзах уу?')) return;
-                        const { error } = await supabase.from('chapters').update({ status: 'rejected' }).eq('id', ch.id);
-                        if (error) notify('Алдаа: ' + error.message);
-                        else fetchPending();
+                        const { data, error } = await supabase.from('chapters').update({ status: 'rejected' }).eq('id', ch.id).eq('status', 'pending').select();
+                        if (error) { notify('Алдаа: ' + error.message); return; }
+                        if (!data || data.length === 0) notify('Энэ бvлгийг өөр moderator аль хэдийн шалгасан байна.');
+                        fetchPending();
                       }} style={{ background: 'rgba(139,0,0,0.2)', color: '#8B0000', border: '1px solid #8B0000', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                         ✕ ТАТГАЛЗАХ
                       </button>
@@ -3798,6 +3917,15 @@ export default function App() {
                 VIP бүлэг (зөвхөн эрхтэй хэрэглэгч уншина)
               </label>
 
+              {/* ЗАСВАР #145: гарах цагийг эндээс ч засаж болно. Хэрэв цагийг
+                  өөрчилвөл, хадгалахад бvлэг шинээр нэмэгдсэн мэт "ШИНЭ БvЛЭГ"
+                  мөрөнд дахин гарна (created_at нь "одоо" болж шинэчлэгдэнэ). */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ГАРАХ ЦАГ (заавал биш — өөрчилбол "ШИНЭ БvЛЭГ" мөрөнд дахин гарна)</div>
+                <input type="datetime-local" value={editChapterForm.publish_at} onChange={e => setEditChapterForm({ ...editChapterForm, publish_at: e.target.value })}
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', colorScheme: 'dark', boxSizing: 'border-box' }} />
+              </div>
+
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>COVER ЗУРАГ (заавал биш — солихгvй бол хуучнаараа vлдэнэ)</div>
                 {editChapter.thumbnail_url && (
@@ -3861,12 +3989,19 @@ export default function App() {
                 if (badFile) { notify(badFile); return; }
                 setEditChapterSaving(true);
 
+                // ЗАСВАР #145: гарах цагийг өөрчилсөн эсэхийг анхны утгатай нь харьцуулна
+                const newPublishAtIso = editChapterForm.publish_at ? new Date(editChapterForm.publish_at).toISOString() : null;
+                const publishAtChanged = newPublishAtIso !== editChapterInitialPublishAt.current;
                 const updates = {
                   chapter_number: Number(editChapterForm.chapter_number),
                   title: editChapterForm.title.trim() || `Бvлэг ${editChapterForm.chapter_number}`,
                   label: editChapterForm.label.trim() || null,
                   is_vip: editChapterForm.is_vip,
+                  publish_at: newPublishAtIso,
                 };
+                // Гарах цагийг зориудаар өөрчилсөн бол бvлгийг шинэ мэт "ШИНЭ БvЛЭГ" мөрөнд
+                // дахин гаргахын тулд created_at-ыг "одоо" болгоно.
+                if (publishAtChanged) updates.created_at = new Date().toISOString();
                 if (editChapterCoverFile) {
                   const ext = editChapterCoverFile.name.split('.').pop();
                   try {

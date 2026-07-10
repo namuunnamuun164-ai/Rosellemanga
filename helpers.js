@@ -102,3 +102,15 @@ export const formatRemaining = (ms) => {
   if (hours > 0) return `${hours} цаг ${m} мин`;
   return `${m} мин`;
 };
+
+// ЗАСВАР #146: "цаг:минут:секунд" (жишээ нь 12:15:28) маягийн цэвэрхэн тоон
+// countdown формат — хуваарийн хуудсанд секунд тутам шинэчлэгдэж харагдана
+export const formatCountdownClock = (ms) => {
+  if (ms <= 0) return '00:00:00';
+  const totalSec = Math.floor(ms / 1000);
+  const hh = Math.floor(totalSec / 3600);
+  const mm = Math.floor((totalSec % 3600) / 60);
+  const ss = totalSec % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
+};
