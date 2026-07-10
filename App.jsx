@@ -30,6 +30,9 @@ export default function App() {
   const [dbMangas, setDbMangas] = useState([]);
   const [authPage, setAuthPage] = useState(null);
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
+  // ЗАСВАР #156: "БvРТГvvЛЭХ"/"НЭВТРЭХ" товчийг олон дарахад давхар (олон
+  // удаа) имэйл/хvсэлт явуулахаас сэргийлнэ
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   // ШИНЭ: нууц үг сэргээх урсгал (имэйлээр 8 оронтой код)
   const [resetCode, setResetCode] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
@@ -100,7 +103,7 @@ export default function App() {
     setEditChapterCoverFile(null);
     setEditChapterNewFiles([]);
     setEditChapter(ch);
-    supabase.from('chapter_images').select('*').eq('chapter_id', ch.id).order('page_number')
+    supabase.from('chapter_images').select('id, chapter_id, image_url, page_number').eq('chapter_id', ch.id).order('page_number')
       .then(({ data }) => {
         setEditChapterExistingImages(data || []);
         editChapterInitialImageIds.current = (data || []).map(img => img.id);
@@ -313,7 +316,7 @@ export default function App() {
   // (бусад хуудсанд 30 сек хангалттай тул илишдэн re-render хийхгvй).
   const [scheduleNowTs, setScheduleNowTs] = useState(Date.now());
   useEffect(() => {
-    if (page !== 'schedule') return;
+    if (page !== 'schedule' && page !== 'detail') return;
     setScheduleNowTs(Date.now());
     const t = setInterval(() => setScheduleNowTs(Date.now()), 1000);
     return () => clearInterval(t);
@@ -361,6 +364,20 @@ export default function App() {
     if (error) { notify('Алдаа: ' + error.message); return; }
     setDbMangas(prev => prev.map(x => x.id === m.id ? { ...x, schedule_day: null, schedule_time: null } : x));
     notify('Хуваариас хасагдлаа.');
+  };
+  // ЗАСВАР #157: admin манганы 7 хоног бvрийн давтагдах хуваарийг ("өдөр",
+  // "цаг") Хуваарь хуудаснаас шууд гараар засаж болно
+  const editMangaSchedule = async (m) => {
+    const dayInput = window.prompt('Шинэ өдрийг тоогоор оруулна уу (0=Ням, 1=Даваа, 2=Мягмар, 3=Лхагва, 4=Пvрэв, 5=Баасан, 6=Бямба):', String(m.schedule_day ?? ''));
+    if (dayInput === null || dayInput.trim() === '') return;
+    const dayNum = Number(dayInput);
+    if (!Number.isInteger(dayNum) || dayNum < 0 || dayNum > 6) { notify('Алдаа: 0-6 хооронд тоо оруулна уу!'); return; }
+    const timeInput = window.prompt('Шинэ цагийг ЦЦ:ММ (жишээ нь 18:30) хэлбэрээр оруулна уу:', m.schedule_time || '');
+    if (timeInput === null || !/^\d{1,2}:\d{2}$/.test(timeInput.trim())) { if (timeInput !== null) notify('Алдаа: цагийг ЦЦ:ММ хэлбэрээр оруулна уу!'); return; }
+    const { error } = await supabase.from('mangas').update({ schedule_day: dayNum, schedule_time: timeInput.trim() }).eq('id', m.id);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    setDbMangas(prev => prev.map(x => x.id === m.id ? { ...x, schedule_day: dayNum, schedule_time: timeInput.trim() } : x));
+    notify('Хуваарь шинэчлэгдлээ.');
   };
 
   // ЗАСВАР #95: нэвтрэхэд Supabase-с хадгалсан манга + унших явцыг татаж ирнэ;
@@ -411,11 +428,43 @@ export default function App() {
     setPage('detail');
   };
 
+  // ЗАСВАР #155: production-д гарахын өмнө нийт сайт даяар (60 гаруй газарт)
+  // Supabase/Postgres-ээс ирдэг англи, техникийн raw алдааны бичвэрvvдийг
+  // (жишээ нь "duplicate key value violates unique constraint") хэрэглэгчид
+  // ойлгомжтой монгол бичвэр рvv хөрвvvлнэ. Дуудлага бvр дээр нь тусад нь
+  // бичихийн оронд notify()-ийн ӨӨРИЙН дотор нэг газар шvvдэг тул БvХ
+  // дуудлагад автоматаар хамрагдана (шинэ notify() нэмэгдэхэд ч дахин
+  // бичих шаардлагагvй).
+  const translateErrorText = (text) => {
+    if (!text) return text;
+    const rules = [
+      [/already registered|already exists/i, 'энэ имэйл хаягаар аль хэдийн бvртгэлтэй хэрэглэгч байна'],
+      [/database error saving new user/i, 'энэ имэйл хаяг (өөр бичлэгээр ч гэсэн) аль хэдийн бvртгэлтэй байж магадгvй'],
+      [/password.*(least|short|characters)/i, 'нууц vг хэт богино байна (дор хаяж 6 тэмдэгттэй байх ёстой)'],
+      [/invalid email/i, 'имэйл хаяг буруу байна'],
+      [/token has expired|otp.*expired|invalid.*otp|invalid.*token/i, 'код буруу эсвэл хугацаа дууссан байна — зөвхөн хамгийн сvvлд илгээсэн код хvчинтэй'],
+      [/rate limit/i, 'хэт олон удаа оролдлоо. Түр хvлээгээд дахин оролдоно уу'],
+      [/duplicate key value violates unique constraint/i, 'ийм мэдээлэл (давхардсан утга) аль хэдийн бvртгэлтэй байна'],
+      [/violates foreign key constraint/i, 'холбогдох мэдээлэл олдсонгvй эсвэл өмнө нь устсан байна'],
+      [/violates row-level security|permission denied|new row violates/i, 'танд энэ vйлдлийг хийх эрх байхгvй байна'],
+      [/jwt expired|invalid jwt/i, 'нэвтрэлтийн хугацаа дууссан байна, дахин нэвтэрнэ vv'],
+      [/failed to fetch|networkerror|network request failed/i, 'сvлжээний алдаа гарлаа. Интернэт холболтоо шалгаад дахин оролдоно уу'],
+      [/value too long/i, 'оруулсан текст хэт урт байна'],
+      [/null value in column .* violates not-null constraint/i, 'заавал бөглөх талбар хоосон байна'],
+    ];
+    let result = text;
+    for (const [pattern, replacement] of rules) {
+      if (pattern.test(result)) { result = result.replace(pattern, replacement); break; }
+    }
+    return result;
+  };
+
   // ЗАСВАР #32: цайвар browser notify()-ийн оронд site-тэй өнгө нийцсэн жижиг
   // мэдэгдлийн карт (toast). Мессежид "Алдаа" гэсэн үг байвал улаан, эс бол
   // ногоон хүрээтэй харагдана — ингэснээр 75 notify() дуудлагыг нэг нэгээр нь
   // төрөл ялгаж бичихийн оронд зүгээр л alert-ийг notify-гаар сольсон.
-  const notify = (message) => {
+  const notify = (rawMessage) => {
+    const message = translateErrorText(rawMessage);
     const type = /алдаа/i.test(message) ? 'error' : 'success';
     const id = `${Date.now()}-${Math.random()}`;
     setToasts(prev => [...prev, { id, message, type }]);
@@ -425,7 +474,10 @@ export default function App() {
   // Supabase-ээс манга татах — админ шинээр нэмсний дараа дахин дуудаж болохоор
   // тусдаа функц болгосон (ЗАСВАР: өмнө нь нэмсний дараа refresh хийх шаардлагатай байсан).
   const fetchMangas = useCallback(() => {
-    supabase.from('mangas').select('*').then(({ data, error }) => {
+    // ЗАСВАР #159: select('*')-ийн оронд шаардлагатай баганаа зааж татна — egress багасна
+    supabase.from('mangas')
+      .select('id, title, description, genres, genre, status, poster_url, banner_url, views, is_hidden, schedule_day, schedule_time, created_at, admin_note, is_recommended')
+      .then(({ data, error }) => {
       if (error) console.error('Supabase манга алдаа:', error);
       if (data && data.length > 0) {
         setDbMangas(data.map(m => ({
@@ -463,8 +515,19 @@ export default function App() {
   // цаг тэмдэгтэй бодит үзэлтийн бүртгэлээс тооцогдоно (нийт views баганаас
   // ялгаатай нь — энэ зөвхөн сүүлийн 30 хоногийг харгалзана).
   useEffect(() => {
-    supabase.rpc('top_manga_last_days', { days_back: 30, result_limit: 10 })
-      .then(({ data }) => setTopMangaIds(data ? data.map(r => r.manga_id) : []));
+    // ЗАСВАР #159: өмнө нь шинэ хуудас нээгдэх бvрт бvх хэрэглэгчийн сvvлийн 30
+    // хоногийн mangaviewevents-ийг шууд count/group хийдэг (хамгийн хvнд query)
+    // байсан — одоо цагийн 1 удаа (pg_cron) урьдчилан тооцоод хадгалдаг жижиг
+    // top_manga_cache хvснэгтээс л уншина, зөвхөн тэр хоосон vед rpc-руу орно.
+    supabase.from('top_manga_cache').select('manga_id').order('rank')
+      .then(({ data, error }) => {
+        if (!error && data && data.length > 0) {
+          setTopMangaIds(data.map(r => r.manga_id));
+          return;
+        }
+        supabase.rpc('top_manga_last_days', { days_back: 30, result_limit: 10 })
+          .then(({ data: d }) => setTopMangaIds(d ? d.map(r => r.manga_id) : []));
+      });
   }, []);
 
   // ЗАСВАР #71: "Санал болгох" hero-г автомат үзэлтийн тоогоор биш, admin-ийн
@@ -525,7 +588,9 @@ export default function App() {
   // холбоос ({{ .ConfirmationURL }})-ны оронд {{ .Token }} гэж тавьсан байх ёстой,
   // эс тэгвэл имэйлд код биш холбоос ирнэ).
   const sendResetCode = async () => {
-    if (resendCooldown > 0) return;
+    // ЗАСВАР #156: маш хурдан давхар дарахад disabled attribute хараахан
+    // идэвхжээгvй байж болзошгvй тул энд ч давхар шалгана
+    if (resendCooldown > 0 || resetSending) return;
     if (!authForm.email.trim()) { notify('Имэйлээ оруулна уу!'); return; }
     setResetSending(true);
     const { error } = await supabase.auth.resetPasswordForEmail(authForm.email.trim());
@@ -623,7 +688,7 @@ export default function App() {
       if (!manga) { setPage('home'); return; }
       setSelected(manga);
       if (chMatch) {
-        supabase.from('chapters').select('*').eq('manga_id', mangaId).eq('chapter_number', Number(chMatch[2])).maybeSingle()
+        supabase.from('chapters').select('id, manga_id, chapter_number, title, label, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url').eq('manga_id', mangaId).eq('chapter_number', Number(chMatch[2])).maybeSingle()
           .then(({ data }) => { if (data) { setSelectedChapter(data); setPage('reader'); } else setPage('detail'); });
       } else {
         setPage('detail');
@@ -688,7 +753,7 @@ export default function App() {
     // Энгийн хэрэглэгч зөвхөн нийтлэгдсэн, нуугдаагvй бүлгийг харна; staff бүгдийг харна
     // ЗАСВАР #119: is_hidden шvvлтvvр дутуу байсан тул "Нуух" товч дарсан ч
     // энгийн хэрэглэгчид тухайн бvлэг хэвээр харагдаж, нээгдэж байсан bug-ыг засав.
-    let q = supabase.from('chapters').select('*').eq('manga_id', selected.id);
+    let q = supabase.from('chapters').select('id, manga_id, chapter_number, title, label, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url').eq('manga_id', selected.id);
     // ЗАСВАР #119: is_hidden багана хуучин бvлгvvдэд NULL байж болох тул
     // "is_hidden.eq.false"-той хамт NULL-ийг ч бас "нуугдаагvй" гэж vзнэ
     // ЗАСВАР #125: устгах хvсэлт илгээгдсэн (pending_delete) бvлгийг ч бас нуана
@@ -732,7 +797,7 @@ export default function App() {
     // шинэ бүлгийн дээр буухаас сэргийлнэ.
     let cancelled = false;
     setChapterImages([]); // өмнөх бүлгийн зураг түр харагдахаас сэргийлнэ
-    supabase.from('chapter_images').select('*').eq('chapter_id', selectedChapter.id).order('page_number')
+    supabase.from('chapter_images').select('id, chapter_id, image_url, page_number').eq('chapter_id', selectedChapter.id).order('page_number')
       .then(({ data }) => {
         if (cancelled || !data) return;
         setChapterImages(data);
@@ -796,7 +861,7 @@ export default function App() {
     // алдаа гарлаа" гэсэн алдаа гаргадаг байсан. Одоо like-ийн тоог тусад нь
     // татаж, клиент талд өөрөө тоолдог болгосон — Supabase-ийн тохиргооноос үл хамаарна.
     supabase.from('comments')
-      .select('*')
+      .select('id, chapter_id, user_id, content, parent_id, sticker_url, created_at')
       .eq('chapter_id', chapterId)
       .order('created_at', { ascending: false })
       .limit(200) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
@@ -862,7 +927,7 @@ export default function App() {
   // ажиллах шаардлагагvй ч, chapter-comment feature-ийг эвдэхгvйгээр найдвартай байлгах үvднээс).
   const fetchMangaComments = (mangaId, isCancelled = () => false) => {
     supabase.from('comments')
-      .select('*')
+      .select('id, manga_id, user_id, content, parent_id, sticker_url, created_at')
       .eq('manga_id', mangaId)
       .order('created_at', { ascending: false })
       .limit(200) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
@@ -959,7 +1024,7 @@ export default function App() {
 
   // ЗАСВАР #113: reel-vvдийг манга мэдээлэл + like-ийн тоотой нь татна
   const fetchReels = (isCancelled = () => false) => {
-    supabase.from('reels').select('*').order('created_at', { ascending: false })
+    supabase.from('reels').select('id, manga_id, video_url, created_at').order('created_at', { ascending: false })
       .limit(30) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
       .then(({ data, error }) => {
         if (isCancelled()) return;
@@ -1152,7 +1217,7 @@ export default function App() {
     const threeDaysAhead = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     // ЗАСВАР #151: is_hidden-г ч сонгоно — эс тэгвэл нуугдсан манганы бvлэг
     // guest хэрэглэгчид "нэргvй" (ch.mangas null болж) харагдах эрсдэлтэй
-    supabase.from('chapters').select('*, mangas(title, poster_url, is_hidden)')
+    supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(title, poster_url, is_hidden)')
       .not('publish_at', 'is', null)
       .gte('publish_at', threeDaysAgo)
       .lte('publish_at', threeDaysAhead)
@@ -1166,7 +1231,7 @@ export default function App() {
   useEffect(() => {
     if (page !== 'home') return;
     let cancelled = false;
-    supabase.from('chapters').select('*, mangas(id, title, poster_url, is_hidden)')
+    supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title, poster_url, is_hidden)')
       .eq('status', 'published')
       .order('created_at', { ascending: false })
       .limit(20)
@@ -1440,7 +1505,11 @@ export default function App() {
                   </div>
                 )}
                 {authPage === 'register' && <div style={{ marginBottom: '1.5rem' }} />}
-                <button onClick={async () => {
+                <button disabled={authSubmitting} onClick={async () => {
+                  // ЗАСВАР #156: олон дарахад давхар хvсэлт (жишээ нь олон
+                  // бvртгvvлэх имэйл) явуулахаас сэргийлж, хамгийн эхэнд шалгана
+                  if (authSubmitting) return;
+                  setAuthSubmitting(true);
                   if (authPage === 'register') {
                     const { error } = await supabase.auth.signUp({
                       email: authForm.email,
@@ -1460,8 +1529,9 @@ export default function App() {
                       notify('Амжилттай нэвтэрлээ! 🎉');
                     }
                   }
-                }} style={{ width: '100%', background: '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: 'pointer', fontWeight: 700, marginBottom: 16 }}>
-                  {authPage === 'login' ? 'НЭВТРЭХ' : 'БҮРТГҮҮЛЭХ'}
+                  setAuthSubmitting(false);
+                }} style={{ width: '100%', background: authSubmitting ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: authSubmitting ? 'not-allowed' : 'pointer', fontWeight: 700, marginBottom: 16 }}>
+                  {authSubmitting ? 'ХАДГАЛЖ БАЙНА...' : (authPage === 'login' ? 'НЭВТРЭХ' : 'БҮРТГҮҮЛЭХ')}
                 </button>
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
                   {authPage === 'login' ? (
@@ -1921,7 +1991,7 @@ export default function App() {
         {/* ШИНЭ: ХУВААРЬ — 7 хоногийн гарагаар манга гарах цаг */}
         {page === 'schedule' && (
           <div style={{ padding: '1.5rem 2rem' }}>
-            <SectionHeader title="ГАРАХ ХУВААРЬ" onClick={() => {}} />
+            <SectionHeader title="ХУВААРЬ" onClick={() => {}} />
 
             {/* ЗАСВАР #107: манга-т гараар хуваарь тавьдаг байсан admin форм-ыг
                 хассан — одоо зөвхөн "БҮЛЭГ НЭМЭХ" дэх "Гарах цаг товлох" талбараар
@@ -1935,15 +2005,17 @@ export default function App() {
                 зорилгоор flexShrink:0 (өргөнөө барьдаг)-ын оронд flex:1 (7-г
                 тэнцvv хуваадаг) болгож, хvрээг (хэрэггvй) арилгаж, фонтыг
                 нарийсгаж илvv цэвэрхэн болгов. */}
+            {/* ЗАСВАР #158: "ӨНӨӨДӨР" бичвэрийг жижиг цэгээр сольж, нэрийг
+                таслахгvй (хэрэгтэй бол 2 мөр болно) байдлаар тохируулав. */}
             <div style={{ display: 'flex', gap: isMobile ? 4 : 8, marginBottom: '1.25rem' }}>
               {[1, 2, 3, 4, 5, 6, 0].map(d => {
                 const isToday = d === new Date().getDay();
                 const isSelected = d === scheduleDay;
                 return (
                   <div key={d} onClick={() => setScheduleDay(d)}
-                    style={{ flex: 1, minWidth: 0, cursor: 'pointer', padding: isMobile ? '6px 2px' : '8px 10px', borderRadius: 8, textAlign: 'center', background: isSelected ? '#8B0000' : '#0f1219' }}>
-                    <div style={{ fontWeight: 600, fontSize: isMobile ? 11 : 13, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{DAYS[d]}</div>
-                    {isToday && <div style={{ fontSize: 8, color: isSelected ? '#fff' : '#8B0000', fontWeight: 600, marginTop: 2 }}>ӨНӨӨДӨР</div>}
+                    style={{ flex: 1, minWidth: 0, cursor: 'pointer', padding: isMobile ? '8px 3px' : '10px 10px', borderRadius: 8, textAlign: 'center', background: isSelected ? '#8B0000' : '#0f1219' }}>
+                    <div style={{ fontWeight: 600, fontSize: isMobile ? 11 : 13, color: '#fff', lineHeight: 1.25 }}>{DAYS[d]}</div>
+                    {isToday && <div style={{ width: 5, height: 5, borderRadius: '50%', background: isSelected ? '#fff' : '#8B0000', margin: '5px auto 0' }} />}
                   </div>
                 );
               })}
@@ -1962,10 +2034,12 @@ export default function App() {
                 const dayChapters = scheduledChapters.filter(ch => new Date(ch.publish_at).getDay() === d && (isStaff || (ch.mangas && !ch.mangas.is_hidden)));
                 const isToday = d === new Date().getDay();
                 return (
-                  <div style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid rgba(139,0,0,0.4)' : '1px solid #1c2230', borderRadius: 14, padding: '1rem' }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8, color: isToday ? '#8B0000' : '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  // ЗАСВАР #158: карт томруулж (padding нэмэгдсэн), "ӨНӨӨДӨР" бичвэрийг
+                  // цэгээр сольж, гарчгийг vргэлж цагаанаар (улаанаар биш) харуулав.
+                  <div style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid rgba(139,0,0,0.4)' : '1px solid #1c2230', borderRadius: 14, padding: '1.25rem' }}>
+                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
                       {DAYS[d]}
-                      {isToday && <span style={{ fontSize: 9, background: '#8B0000', color: '#fff', padding: '2px 8px', borderRadius: 10 }}>ӨНӨӨДӨР</span>}
+                      {isToday && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#8B0000', display: 'inline-block' }} />}
                     </div>
                     {dayMangas.length === 0 && dayChapters.length === 0 ? (
                       <div style={{ fontSize: 11, color: '#444' }}>—</div>
@@ -1976,31 +2050,30 @@ export default function App() {
                           const remainingMs = next ? next.getTime() - scheduleNowTs : null;
                           return (
                             <div key={`m${m.id}`} onClick={() => goToDetail(m)}
-                              style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', padding: '8px 0', borderTop: i > 0 ? '1px solid #1c2230' : 'none' }}>
-                              <img src={m.poster} alt="" style={{ width: 46, height: 62, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
+                              style={{ display: 'flex', gap: 14, alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderTop: i > 0 ? '1px solid #1c2230' : 'none' }}>
+                              <img src={m.poster} alt="" style={{ width: 56, height: 76, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
-                                {/* ЗАСВАР #146: schedule_time тохируулаагvй vед (жишээ нь зөвхөн
-                                    өдөр сонгосон) харагдаж болзошгvй байсан эвдэрсэн ("null")
-                                    бичвэрийг арилгаж, цаг байгаа vед л мөрийг харуулна */}
+                                <div style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
+                                {/* ЗАСВАР #158: нэрний доор статик цагийн ("18:00") оронд, тэр
+                                    ЯГ БАЙРАНД нь секунд тутам тоологддог countdown-г харуулна —
+                                    баруун буланд байсан тусдаа countdown-г арилгав. */}
                                 {m.schedule_time && (
-                                  <div style={{ fontSize: 11, color: '#fff', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                    {String(m.schedule_time).slice(0, 5)}
+                                  <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                      {remainingMs != null && remainingMs > 0 ? formatCountdownClock(remainingMs) : String(m.schedule_time).slice(0, 5)}
+                                    </span>
                                   </div>
                                 )}
                               </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                                {/* ЗАСВАР #146: баруун дээд буланд цэвэрхэн "цаг:минут:секунд"
-                                    countdown (шар биш цагаан, жижиг, "мин" гэх мэт vггvй) */}
-                                {remainingMs != null && remainingMs > 0 && (
-                                  <div style={{ fontSize: 10, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</div>
-                                )}
-                                {isAdmin && (
+                              {isAdmin && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                                  <span onClick={e => { e.stopPropagation(); editMangaSchedule(m); }} title="Хуваарийг засах"
+                                    style={{ fontSize: 15, color: '#ccc', cursor: 'pointer' }}>✎</span>
                                   <span onClick={e => { e.stopPropagation(); removeMangaSchedule(m); }} title="Хуваариас хасах"
-                                    style={{ fontSize: 13, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
-                                )}
-                              </div>
+                                    style={{ fontSize: 15, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -2011,32 +2084,35 @@ export default function App() {
                           const hasCustomTitle = ch.title && ch.title.trim() && ch.title.trim() !== `Бvлэг ${ch.chapter_number}`;
                           return (
                             <div key={`c${ch.id}`} onClick={() => goToDetail({ id: ch.manga_id, title: ch.mangas?.title, poster: ch.mangas?.poster_url })}
-                              style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', padding: '8px 0', borderTop: (dayMangas.length > 0 || i > 0) ? '1px solid #1c2230' : 'none' }}>
+                              style={{ display: 'flex', gap: 14, alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderTop: (dayMangas.length > 0 || i > 0) ? '1px solid #1c2230' : 'none' }}>
                               {/* ЗАСВАР #148: тухайн бvлгийн (публик) cover зурган дээр бvлгийн
                                   дугаарыг нvvр хуудасны "ШИНЭ БvЛЭГ" мөртэй адил жижиг тэмдэг
                                   (badge)-ээр давхарлав */}
-                              <div style={{ position: 'relative', width: 46, height: 62, flexShrink: 0 }}>
+                              <div style={{ position: 'relative', width: 56, height: 76, flexShrink: 0 }}>
                                 <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', borderRadius: 8 }} />
-                                <div style={{ position: 'absolute', top: 3, left: 3, background: '#8B0000', color: '#fff', fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 4 }}>{ch.chapter_number}</div>
+                                <div style={{ position: 'absolute', top: 3, left: 3, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{ch.chapter_number}</div>
                               </div>
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <div style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {ch.mangas?.title || 'Манга'} — Бүлэг {ch.chapter_number}{hasCustomTitle ? ` · ${ch.title}` : ''}
                                 </div>
-                                <div style={{ fontSize: 11, color: '#fff', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                  {String(ch.publish_at).slice(11, 16)}
+                                {/* ЗАСВАР #158: нэрний доорх статик цагийн оронд секунд тутам
+                                    тоологддог countdown-г шууд ЭНД харуулна */}
+                                <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                    {remainingMs > 0 ? formatCountdownClock(remainingMs) : String(ch.publish_at).slice(11, 16)}
+                                  </span>
                                 </div>
                               </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                                {remainingMs > 0 && (
-                                  <div style={{ fontSize: 10, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</div>
-                                )}
-                                {isAdmin && (
+                              {isAdmin && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                                  <span onClick={e => { e.stopPropagation(); openEditChapter(ch); }} title="Бvлгийг засах"
+                                    style={{ fontSize: 15, color: '#ccc', cursor: 'pointer' }}>✎</span>
                                   <span onClick={e => { e.stopPropagation(); removeChapterSchedule(ch); }} title="Хуваариас хасах"
-                                    style={{ fontSize: 13, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
-                                )}
-                              </div>
+                                    style={{ fontSize: 15, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -2308,9 +2384,9 @@ export default function App() {
                                 {isStaff && ch.is_hidden && <span style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>🙈 НУУГДСАН</span>}
                                 {isStaff && ch.pending_delete && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>⏳ УСТГАХ ХvЛЭЭГДЭЖ БУЙ</span>}
                               </div>
-                              <div style={{ fontSize: 12, color: locked ? '#f5a623' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
+                              <div style={{ fontSize: 12, color: locked ? '#fff' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
                                 {locked ? (
-                                  <span>⏳ {formatRemaining(new Date(ch.publish_at).getTime() - nowTs)}</span>
+                                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>⏳ {formatCountdownClock(new Date(ch.publish_at).getTime() - scheduleNowTs)}</span>
                                 ) : (
                                   <span>{formatNumericDate(ch.created_at)}</span>
                                 )}
@@ -2653,8 +2729,13 @@ export default function App() {
               // аргаар зуми хэрэгжvvлж, унших багана (720px)-аар хязгаарлав.
               <div style={{ maxWidth: 720, margin: '0 auto' }}>
                 <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
-                  {chapterImages.map(img => (
+                  {/* ЗАСВАР #159: эхний 3 хуудсыг шууд (eager), vлдсэнийг lazy ачаална —
+                      урт бvлэг нээхэд бvх зургийг нэг зэрэг ачаалахгvй, дэлгэц дээр
+                      ойртох vед нь татдаг болгож эхний ачааллыг хурдасгав. */}
+                  {chapterImages.map((img, i) => (
                     <img key={img.id} src={img.image_url} alt={`Page ${img.page_number}`}
+                      loading={i < 3 ? 'eager' : 'lazy'}
+                      decoding="async"
                       onContextMenu={e => e.preventDefault()}
                       draggable={false}
                       style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }} />
@@ -3817,10 +3898,9 @@ export default function App() {
               <div style={{ fontSize: 32, marginBottom: 12 }}>🔞</div>
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>18+ Насны хязгаарлалт</div>
               <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.6, marginBottom: '1.75rem' }}>
-                Энэ манга насанд хvрэгчдэд (18+) зориулсан агуулга агуулж болзошгvй.
-                Vргэлжлvvлснээр та 18-с дээш насандаа хvрснийг баталгаажуулж байна.
-                Хэрэв та 18 насанд хvрээгvй бол цааш vзэхийг зөвлөхгvй — vvнээс vvдэх
-                аливаа vр дагаварт манай сайт хариуцлага хvлээхгvй.
+                Энэ манга насанд хvрэгчдэд (18+) зориулсан хэсэн агуулсан байж болзошгvй.
+                Хэрэв насанд хvрээгvй бол цааш vзэхийг зөвлөхгvй. Үvнээс vvдэх
+               vр дагаварт сайт хариуцлага хvлээхгvй.
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={() => {
