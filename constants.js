@@ -1,6 +1,6 @@
 // Апп даяар ашиглагдах тогтмол утгууд (component state-ээс хамааралгvй)
 
-export const genres = ['Action', 'Historical', 'Modern', 'Smut', 'BL', 'Horror', 'Romance'];
+export const genres = ['Action', 'Historical', 'Modern', 'Smut', 'BL', 'Horror', 'Romance', 'Fantasy'];
 
 // ЗАСВАР #75: "Дууссан"/"Үргэлжилж байна" 2-оос гадна "Завсарлага авсан",
 // "Гаргалт зогссон" 2 төлөв нэмэв. Өнгө/бэлгэдлийг нэг газар тодорхойлж,

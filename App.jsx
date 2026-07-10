@@ -244,6 +244,19 @@ export default function App() {
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
   const askConfirm = (message, onConfirm) => setConfirmModal({ message, onConfirm });
 
+  // ЗАСВАР #150: "Smut" төрөлтэй манганы дэлгэрэнгvй хуудсанд ороход 18+
+  // анхааруулга харуулна — уншигч нэг удаа "ОЙЛГОЛОО" дарсны дараа (уг
+  // browser-т) дахин харагдахгvй (localStorage-д тэмдэглэнэ).
+  const [smutWarningOpen, setSmutWarningOpen] = useState(false);
+  useEffect(() => {
+    if (page !== 'detail' || !selected) { setSmutWarningOpen(false); return; }
+    if (!(selected.genres || []).includes('Smut')) { setSmutWarningOpen(false); return; }
+    try {
+      if (localStorage.getItem('smut_warning_ack') === '1') { setSmutWarningOpen(false); return; }
+    } catch { /* localStorage хаалттай vед анхааруулгыг харин ч харуулна */ }
+    setSmutWarningOpen(true);
+  }, [page, selected]);
+
   // ============ ROLE СИСТЕМ ============
   // admin     — бүх эрх
   // moderator — манга/бүлэг нэмэх, Editor-ийн хүсэлт батлах/татгалзах, сэтгэгдэл устгах, report шалгах (манга устгах эрхгүй)
@@ -1916,15 +1929,19 @@ export default function App() {
                 дээшээ мөр болгож ТАБ-аар сонгодог болгов — дараалал нь хэвийн
                 долоо хоногийн Даваа-с эхэлдэг дараалал хэвээрээ, гэхдээ хуудас
                 нээгдэх бvрт ӨНӨӨДРИЙН таб автоматаар сонгогдоно. */}
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: '1.25rem' }} className="scroll-row">
+            {/* ЗАСВАР #148: 7 таб утсан дээр ч хажуу тийш гvйлгэхгvйгээр багтаах
+                зорилгоор flexShrink:0 (өргөнөө барьдаг)-ын оронд flex:1 (7-г
+                тэнцvv хуваадаг) болгож, хvрээг (хэрэггvй) арилгаж, фонтыг
+                нарийсгаж илvv цэвэрхэн болгов. */}
+            <div style={{ display: 'flex', gap: isMobile ? 4 : 8, marginBottom: '1.25rem' }}>
               {[1, 2, 3, 4, 5, 6, 0].map(d => {
                 const isToday = d === new Date().getDay();
                 const isSelected = d === scheduleDay;
                 return (
                   <div key={d} onClick={() => setScheduleDay(d)}
-                    style={{ flexShrink: 0, cursor: 'pointer', padding: '8px 16px', borderRadius: 10, textAlign: 'center', background: isSelected ? '#8B0000' : '#0f1219', border: isSelected ? '1px solid #8B0000' : '1px solid #1c2230' }}>
-                    <div style={{ fontWeight: 800, fontSize: 13, color: '#fff' }}>{DAYS[d]}</div>
-                    {isToday && <div style={{ fontSize: 8, color: isSelected ? '#fff' : '#8B0000', fontWeight: 700, marginTop: 2 }}>ӨНӨӨДӨР</div>}
+                    style={{ flex: 1, minWidth: 0, cursor: 'pointer', padding: isMobile ? '6px 2px' : '8px 10px', borderRadius: 8, textAlign: 'center', background: isSelected ? '#8B0000' : '#0f1219' }}>
+                    <div style={{ fontWeight: 600, fontSize: isMobile ? 11 : 13, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{DAYS[d]}</div>
+                    {isToday && <div style={{ fontSize: 8, color: isSelected ? '#fff' : '#8B0000', fontWeight: 600, marginTop: 2 }}>ӨНӨӨДӨР</div>}
                   </div>
                 );
               })}
@@ -1941,7 +1958,7 @@ export default function App() {
                 const dayChapters = scheduledChapters.filter(ch => new Date(ch.publish_at).getDay() === d);
                 const isToday = d === new Date().getDay();
                 return (
-                  <div style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid #8B0000' : '1px solid #1c2230', borderRadius: 14, padding: '1rem' }}>
+                  <div style={{ background: isToday ? 'rgba(139,0,0,0.08)' : '#0f1219', border: isToday ? '1px solid rgba(139,0,0,0.4)' : '1px solid #1c2230', borderRadius: 14, padding: '1rem' }}>
                     <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8, color: isToday ? '#8B0000' : '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
                       {DAYS[d]}
                       {isToday && <span style={{ fontSize: 9, background: '#8B0000', color: '#fff', padding: '2px 8px', borderRadius: 10 }}>ӨНӨӨДӨР</span>}
@@ -1991,7 +2008,13 @@ export default function App() {
                           return (
                             <div key={`c${ch.id}`} onClick={() => goToDetail({ id: ch.manga_id, title: ch.mangas?.title, poster: ch.mangas?.poster_url })}
                               style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', padding: '8px 0', borderTop: (dayMangas.length > 0 || i > 0) ? '1px solid #1c2230' : 'none' }}>
-                              <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: 46, height: 62, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
+                              {/* ЗАСВАР #148: тухайн бvлгийн (публик) cover зурган дээр бvлгийн
+                                  дугаарыг нvvр хуудасны "ШИНЭ БvЛЭГ" мөртэй адил жижиг тэмдэг
+                                  (badge)-ээр давхарлав */}
+                              <div style={{ position: 'relative', width: 46, height: 62, flexShrink: 0 }}>
+                                <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', borderRadius: 8 }} />
+                                <div style={{ position: 'absolute', top: 3, left: 3, background: '#8B0000', color: '#fff', fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 4 }}>{ch.chapter_number}</div>
+                              </div>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {ch.mangas?.title || 'Манга'} — Бүлэг {ch.chapter_number}{hasCustomTitle ? ` · ${ch.title}` : ''}
@@ -2360,8 +2383,10 @@ export default function App() {
               {detailTab === 'info' && (
                 <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: '1.25rem' }}>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 14 }}>
+                    {/* ЗАСВАР #149: хvрээг бvдэг улаанаар, vсгийг цагаанаар солив
+                        (өмнө нь хvрээ болон vсэг хоёул цэвэр улаан байсан) */}
                     {(selected.genres || []).map(g => (
-                      <span key={g} style={{ fontSize: 11, color: '#8B0000', border: '1px solid #8B0000', display: 'inline-block', padding: '2px 10px', borderRadius: 4, background: '#0a0a0a' }}>{g.toUpperCase()}</span>
+                      <span key={g} style={{ fontSize: 11, color: '#fff', border: '1px solid rgba(139,0,0,0.4)', display: 'inline-block', padding: '2px 10px', borderRadius: 4, background: '#0a0a0a' }}>{g.toUpperCase()}</span>
                     ))}
                   </div>
                   <div style={{ color: '#bbb', fontSize: 13, lineHeight: 1.6 }}>{selected.desc}</div>
@@ -3775,6 +3800,37 @@ export default function App() {
                 <button onClick={() => { const fn = confirmModal.onConfirm; setConfirmModal(null); fn(); }}
                   style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                   Тийм
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #150: "Smut" төрөлтэй манганд зориулсан 18+ анхааруулга */}
+        {smutWarningOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+            <div style={{ width: 400, maxWidth: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 18, padding: '2rem', boxSizing: 'border-box', textAlign: 'center' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>🔞</div>
+              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>18+ Насны хязгаарлалт</div>
+              <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.6, marginBottom: '1.75rem' }}>
+                Энэ манга насанд хvрэгчдэд (18+) зориулсан агуулга агуулж болзошгvй.
+                Vргэлжлvvлснээр та 18-с дээш насандаа хvрснийг баталгаажуулж байна.
+                Хэрэв та 18 насанд хvрээгvй бол цааш vзэхийг зөвлөхгvй — vvнээс vvдэх
+                аливаа vр дагаварт манай сайт хариуцлага хvлээхгvй.
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => {
+                  setSmutWarningOpen(false);
+                  setSelected(null);
+                  setPage(previousPage);
+                }} style={{ flex: 1, background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', padding: '10px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                  БУЦАХ
+                </button>
+                <button onClick={() => {
+                  try { localStorage.setItem('smut_warning_ack', '1'); } catch { /* хаалттай vед зөвхөн энэ удаад л зөвшөөрнө */ }
+                  setSmutWarningOpen(false);
+                }} style={{ flex: 1, background: '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                  ОЙЛГОЛОО
                 </button>
               </div>
             </div>
