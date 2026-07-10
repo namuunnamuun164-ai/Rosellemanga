@@ -60,6 +60,37 @@ export const formatNumericDate = (dateStr) => {
   return `${d.getFullYear()}.${mm}.${dd}`;
 };
 
+// ЗАСВАР #129: Gmail нь local part дахь цэг (.) болон "+alias"-ыг vл тооцдог
+// (жишээ нь "u.ser+work@gmail.com" == "user@gmail.com" яг ижил хайрцаг руу очно).
+// Admin/moderator/editor эрх олгохоос өмнө нэг хvн ижил Gmail хайрцгаараа олон
+// бvртгэл vvсгэж давхар staff болохоос сэргийлэхийн тулд харьцуулалтад ашиглана.
+export const normalizeGmailEmail = (email) => {
+  if (!email) return '';
+  const [local, domain] = email.trim().toLowerCase().split('@');
+  if (!domain) return email.trim().toLowerCase();
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    return local.split('+')[0].replace(/\./g, '') + '@gmail.com';
+  }
+  return `${local}@${domain}`;
+};
+
+// ЗАСВАР #139: манганы vзэлт (views) хиймлээр өсгөхөөс сэргийлэх зорилгоор
+// increment_manga_views RPC-д зочин (нэвтрээгvй) хэрэглэгчийг ялгах тогтвортой
+// (browser-д хадгалагдсан) key дамжуулна — нэвтэрсэн бол сервер талд auth.uid()
+// ашиглах тул vvнийг үл хэрэглэнэ, харин зочинд өөр аргагvй тул хэрэгтэй.
+export const getAnonViewerKey = () => {
+  try {
+    let key = localStorage.getItem('anon_viewer_key');
+    if (!key) {
+      key = crypto.randomUUID();
+      localStorage.setItem('anon_viewer_key', key);
+    }
+    return key;
+  } catch {
+    return '';
+  }
+};
+
 // Үлдсэн хугацааг "2 өдөр 3 цаг" маягаар
 export const formatRemaining = (ms) => {
   if (ms <= 0) return '';

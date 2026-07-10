@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu } from './icons';
 import { PasswordField } from './PasswordField';
 
@@ -213,6 +213,11 @@ export default function App() {
   // ЗАСВАР #117: сэтгэгдэл дэх стикер зургийг дарж томруулж vзэх (lightbox)
   const [zoomedSticker, setZoomedSticker] = useState(null);
 
+  // ЗАСВАР #130: бvлэг устгах хvсэлттэй холбоотой цайвар browser window.confirm()-г
+  // site-тэй өнгө нийцсэн загвартай цонхоор сольсон.
+  const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
+  const askConfirm = (message, onConfirm) => setConfirmModal({ message, onConfirm });
+
   // ============ ROLE СИСТЕМ ============
   // admin     — бүх эрх
   // moderator — манга/бүлэг нэмэх, Editor-ийн хүсэлт батлах/татгалзах, сэтгэгдэл устгах, report шалгах (манга устгах эрхгүй)
@@ -232,6 +237,9 @@ export default function App() {
   const hasActiveVip = !!userProfile?.is_vip && (!userProfile?.vip_expires_at || new Date(userProfile.vip_expires_at).getTime() > nowTs);
   const isVip = isStaff || hasActiveVip;
   const ROLE_LABELS = { admin: 'Админ', moderator: 'Модератор', editor: 'Эдитор', user: 'Хэрэглэгч' };
+  // ЗАСВАР #127: staff (admin/moderator/editor) 6 хvртэл, энгийн хэрэглэгч 3 хvртэл стикер хадгалж болно
+  const stickerSlots = isStaff ? [1, 2, 3, 4, 5, 6] : [1, 2, 3];
+  const myStickers = stickerSlots.map(n => userProfile?.[`sticker_${n}`]).filter(Boolean);
 
   // ШИНЭ: тодорхой цагт (publish_at) товлогдсон бүлгүүд — хуваарийн хуудсанд харуулна
   const [scheduledChapters, setScheduledChapters] = useState([]);
@@ -426,7 +434,7 @@ export default function App() {
 
   // Хэрэглэгчийн role, нэр, avatar-ыг нэг дор татна
   const fetchProfile = useCallback((userId) => {
-    supabase.from('users').select('roles, name, avatar_url, is_vip, vip_expires_at, sticker_1, sticker_2, sticker_3').eq('id', userId).single()
+    supabase.from('users').select('roles, name, avatar_url, is_vip, vip_expires_at, sticker_1, sticker_2, sticker_3, sticker_4, sticker_5, sticker_6').eq('id', userId).single()
       .then(({ data }) => {
         if (data) {
           setUserRoles(data.roles || []);
@@ -621,7 +629,9 @@ export default function App() {
     // дуудаагvй бол бодит HTTP хvсэлт ОГТ явдаггvй (bare дуудлага чимээгvй
     // юу ч хийдэггvй байсан) — тиймээс vзэлт бодит DB-д хэзээ ч нэмэгдэхгvй,
     // харин client талд л түр (session доторх) нэмэгдсэн мэт харагддаг байв.
-    supabase.rpc('increment_manga_views', { input_id: selected.id })
+    // ЗАСВАР #139: зочин (нэвтрээгvй) хэрэглэгчийг ялгах key дамжуулж, ижил
+    // vзэгч давтан үзэхэд vзэлтийг дахин тоолохгvй байхаар server талд шvvнэ.
+    supabase.rpc('increment_manga_views', { input_id: selected.id, viewer_key: getAnonViewerKey() })
       .then(({ error }) => { if (error) console.error('Vзэлт нэмэгдvvлэх алдаа:', error); });
     setDbMangas(prev => prev.map(m => m.id === selected.id ? { ...m, views: (m.views || 0) + 1 } : m));
     setSelected(prev => prev && prev.id === selected.id ? { ...prev, views: (prev.views || 0) + 1 } : prev);
@@ -676,6 +686,19 @@ export default function App() {
     return () => observer.disconnect();
   }, [page, dbReels]);
 
+  // ЗАСВАР #126: users_select_all policy-г (хэн ч бvх багана, тухайлбал имэйл,
+  // уншиж чаддаг байсан цоорхойг) хумьсны дараа "users!user_id(...)" embed
+  // зөвхөн өөрийн болон staff-ийн мөрөнд л ажиллах болсон тул, сэтгэгдэл
+  // бичсэн БУСАД хэрэглэгчийн нэр/avatar-г security definer RPC
+  // (get_public_profiles)-аар тусад нь татаж merge хийнэ.
+  const attachAuthors = async (list) => {
+    const ids = [...new Set(list.map(c => c.user_id))];
+    if (ids.length === 0) return list;
+    const { data } = await supabase.rpc('get_public_profiles', { user_ids: ids });
+    const byId = Object.fromEntries((data || []).map(u => [u.id, u]));
+    return list.map(c => ({ ...c, users: byId[c.user_id] || null }));
+  };
+
   // ШИНЭ: сэтгэгдэл татах (нэр, avatar, like-ийн тоотой хамт)
   // isCancelled — өмнөх бүлгийн хүсэлт хожуу ирвэл state дарж бичихээс сэргийлэх (заавал биш)
   const fetchComments = (chapterId, isCancelled = () => false) => {
@@ -684,19 +707,16 @@ export default function App() {
     // тохиргоогоор идэвхгүй байдаг) query-г бүхэлд нь унагааж, "сэтгэгдэл татахад
     // алдаа гарлаа" гэсэн алдаа гаргадаг байсан. Одоо like-ийн тоог тусад нь
     // татаж, клиент талд өөрөө тоолдог болгосон — Supabase-ийн тохиргооноос үл хамаарна.
-    // ЗАСВАР #74: "Could not embed because more than one relationship was found
-    // for 'comments' and 'users'" алдааг засав — comments/users хооронд PostgREST
-    // хэд хэдэн FK харж, аль нэгийг нь сонгож чадахгүй байсан тул !user_id гэж
-    // яг аль баганаар холбогдохыг нь тодорхой зааж өгсөн.
     supabase.from('comments')
-      .select('*, users!user_id(name, avatar_url, roles)')
+      .select('*')
       .eq('chapter_id', chapterId)
       .order('created_at', { ascending: false })
       .limit(200) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (isCancelled()) return;
         if (error) { console.error('Сэтгэгдэл татах алдаа:', error); notify('Алдаа: сэтгэгдэл татахад алдаа гарлаа (' + error.message + ')'); return; }
-        const commentsList = data || [];
+        const commentsList = await attachAuthors(data || []);
+        if (isCancelled()) return;
         setComments(commentsList);
         if (commentsList.length === 0) { setCommentLikeCounts({}); setMyLikes([]); return; }
         supabase.from('comment_likes').select('comment_id').in('comment_id', commentsList.map(c => c.id))
@@ -754,14 +774,15 @@ export default function App() {
   // ажиллах шаардлагагvй ч, chapter-comment feature-ийг эвдэхгvйгээр найдвартай байлгах үvднээс).
   const fetchMangaComments = (mangaId, isCancelled = () => false) => {
     supabase.from('comments')
-      .select('*, users!user_id(name, avatar_url, roles)')
+      .select('*')
       .eq('manga_id', mangaId)
       .order('created_at', { ascending: false })
       .limit(200) // ЗАСВАР #118: өсөлтөд бэлтгэж хязгаартай татна
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (isCancelled()) return;
         if (error) { console.error('Манганы сэтгэгдэл татах алдаа:', error); return; }
-        const list = data || [];
+        const list = await attachAuthors(data || []);
+        if (isCancelled()) return;
         setMangaComments(list);
         if (list.length === 0) { setMangaCommentLikeCounts({}); setMyMangaLikes([]); return; }
         supabase.from('comment_likes').select('comment_id').in('comment_id', list.map(c => c.id))
@@ -982,15 +1003,24 @@ export default function App() {
   }, []);
 
   // ЗАСВАР #121: одоо Модератор/Эдитор эрхтэй хэрэглэгчдийг татна (эрх хураах жагсаалт)
+  // ЗАСВАР #128: admin эрхтэй хэрэглэгчийг ч жагсаалтад оруулав (өмнө нь энэ
+  // жагсаалт "moderator"/"editor"-оор л шvvдэг байсан тул admin эрхийг vvгээр
+  // хураах боломжгvй байсан).
   const fetchStaffUsers = useCallback(() => {
-    supabase.from('users').select('id, email, name, roles').overlaps('roles', ['moderator', 'editor']).order('email')
+    supabase.from('users').select('id, email, name, roles').overlaps('roles', ['admin', 'moderator', 'editor']).order('email')
       .then(({ data, error }) => { if (error) console.error('Staff татах алдаа:', error); else setStaffUsers(data || []); });
   }, []);
 
-  // ЗАСВАР #121: эрх хураах — moderator/editor-г л массиваас хасна (admin эрх хэвээр vлдэнэ)
-  const revokeStaffRole = async (user) => {
-    if (!window.confirm(`${user.email} хэрэглэгчийн Модератор/Эдитор эрхийг хураах уу?`)) return;
-    const newRoles = (user.roles || []).filter(r => r !== 'moderator' && r !== 'editor');
+  // ЗАСВАР #128: нэг товч дарахад moderator+editor хоёуланг зэрэг хураадаг
+  // байсныг өөрчилж, эрх тус бvрийг (admin-г ч оролцуулаад) тусад нь сонгож
+  // хураах боломжтой болгов.
+  const revokeSingleRole = async (user, role) => {
+    if (user.id === currentUser?.id && role === 'admin') {
+      notify('Алдаа: өөрийн Админ эрхийг өөрөө хураах боломжгүй.');
+      return;
+    }
+    if (!window.confirm(`${user.email} хэрэглэгчээс ${ROLE_LABELS[role] || role} эрхийг хураах уу?`)) return;
+    const newRoles = (user.roles || []).filter(r => r !== role);
     const { error } = await supabase.from('users').update({ roles: newRoles }).eq('id', user.id);
     if (error) { notify('Алдаа: ' + error.message); return; }
     notify('Эрх хураагдлаа.');
@@ -1522,11 +1552,12 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* ЗАСВАР #108: хэрэглэгчийн 3 хvртэлх стикер (сэтгэгдэлд ашиглана) */}
+                        {/* ЗАСВАР #108: хэрэглэгчийн 3 хvртэлх стикер (сэтгэгдэлд ашиглана)
+                            ЗАСВАР #127: admin/moderator/editor эрхтэй бол 6 хvртэл */}
                         <div style={{ marginBottom: 14 }}>
-                          <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>СТИКЕР (сэтгэгдэлд ашиглана, дээд тал нь 3)</div>
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            {[1, 2, 3].map(slot => {
+                          <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>СТИКЕР (сэтгэгдэлд ашиглана, дээд тал нь {stickerSlots.length})</div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {stickerSlots.map(slot => {
                               const url = userProfile?.[`sticker_${slot}`];
                               return (
                                 <div key={slot} style={{ position: 'relative', width: 56, height: 56 }}>
@@ -2145,25 +2176,27 @@ export default function App() {
                             {/* ЗАСВАР #125: admin шууд устгана (R2-с зурагны хамт), moderator/editor
                                 зөвхөн ХvСЭЛТ vvсгэнэ — admin "УСТГАХ ХvСЭЛТ" tab-аас баталгаажуулна. */}
                             {isStaff && (
-                              <span onClick={async (e) => {
+                              <span onClick={(e) => {
                                 e.stopPropagation();
                                 if (isAdmin) {
-                                  if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бvрмөсөн устгах уу? Энэ vйлдлийг БУЦААХ БОЛОМЖГvЙ (зурагнууд R2-с ч устна).`)) return;
-                                  const { data: images } = await supabase.from('chapter_images').select('image_url').eq('chapter_id', ch.id);
-                                  const urls = [...(images || []).map(i => i.image_url), ch.thumbnail_url].filter(Boolean);
-                                  try { await deleteFromR2(urls); } catch (err) { notify('Анхаар: зарим файл R2-с устгагдсангvй (' + err.message + ').'); }
-                                  await supabase.from('chapter_images').delete().eq('chapter_id', ch.id);
-                                  const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
-                                  if (error) { notify('Алдаа: ' + error.message); return; }
-                                  setDbChapters(prev => prev.filter(x => x.id !== ch.id));
-                                  notify('Бүлэг бvрмөсөн устгагдлаа 🗑');
+                                  askConfirm(`Бүлэг ${ch.chapter_number}-ийг бvрмөсөн устгах уу? Энэ vйлдлийг БУЦААХ БОЛОМЖГvЙ (зурагнууд R2-с ч устна).`, async () => {
+                                    const { data: images } = await supabase.from('chapter_images').select('image_url').eq('chapter_id', ch.id);
+                                    const urls = [...(images || []).map(i => i.image_url), ch.thumbnail_url].filter(Boolean);
+                                    try { await deleteFromR2(urls); } catch (err) { notify('Анхаар: зарим файл R2-с устгагдсангvй (' + err.message + ').'); }
+                                    await supabase.from('chapter_images').delete().eq('chapter_id', ch.id);
+                                    const { error } = await supabase.from('chapters').delete().eq('id', ch.id);
+                                    if (error) { notify('Алдаа: ' + error.message); return; }
+                                    setDbChapters(prev => prev.filter(x => x.id !== ch.id));
+                                    notify('Бүлэг бvрмөсөн устгагдлаа 🗑');
+                                  });
                                 } else {
                                   if (ch.pending_delete) { notify('Энэ бvлэг аль хэдийн устгах хvсэлттэй, админ шалгах хvртэл хvлээнэ vv.'); return; }
-                                  if (!window.confirm(`Бvлэг ${ch.chapter_number}-ийг устгах хvсэлт илгээх vv? Админ баталгаажуулах хvртэл хvлээгдэнэ.`)) return;
-                                  const { error } = await supabase.from('chapters').update({ pending_delete: true, delete_requested_by: currentUser.id, delete_requested_at: new Date().toISOString() }).eq('id', ch.id);
-                                  if (error) { notify('Алдаа: ' + error.message); return; }
-                                  setDbChapters(prev => prev.map(x => x.id === ch.id ? { ...x, pending_delete: true } : x));
-                                  notify('Устгах хvсэлт илгээгдлээ. Админ баталгаажуулах хvртэл хvлээнэ vv.');
+                                  askConfirm(`Бvлэг ${ch.chapter_number}-ийг устгах хvсэлт илгээх vv? Админ баталгаажуулах хvртэл хvлээгдэнэ.`, async () => {
+                                    const { error } = await supabase.from('chapters').update({ pending_delete: true, delete_requested_by: currentUser.id, delete_requested_at: new Date().toISOString() }).eq('id', ch.id);
+                                    if (error) { notify('Алдаа: ' + error.message); return; }
+                                    setDbChapters(prev => prev.map(x => x.id === ch.id ? { ...x, pending_delete: true } : x));
+                                    notify('Устгах хvсэлт илгээгдлээ. Админ баталгаажуулах хvртэл хvлээнэ vv.');
+                                  });
                                 }
                               }} title={ch.pending_delete ? 'Устгах хvсэлттэй' : 'Устгах'}
                                 style={{ fontSize: 16, cursor: 'pointer', padding: 4, color: ch.pending_delete ? '#f5a623' : '#8B0000' }}>
@@ -2249,9 +2282,9 @@ export default function App() {
                           rows={2}
                           style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
                         {/* ЗАСВАР #111: профайлд хадгалсан стикерээ сэтгэгдэлдээ хавсаргах */}
-                        {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].some(Boolean) && (
-                          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                            {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].filter(Boolean).map((url, i) => (
+                        {myStickers.length > 0 && (
+                          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                            {myStickers.map((url, i) => (
                               <img key={i} src={url} alt="" onClick={() => setMangaSelectedSticker(prev => prev === url ? null : url)}
                                 style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: mangaSelectedSticker === url ? '2px solid #8B0000' : '2px solid transparent', opacity: mangaSelectedSticker === url ? 1 : 0.6 }} />
                             ))}
@@ -2509,9 +2542,9 @@ export default function App() {
                       rows={2}
                       style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
                     {/* ЗАСВАР #108: профайлд хадгалсан стикерээ сэтгэгдэлдээ хавсаргах */}
-                    {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].some(Boolean) && (
-                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                        {[userProfile?.sticker_1, userProfile?.sticker_2, userProfile?.sticker_3].filter(Boolean).map((url, i) => (
+                    {myStickers.length > 0 && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                        {myStickers.map((url, i) => (
                           <img key={i} src={url} alt="" onClick={() => setSelectedSticker(prev => prev === url ? null : url)}
                             style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: selectedSticker === url ? '2px solid #8B0000' : '2px solid transparent', opacity: selectedSticker === url ? 1 : 0.6 }} />
                         ))}
@@ -2904,7 +2937,9 @@ export default function App() {
                         is_vip: chapterIsVip,
                         label: chapterLabel.trim() || null,
                         // Editor-only → 'pending' (батлагдах хүртэл харагдахгүй), бусад staff → шууд нийтлэгдэнэ.
-                        // DB талд trigger давхар шалгадаг тул энд хуурч болохгүй.
+                        // ЗАСВАР #126: chapters_insert_staff RLS policy (WITH CHECK) editor-only
+                        // мөрийг status='pending' биш утгаар оруулахыг сервер талд хориглодог
+                        // болсон тул энд хуурч (жишээ нь Network tab-аар мутлаж) болохгүй.
                         status: editorOnly ? 'pending' : 'published',
                         publish_at: !editorOnly && chapterPublishAt ? new Date(chapterPublishAt).toISOString() : null,
                       })
@@ -3091,14 +3126,25 @@ export default function App() {
                 </div>
                 <button onClick={async () => {
                   if (!adminWorkerEmail) { notify('Имэйл оруулна уу!'); return; }
+                  // ЗАСВАР #133: public.users.email (хэн ч өөрийн мөрөнд солиж болдог,
+                  // итгэмжлэгдэхгvй багана)-ээр хайхын оронд auth.users (жинхэнэ,
+                  // баталгаажсан имэйл)-ээр хайдаг security definer RPC ашиглана —
+                  // эс бол халдагч өөрийн email-ээ өөр хvний имэйл рvv солиод, тэр
+                  // хvнд зориулсан эрхийг өөртөө авах боломжтой байсан.
                   const { data: userData, error: userError } = await supabase
-                    .from('users')
-                    .select('id, email')
-                    .eq('email', adminWorkerEmail.trim())
+                    .rpc('admin_lookup_user_by_email', { lookup_email: adminWorkerEmail.trim() })
                     .maybeSingle();
                   // ЗАСВАР: алдааг эхэлж шалгадаг болгосон (өмнө нь дараалал буруу байсан)
                   if (userError) { notify('Алдаа: ' + userError.message); return; }
                   if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгүй! Хэрэглэгч эхлээд сайтад бүртгүүлсэн байх ёстой. ' + adminWorkerEmail); return; }
+                  // ЗАСВАР #129: staff эрх (admin/moderator/editor) олгохоос өмнө ижил Gmail
+                  // хайрцгийн өөр бичлэгээр (цэг/+alias) өөр хэрэглэгч аль хэдийн staff
+                  // эрхтэй эсэхийг шалгана — нэг хvн олон бvртгэлээр давхар staff болохоос сэргийлнэ.
+                  if (adminWorkerRoles.length > 0) {
+                    const targetNorm = normalizeGmailEmail(userData.email);
+                    const clash = staffUsers.find(su => su.id !== userData.id && normalizeGmailEmail(su.email) === targetNorm);
+                    if (clash) { notify(`Алдаа: энэ Gmail хаяг (өөр бичлэгээр: ${clash.email}) аль хэдийн staff эрхтэй байна.`); return; }
+                  }
                   const { error } = await supabase
                     .from('users')
                     .update({ roles: adminWorkerRoles })
@@ -3115,11 +3161,12 @@ export default function App() {
                   ЭРХ ОЛГОХ
                 </button>
 
-                {/* ЗАСВАР #121: одоо Модератор/Эдитор эрхтэй хэрэглэгчдийн жагсаалт + хураах товч */}
+                {/* ЗАСВАР #128: admin/модератор/эдитор эрхтэй хэрэглэгчдийн жагсаалт —
+                    эрх тус бvр дээрх ✕ дарж яг тэр НЭГ эрхийг л хураана (бусад эрх хэвээр vлдэнэ) */}
                 <div style={{ marginTop: '1.5rem' }}>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>МОДЕРАТОР/ЭДИТОР ЭРХТЭЙ ХЭРЭГЛЭГЧИД ({staffUsers.length})</div>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>АДМИН/МОДЕРАТОР/ЭДИТОР ЭРХТЭЙ ХЭРЭГЛЭГЧИД ({staffUsers.length})</div>
                   {staffUsers.length === 0 ? (
-                    <div style={{ fontSize: 12, color: '#555' }}>Одоогоор модератор/эдитор эрхтэй хэрэглэгч алга байна.</div>
+                    <div style={{ fontSize: 12, color: '#555' }}>Одоогоор эрхтэй хэрэглэгч алга байна.</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {staffUsers.map(u => (
@@ -3128,14 +3175,14 @@ export default function App() {
                             <div style={{ fontSize: 12, fontWeight: 700, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || u.email}</div>
                             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 3 }}>
                               {u.roles.map(r => (
-                                <span key={r} style={{ fontSize: 9, fontWeight: 700, color: '#8B0000', border: '1px solid #8B0000', padding: '1px 8px', borderRadius: 10 }}>{(ROLE_LABELS[r] || r).toUpperCase()}</span>
+                                <span key={r} onClick={() => revokeSingleRole(u, r)} title={`${ROLE_LABELS[r] || r} эрхийг хураах`}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: '#8B0000', border: '1px solid #8B0000', padding: '1px 8px', borderRadius: 10, cursor: 'pointer' }}>
+                                  {(ROLE_LABELS[r] || r).toUpperCase()}
+                                  <span style={{ fontSize: 10 }}>✕</span>
+                                </span>
                               ))}
                             </div>
                           </div>
-                          <button onClick={() => revokeStaffRole(u)}
-                            style={{ background: 'transparent', border: '1px solid #8B0000', color: '#8B0000', padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
-                            ХУРААХ
-                          </button>
                         </div>
                       ))}
                     </div>
@@ -3173,8 +3220,10 @@ export default function App() {
                     const days = Number(vipDays);
                     if (!days || days <= 0) { notify('Хоногийн тоог зөв оруулна уу!'); return; }
                     setVipSaving(true);
-                    const { data: userData, error: userError } = await supabase.from('users').select('id, vip_expires_at, is_vip')
-                      .eq('email', vipEmail.trim()).maybeSingle();
+                    // ЗАСВАР #133: public.users.email биш, auth.users (жинхэнэ имэйл)-ээр хайна
+                    const { data: userData, error: userError } = await supabase
+                      .rpc('admin_lookup_user_by_email', { lookup_email: vipEmail.trim() })
+                      .maybeSingle();
                     if (userError) { notify('Алдаа: ' + userError.message); setVipSaving(false); return; }
                     if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгүй!'); setVipSaving(false); return; }
                     // Идэвхтэй VIP-тэй бол одоо байгаа дуусах хугацаан дээр нь нэмнэ, эс бол өнөөдрөөс эхэлнэ
@@ -3194,7 +3243,10 @@ export default function App() {
                   </button>
                   <button disabled={vipSaving} onClick={async () => {
                     if (!vipEmail.trim()) { notify('Имэйл оруулна уу!'); return; }
-                    const { data: userData, error: userError } = await supabase.from('users').select('id').eq('email', vipEmail.trim()).maybeSingle();
+                    // ЗАСВАР #133: public.users.email биш, auth.users (жинхэнэ имэйл)-ээр хайна
+                    const { data: userData, error: userError } = await supabase
+                      .rpc('admin_lookup_user_by_email', { lookup_email: vipEmail.trim() })
+                      .maybeSingle();
                     if (userError) { notify('Алдаа: ' + userError.message); return; }
                     if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгүй!'); return; }
                     const { error } = await supabase.from('users').update({ is_vip: false, vip_expires_at: null }).eq('id', userData.id);
@@ -3340,8 +3392,7 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                      <button onClick={async () => {
-                        if (!window.confirm(`Бүлэг ${ch.chapter_number}-ийг бvрмөсөн устгах уу? Энэ vйлдлийг БУЦААХ БОЛОМЖГvЙ (зурагнууд R2-с ч устна).`)) return;
+                      <button onClick={() => askConfirm(`Бүлэг ${ch.chapter_number}-ийг бvрмөсөн устгах уу? Энэ vйлдлийг БУЦААХ БОЛОМЖГvЙ (зурагнууд R2-с ч устна).`, async () => {
                         const { data: images } = await supabase.from('chapter_images').select('image_url').eq('chapter_id', ch.id);
                         const urls = [...(images || []).map(i => i.image_url), ch.thumbnail_url].filter(Boolean);
                         try {
@@ -3354,7 +3405,7 @@ export default function App() {
                         if (error) { notify('Алдаа: ' + error.message); return; }
                         notify('Бvлэг бvрмөсөн устгагдлаа 🗑');
                         fetchPendingDeleteChapters();
-                      }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                      })} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                         ✓ БАТАЛГААЖУУЛАХ (УСТГАХ)
                       </button>
                       <button onClick={async () => {
@@ -3508,12 +3559,49 @@ export default function App() {
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Урьдчилан харах ({chapterFiles.length} зураг)</div>
-              <div style={{ width: 80 }} />
+              {/* ЗАСВАР #127: жинхэнэ уншигчийн хуудастай адил zoom товч нэмэв —
+                  өмнө нь энэ цонхонд zoom огт байгаагvй тул "zoom ажиллахгvй байна"
+                  гэж харагддаг байсан (бодит уншигчийн хуудсанд байдаг readerZoom
+                  state-ийг хамт ашигладаг тул хоёр газар зэрэг тохирсон хэвээр байна). */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
+                  style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
+                  −
+                </button>
+                <span style={{ fontSize: 11, color: '#aaa', minWidth: 34, textAlign: 'center' }}>{readerZoom}%</span>
+                <button onClick={() => setReaderZoom(z => Math.min(200, z + 10))} title="Томруулах"
+                  style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
+                  +
+                </button>
+              </div>
             </div>
-            {chapterFiles.map((file, i) => (
-              <img key={i} src={chapterFileUrls[i]} alt={`${i + 1}`}
-                style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
-            ))}
+            <div style={{ maxWidth: 720, margin: '0 auto' }}>
+              <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
+                {chapterFiles.map((file, i) => (
+                  <img key={i} src={chapterFileUrls[i]} alt={`${i + 1}`}
+                    style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #130: устгах хvсэлттэй холбоотой баталгаажуулах цонх (window.confirm-ийн оронд) */}
+        {confirmModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+            <div style={{ width: 380, maxWidth: '100%', background: '#111', border: '1px solid #222', borderRadius: 16, padding: '1.75rem', boxSizing: 'border-box' }}>
+              <div style={{ fontSize: 14, color: '#eee', lineHeight: 1.5, marginBottom: '1.5rem', whiteSpace: 'pre-line' }}>{confirmModal.message}</div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setConfirmModal(null)}
+                  style={{ background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  Болих
+                </button>
+                <button onClick={() => { const fn = confirmModal.onConfirm; setConfirmModal(null); fn(); }}
+                  style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  Тийм
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
