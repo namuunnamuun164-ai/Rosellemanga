@@ -45,6 +45,8 @@ export default function App() {
   const [chapterImages, setChapterImages] = useState([]);
   // ЗАСВАР #56: 1 төрлийн оронд 1-3 төрөл зэрэг сонгож болдог болгосон (массив)
   const [adminManga, setAdminManga] = useState({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
+  // ЗАСВАР #142: "НЭМЭХ" товчийг олон дарахад давхар манга vvсгэхээс сэргийлнэ
+  const [mangaSaving, setMangaSaving] = useState(false);
   const [adminWorkerEmail, setAdminWorkerEmail] = useState('');
   // ЗАСВАР #31: цуглуулга болсон — олон staff role-ийг зэрэг чеклэж болно
   const [adminWorkerRoles, setAdminWorkerRoles] = useState([]);
@@ -118,14 +120,24 @@ export default function App() {
   // ЗАСВАР #102: доошоо гvйлгэхэд толгой хэсгийг нуух, дээшээ гvйлгэхэд харуулах
   const [readerHeaderVisible, setReaderHeaderVisible] = useState(true);
   const lastScrollY = useRef(0);
+  // ЗАСВАР #141: Safari (ялангуяа утсан дээр) удаан нуугдсан tab-ыг санамсаргvй
+  // дахин ачаалахад унших байрлал алдагдаж, эхнээс эхэлдэг байсан асуудлыг
+  // багасгах зорилгоор гvйлгэсэн байрлалыг тогтмол хугацаанд sessionStorage-д
+  // хадгална (доор өөр effect-ээр буцааж сэргээнэ).
+  const lastScrollSaveTime = useRef(0);
   useEffect(() => {
-    if (page !== 'reader') return;
+    if (page !== 'reader' || !selectedChapter) return;
     lastScrollY.current = window.scrollY;
     const onScroll = () => {
       const y = window.scrollY;
       if (y > lastScrollY.current && y > 80) setReaderHeaderVisible(false);
       else if (y < lastScrollY.current) setReaderHeaderVisible(true);
       lastScrollY.current = y;
+      const now = Date.now();
+      if (now - lastScrollSaveTime.current > 300) {
+        lastScrollSaveTime.current = now;
+        try { sessionStorage.setItem(`reader_scroll_${selectedChapter.id}`, String(y)); } catch { /* Safari private mode гэх мэтэд sessionStorage хаалттай байж болно */ }
+      }
     };
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
@@ -144,6 +156,8 @@ export default function App() {
   // жигсаасан таб (each) хэсэгтэй болгосон
   const [adminTab, setAdminTab] = useState('manga');
   const [chapterUploading, setChapterUploading] = useState(false);
+  // ШИНЭ: бvлэг нэмэхэд зургууд хэдэн хувь upload болсныг харуулна
+  const [chapterUploadProgress, setChapterUploadProgress] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
   // ЗАСВАР #31: role одоо цуглуулга (жишээ нь moderator+editor зэрэг байж болно) —
   // өмнө нь ганц утгатай string байсан тул хоёр эрхийг зэрэг олгох боломжгүй,
@@ -657,7 +671,19 @@ export default function App() {
     let cancelled = false;
     setChapterImages([]); // өмнөх бүлгийн зураг түр харагдахаас сэргийлнэ
     supabase.from('chapter_images').select('*').eq('chapter_id', selectedChapter.id).order('page_number')
-      .then(({ data }) => { if (!cancelled && data) setChapterImages(data); });
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setChapterImages(data);
+        // ЗАСВАР #141: Safari tab-ыг санамсаргvй дахин ачаалахад (жишээ нь
+        // хэдэн минут нуугдсаны дараа) URL-аас зөв бvлэг рvv сэргэдэг ч
+        // гvйлгэсэн байрлалаа алддаг байсныг эндvvгээр сэргээнэ.
+        try {
+          const savedY = sessionStorage.getItem(`reader_scroll_${selectedChapter.id}`);
+          if (savedY) {
+            requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, Number(savedY))));
+          }
+        } catch { /* Safari private mode гэх мэтэд sessionStorage хаалттай байж болно */ }
+      });
     fetchComments(selectedChapter.id, () => cancelled);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1671,7 +1697,7 @@ export default function App() {
               {allMangas.filter(m => history.find(h => h.mangaId === m.id)).length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ТҮҮХ" onClick={() => { setPreviousPage('home'); setAllCategory('history'); setPage('all'); }} />
-                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
+                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                     {allMangas.filter(m => history.find(h => h.mangaId === m.id)).map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={true} /></div>)}
                   </div>
                 </div>
@@ -1679,7 +1705,7 @@ export default function App() {
 
               <div style={{ marginBottom: '2.5rem' }}>
                 <SectionHeader title="ШИНЭ БҮЛЭГ" onClick={() => { setPreviousPage('home'); setAllCategory('recentChapter'); setPage('all'); }} />
-                <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
+                <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                   {recentChapters
                     .filter(ch => (isStaff || !ch.mangas?.is_hidden) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
@@ -1702,7 +1728,7 @@ export default function App() {
               {newMangas.length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ШИНЭ МАНГА" onClick={() => { setPreviousPage('home'); setAllCategory('new'); setPage('all'); }} />
-                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
+                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                     {newMangas.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
                   </div>
                 </div>
@@ -1712,7 +1738,7 @@ export default function App() {
               {curatedRecommended.length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="САНАЛ БОЛГОХ" onClick={() => { setPreviousPage('home'); setAllCategory('recommended'); setPage('all'); }} />
-                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
+                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                     {curatedRecommended.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
                   </div>
                 </div>
@@ -1720,7 +1746,7 @@ export default function App() {
 
               <div style={{ marginBottom: '2.5rem' }}>
                 <SectionHeader title="ДУУССАН" onClick={() => { setPreviousPage('home'); setAllCategory('finished'); setPage('all'); }} />
-                <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'thin' }}>
+                <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                   {allMangas.filter(m => m.status === 'Дууссан').map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
                 </div>
               </div>
@@ -2755,20 +2781,25 @@ export default function App() {
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Оруулаагүй бол poster зураг ашиглагдана</div>
                 </div>
-                <button onClick={async () => {
+                <button disabled={mangaSaving} onClick={async () => {
+                  // ЗАСВАР #142: олон дарахад давхар vvсгэхээс сэргийлж, хамгийн эхэнд шалгана
+                  // (disabled attribute React-ийн дараагийн render хvртэл хойшлогддог тул
+                  // маш хурдан давхар дарахад тvvнийг ганцаараа найдаж болохгvй).
+                  if (mangaSaving) return;
                   if (!adminManga.title) { notify('Гарчиг оруулна уу!'); return; }
                   // ЗАСВАР #118: төрлийн шалгалтыг upload-ын ӨМНӨ зөөв — өмнө нь
                   // зургууд R2 руу орсны ДАРАА шалгалт унаж, орфон файл үлддэг байсан.
                   if (adminManga.genres.length === 0) { notify('Дор хаяж 1 төрөл сонгоно уу!'); return; }
                   const badFile = [posterFile, bannerFile].filter(Boolean).map(validateImageFile).find(Boolean);
                   if (badFile) { notify(badFile); return; }
+                  setMangaSaving(true);
                   let posterUrl = '';
                   if (posterFile) {
                     const fileExt = posterFile.name.split('.').pop();
                     const fileName = `${Date.now()}.${fileExt}`;
                     try {
                       posterUrl = await uploadToR2(posterFile, `posters/${fileName}`);
-                    } catch (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); return; }
+                    } catch (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); setMangaSaving(false); return; }
                   }
                   let bannerUrl = '';
                   if (bannerFile) {
@@ -2776,7 +2807,7 @@ export default function App() {
                     const fileName = `${Date.now()}-banner.${fileExt}`;
                     try {
                       bannerUrl = await uploadToR2(bannerFile, `banners/${fileName}`);
-                    } catch (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); return; }
+                    } catch (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); setMangaSaving(false); return; }
                   }
                   const { error } = await supabase.from('mangas').insert({
                     title: adminManga.title,
@@ -2795,8 +2826,9 @@ export default function App() {
                     setBannerFile(null);
                     fetchMangas(); // ЗАСВАР: жагсаалтыг шууд шинэчилнэ (өмнө нь refresh хэрэгтэй байсан)
                   }
-                }} style={{ width: '100%', background: '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
-                  НЭМЭХ
+                  setMangaSaving(false);
+                }} style={{ width: '100%', background: mangaSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: mangaSaving ? 'not-allowed' : 'pointer', fontSize: 14 }}>
+                  {mangaSaving ? 'ХАДГАЛЖ БАЙНА...' : 'НЭМЭХ'}
                 </button>
               </div>
               )}
@@ -2919,6 +2951,10 @@ export default function App() {
                 <button
                   disabled={chapterUploading}
                   onClick={async () => {
+                    // ЗАСВАР #142: олон дарахад давхар бvлэг vvсгэхээс сэргийлж, хамгийн эхэнд шалгана
+                    // (disabled attribute React-ийн дараагийн render хvртэл хойшлогддог тул
+                    // маш хурдан давхар дарахад тvvнийг ганцаараа найдаж болохгvй).
+                    if (chapterUploading) return;
                     if (!chapterManga) { notify('Манга сонгоно уу!'); return; }
                     if (!chapterNumber) { notify('Бүлгийн дугаар оруулна уу!'); return; }
                     if (chapterFiles.length === 0) { notify('Зураг сонгоно уу!'); return; }
@@ -2927,6 +2963,15 @@ export default function App() {
                     if (badFile) { notify(badFile); return; }
 
                     setChapterUploading(true);
+                    setChapterUploadProgress(0);
+                    // ШИНЭ: cover (байвал) + бvх хуудасны зургийг тоолж, upload
+                    // болгонд хэдэн хувь дуусаж байгааг тооцно.
+                    const totalUploads = (chapterCover ? 1 : 0) + chapterFiles.length;
+                    let doneUploads = 0;
+                    const markUploadDone = () => {
+                      doneUploads += 1;
+                      setChapterUploadProgress(totalUploads > 0 ? Math.round((doneUploads / totalUploads) * 100) : 0);
+                    };
 
                     const { data: chapterData, error: chapterError } = await supabase
                       .from('chapters')
@@ -2961,6 +3006,7 @@ export default function App() {
                       try {
                         thumbnailUrl = await uploadToR2(chapterCover, cName);
                       } catch (cErr) { notify('Cover upload алдаа: ' + cErr.message); }
+                      markUploadDone();
                     }
 
                     for (let i = 0; i < chapterFiles.length; i++) {
@@ -2973,8 +3019,10 @@ export default function App() {
                         publicUrl = await uploadToR2(file, fileName);
                       } catch (uploadError) {
                         notify(`Зураг ${i + 1} upload алдаа: ` + uploadError.message);
+                        markUploadDone();
                         continue;
                       }
+                      markUploadDone();
 
                       // ЗАСВАР #63: эхний хуудсыг автоматаар thumbnail болгож хадгалдаг байсныг
                       // хассан — тэр нь дурын (санамсаргүй харагдах) хуудасны зургийг "cover"
@@ -3005,9 +3053,18 @@ export default function App() {
                     setChapterLabel('');
                     setChapterPublishAt('');
                     setChapterUploading(false);
+                    setChapterUploadProgress(0);
                   }}
-                  style={{ width: '100%', background: chapterUploading ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: chapterUploading ? 'not-allowed' : 'pointer', fontSize: 14 }}>
-                  {chapterUploading ? 'УНШИЖ БАЙНА...' : 'БҮЛЭГ НЭМЭХ'}
+                  style={{
+                    width: '100%', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700,
+                    cursor: chapterUploading ? 'not-allowed' : 'pointer', fontSize: 14,
+                    // ШИНЭ: upload хийж байх vед хэдэн хувь дуусснаа товч дээр
+                    // өнгөөр (progress bar шиг) болон тоогоор хамт харуулна.
+                    background: chapterUploading
+                      ? `linear-gradient(to right, #8B0000 ${chapterUploadProgress}%, #3a3a3a ${chapterUploadProgress}%)`
+                      : '#8B0000',
+                  }}>
+                  {chapterUploading ? `УНШИЖ БАЙНА... ${chapterUploadProgress}%` : 'БҮЛЭГ НЭМЭХ'}
                 </button>
               </div>
               )}
