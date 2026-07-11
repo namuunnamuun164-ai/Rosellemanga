@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
-import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS } from './constants';
+import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE } from './constants';
 import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu } from './icons';
 import { PasswordField } from './PasswordField';
@@ -76,6 +76,8 @@ export default function App() {
   const [editChapterNewFiles, setEditChapterNewFiles] = useState([]); // шинээр нэмэх файлууд
   const [editChapterSaving, setEditChapterSaving] = useState(false);
   const [editChapterNewFileUrls, setEditChapterNewFileUrls] = useState([]);
+  // ЗАСВАР #161: бvлэг ЗАСАХ цонхонд ч (нэмэх цонхны adил) бvтэн харах (preview) товч
+  const [editChapterPreviewOpen, setEditChapterPreviewOpen] = useState(false);
   useEffect(() => {
     const urls = editChapterNewFiles.map(f => URL.createObjectURL(f));
     setEditChapterNewFileUrls(urls);
@@ -234,7 +236,10 @@ export default function App() {
   const [dbReels, setDbReels] = useState([]);
   const [myReelLikes, setMyReelLikes] = useState([]);
   const [reelLikeCounts, setReelLikeCounts] = useState({});
-  const [reelsMuted, setReelsMuted] = useState(true);
+  // ЗАСВАР #161: reel-vvдийг нээхэд дуу нь автоматаар хаалттай (muted) эхэлдэг
+  // байснийг өөрчилж, шууд дуутайгаар нээгддэг болгов (хэрэглэгч "Reels" рvv
+  // орох дарах vйлдэл өөрөө user gesture тул browser-vvд ихэнхдээ зөвшөөрдөг).
+  const [reelsMuted, setReelsMuted] = useState(false);
   const [adminReelManga, setAdminReelManga] = useState('');
   const [reelVideoFile, setReelVideoFile] = useState(null);
   const [reelUploading, setReelUploading] = useState(false);
@@ -1344,7 +1349,7 @@ export default function App() {
           <div style={{ position: 'absolute', top: 5, left: 5, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 8, fontWeight: 700, padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase' }}>{(STATUS_META[m.status] || DEFAULT_STATUS_META).badge}</div>
         )}
         {m.is_hidden && (
-          <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.8)', color: '#f5a623', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>🙈 НУУГДСАН</div>
+          <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.8)', color: '#f5a623', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>🥀 НУУГДСАН</div>
         )}
       </div>
       <div style={{ padding: '6px 2px' }}>
@@ -1511,13 +1516,23 @@ export default function App() {
                   if (authSubmitting) return;
                   setAuthSubmitting(true);
                   if (authPage === 'register') {
-                    const { error } = await supabase.auth.signUp({
+                    // ЗАСВАР #160: бvртгvvлэхэд имэйл баталгаажуулах шаардлагыг Supabase
+                    // Dashboard-с унтраасан (spam-д ордог асуудлаас болж) — тэгэхээр
+                    // signUp шууд session-той буцаж ирнэ, тэр vед нэвтэрсэн мэт шууд
+                    // хаана; хэрэв ямар нэг шалтгаанаар session ирэхгvй бол (жишээ нь
+                    // тохиргоо буцаагдсан) хуучин "имэйлээ шалгана уу" мессежийг vзvvлнэ.
+                    const { data, error } = await supabase.auth.signUp({
                       email: authForm.email,
                       password: authForm.password,
                       options: { data: { name: authForm.name } }
                     });
                     if (error) notify('Алдаа: ' + error.message);
-                    else notify('Бүртгэл амжилттай! Имэйлээ шалгана уу 📧');
+                    else if (data.session) {
+                      setAuthPage(null);
+                      notify('Бүртгэл амжилттай! Тавтай морил 🎉');
+                    } else {
+                      notify('Бүртгэл амжилттай! Имэйлээ шалгана уу 📧');
+                    }
                   } else {
                     const { error } = await supabase.auth.signInWithPassword({
                       email: authForm.email,
@@ -1651,7 +1666,8 @@ export default function App() {
                 <IconMenu />
               </span>
             )}
-            <img src="/logo.png" alt="logo" style={{ height: isMobile ? 34 : 36, width: 'auto', maxWidth: 140, objectFit: 'contain', flexShrink: 0 }} />
+            {/* ЗАСВАР #161: топбар дахь логог жоохон томруулав (34/36 → 40/44) */}
+            <img src="/logo.png" alt="logo" style={{ height: isMobile ? 40 : 44, width: 'auto', maxWidth: 150, objectFit: 'contain', flexShrink: 0 }} />
           </div>
 
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
@@ -2051,18 +2067,18 @@ export default function App() {
                           return (
                             <div key={`m${m.id}`} onClick={() => goToDetail(m)}
                               style={{ display: 'flex', gap: 14, alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderTop: i > 0 ? '1px solid #1c2230' : 'none' }}>
-                              <img src={m.poster} alt="" style={{ width: 56, height: 76, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, flexShrink: 0 }} />
+                              <img src={m.poster} alt="" style={{ width: 56, height: 76, objectFit: 'cover', objectPosition: 'top', borderRadius: 8, border: '2px solid #000', flexShrink: 0 }} />
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
                                 {/* ЗАСВАР #158: нэрний доор статик цагийн ("18:00") оронд, тэр
                                     ЯГ БАЙРАНД нь секунд тутам тоологддог countdown-г харуулна —
-                                    баруун буланд байсан тусдаа countdown-г арилгав. */}
-                                {m.schedule_time && (
+                                    баруун буланд байсан тусдаа countdown-г арилгав.
+                                    ЗАСВАР #161: нэгэнт цаг нь өнгөрсөн (гарсан) бол цаг огт
+                                    харуулахгvй болгов (статик цагийн fallback-ыг арилгав). */}
+                                {m.schedule_time && remainingMs != null && remainingMs > 0 && (
                                   <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                      {remainingMs != null && remainingMs > 0 ? formatCountdownClock(remainingMs) : String(m.schedule_time).slice(0, 5)}
-                                    </span>
+                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</span>
                                   </div>
                                 )}
                               </div>
@@ -2089,21 +2105,24 @@ export default function App() {
                                   дугаарыг нvvр хуудасны "ШИНЭ БvЛЭГ" мөртэй адил жижиг тэмдэг
                                   (badge)-ээр давхарлав */}
                               <div style={{ position: 'relative', width: 56, height: 76, flexShrink: 0 }}>
-                                <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', borderRadius: 8 }} />
+                                <img src={ch.thumbnail_url || ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', borderRadius: 8, border: '2px solid #000' }} />
                                 <div style={{ position: 'absolute', top: 3, left: 3, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{ch.chapter_number}</div>
                               </div>
                               <div style={{ flex: 1, minWidth: 0 }}>
+                                {/* ЗАСВАР #161: нэрний ард "— Бvлэг N" гэдгийг арилгав (дугаар нь
+                                    аль хэдийн cover зурган дээрх тэмдэгт харагдаж байгаа тул давхардуулахгvй) */}
                                 <div style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {ch.mangas?.title || 'Манга'} — Бүлэг {ch.chapter_number}{hasCustomTitle ? ` · ${ch.title}` : ''}
+                                  {ch.mangas?.title || 'Манга'}{hasCustomTitle ? ` · ${ch.title}` : ''}
                                 </div>
                                 {/* ЗАСВАР #158: нэрний доорх статик цагийн оронд секунд тутам
-                                    тоологддог countdown-г шууд ЭНД харуулна */}
-                                <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                    {remainingMs > 0 ? formatCountdownClock(remainingMs) : String(ch.publish_at).slice(11, 16)}
-                                  </span>
-                                </div>
+                                    тоологддог countdown-г шууд ЭНД харуулна
+                                    ЗАСВАР #161: нэгэнт гарсан (өнгөрсөн) бол цаг огт харуулахгvй */}
+                                {remainingMs > 0 && (
+                                  <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</span>
+                                  </div>
+                                )}
                               </div>
                               {isAdmin && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
@@ -2273,10 +2292,10 @@ export default function App() {
                     if (error) { notify('Алдаа: ' + error.message); return; }
                     setSelected({ ...selected, is_hidden: nv });
                     fetchMangas();
-                    notify(nv ? 'Манга нуугдлаа 🙈' : 'Манга ил боллоо 👁');
+                    notify(nv ? 'Манга нуугдлаа 🥀' : 'Манга ил боллоо 🌹');
                   }}
                     style={{ background: selected.is_hidden ? '#1e5c2e' : 'rgba(139,0,0,0.25)', color: '#fff', border: '1px solid #444', padding: '9px 20px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>
-                    {selected.is_hidden ? '👁 ИЛ БОЛГОХ' : '🙈 НУУХ'}
+                    {selected.is_hidden ? '🌹 ИЛ БОЛГОХ' : '🥀 НУУХ'}
                   </button>
                 )}
                 {isAdmin && (
@@ -2381,7 +2400,7 @@ export default function App() {
                                 )}
                                 {isStaff && ch.status === 'pending' && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>ХҮЛЭЭГДЭЖ БУЙ</span>}
                                 {isStaff && ch.status === 'rejected' && <span style={{ fontSize: 10, color: '#8B0000', fontWeight: 700 }}>ТАТГАЛЗСАН</span>}
-                                {isStaff && ch.is_hidden && <span style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>🙈 НУУГДСАН</span>}
+                                {isStaff && ch.is_hidden && <span style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>🥀 НУУГДСАН</span>}
                                 {isStaff && ch.pending_delete && <span style={{ fontSize: 10, color: '#f5a623', fontWeight: 700 }}>⏳ УСТГАХ ХvЛЭЭГДЭЖ БУЙ</span>}
                               </div>
                               <div style={{ fontSize: 12, color: locked ? '#fff' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -2410,7 +2429,7 @@ export default function App() {
                                 setDbChapters(prev => prev.map(x => x.id === ch.id ? { ...x, is_hidden: nv } : x));
                               }} title={ch.is_hidden ? 'Ил болгох' : 'Нуух'}
                                 style={{ fontSize: 16, cursor: 'pointer', padding: 4 }}>
-                                {ch.is_hidden ? '👁' : '🙈'}
+                                {ch.is_hidden ? '🌹' : '🥀'}
                               </span>
                             )}
                             {/* ЗАСВАР #125: admin шууд устгана (R2-с зурагны хамт), moderator/editor
@@ -2639,16 +2658,38 @@ export default function App() {
               <div style={{ color: '#777', marginTop: 10 }}>Өөрт тохирох багцаа сонгоно уу</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 24, flexWrap: 'wrap' }}>
-              {PLANS.map(plan => (
+              {PLANS.map(plan => {
+                // ЗАСВАР #163: тухайн багц түр зуурын хямдралтай, хугацаа нь
+                // дуусаагvй бол хямдарсан vнийг vзvvлнэ (хугацаа дуусмагц
+                // автоматаар анхны vнэ рvv буцна, код дахин засах шаардлагагvй).
+                const salePrice = SALE.prices[plan.key];
+                const onSale = !!salePrice && nowTs < new Date(SALE.endsAt).getTime();
+                const toNum = s => Number(String(s).replace(/[^0-9]/g, ''));
+                const percentOff = onSale ? Math.round((1 - toNum(salePrice) / toNum(plan.price)) * 100) : 0;
+                const remainingMs = new Date(SALE.endsAt).getTime() - nowTs;
+                return (
                 <div key={plan.key}
-                  style={{ width: 300, background: '#111', padding: 30, borderRadius: 20, border: '2px solid #8B0000', transition: '0.3s', cursor: 'pointer', position: 'relative', boxShadow: plan.recommended ? '0 0 30px #8B0000' : 'none' }}
+                  style={{ width: 300, background: '#111', padding: 30, borderRadius: 20, border: onSale ? '2px solid #f5a623' : '2px solid #8B0000', transition: '0.3s', cursor: 'pointer', position: 'relative', boxShadow: plan.recommended ? '0 0 30px #8B0000' : 'none' }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.boxShadow = '0 0 30px rgba(139,0,0,0.5)'; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = plan.recommended ? '0 0 30px #8B0000' : 'none'; }}>
-                  {plan.recommended && (
+                  {plan.recommended && !onSale && (
                     <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', background: '#8B0000', padding: '4px 16px', borderRadius: 20, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>САНАЛ БОЛГОХ</div>
                   )}
+                  {onSale && (
+                    <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', background: '#f5a623', color: '#000', padding: '4px 16px', borderRadius: 20, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>🔥 -{percentOff}% ХЯМДРАЛ</div>
+                  )}
                   <h2 style={{ textAlign: 'center', color: '#fff', marginBottom: 8 }}>{plan.label}</h2>
-                  <div style={{ textAlign: 'center', fontSize: 40, fontWeight: 900, margin: '20px 0', color: '#fff' }}>{plan.price}</div>
+                  {onSale ? (
+                    <div style={{ position: 'relative', textAlign: 'center', margin: '20px 0' }}>
+                      <div style={{ position: 'absolute', top: -12, right: 4, transform: 'rotate(6deg)', background: '#f5a623', color: '#000', border: '1.5px dashed #000', borderRadius: 8, padding: '3px 8px', fontSize: 10, fontWeight: 800, lineHeight: 1.3, whiteSpace: 'nowrap' }}>
+                        ХЯМДРАЛ<br />{remainingMs > 0 ? formatRemaining(remainingMs) || '1 мин' : ''} vлдсэн
+                      </div>
+                      <span style={{ fontSize: 18, color: '#666', textDecoration: 'line-through', marginRight: 10 }}>{plan.price}</span>
+                      <span style={{ fontSize: 40, fontWeight: 900, color: '#f5a623' }}>{salePrice}</span>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', fontSize: 40, fontWeight: 900, margin: '20px 0', color: '#fff' }}>{plan.price}</div>
+                  )}
                   <div style={{ lineHeight: 2, color: '#aaa', marginBottom: 8 }}>
                     {plan.features.map((f, i) => <div key={i}>✓ {f}</div>)}
                   </div>
@@ -2657,7 +2698,8 @@ export default function App() {
                     {selectedPlan === plan.key ? 'СОНГОГДСОН' : 'СОНГОХ'}
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -3132,7 +3174,7 @@ export default function App() {
                       {/* ЗАСВАР #36: бүлэг уншиж байгаа юм шиг бүтнээр нь харах цонх */}
                       <button onClick={() => setChapterPreviewOpen(true)}
                         style={{ background: '#1a1a1a', border: '1px solid #333', color: '#ccc', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                        👁 БҮТНЭЭР ХАРАХ
+                        🖼️ БҮТНЭЭР ХАРАХ
                       </button>
                     </div>
                   )}
@@ -3767,7 +3809,11 @@ export default function App() {
                 <div style={{ fontSize: 20, color: '#8B0000', marginTop: 6, fontWeight: 800 }}>
                   {(() => {
                     const p = PLANS.find(x => x.key === selectedPlan);
-                    return p ? `${p.label} — ${p.price}` : '';
+                    if (!p) return '';
+                    // ЗАСВАР #163: түр зуурын хямдралтай vед popup дээр ч хямдарсан vнийг харуулна
+                    const salePrice = SALE.prices[p.key];
+                    const onSale = !!salePrice && Date.now() < new Date(SALE.endsAt).getTime();
+                    return `${p.label} — ${onSale ? salePrice : p.price}`;
                   })()}
                 </div>
               </div>
@@ -4080,7 +4126,16 @@ export default function App() {
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ОДОО БАЙГАА ЗУРАГНУУД ({editChapterExistingImages.length})</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: '#888' }}>ОДОО БАЙГАА ЗУРАГНУУД ({editChapterExistingImages.length})</div>
+                  {/* ЗАСВАР #161: нэмэх цонхны adил бvтэн харах (preview) товч */}
+                  {(editChapterExistingImages.length > 0 || editChapterNewFiles.length > 0) && (
+                    <button onClick={() => setEditChapterPreviewOpen(true)}
+                      style={{ background: '#1a1a1a', border: '1px solid #333', color: '#ccc', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                      🖼️ БҮТЭН ХАРАХ
+                    </button>
+                  )}
+                </div>
                 {editChapterExistingImages.length > 0 ? (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: 260, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
                     {editChapterExistingImages.map((img, i) => (
@@ -4162,12 +4217,19 @@ export default function App() {
                 if (removedIds.length > 0) {
                   await supabase.from('chapter_images').delete().in('id', removedIds);
                 }
-                // Vлдсэн зургуудын дарааллыг (page_number) шинэчилнэ
+                // ЗАСВАР #161: vлдсэн зургуудын дарааллыг (page_number) шинэчилнэ —
+                // (chapter_id, page_number) дээр unique constraint байдаг тул шууд
+                // эцсийн дугаар руу update хийхэд зарим мөр давхцаж (жишээ нь 2-р
+                // зургийг 1 болгох vед 1-р зураг хараахан шинэчлэгдээгvй хэвээр 1
+                // хэвээрээ байх үед) алдаа гарч, зарим зураг ЯГ АМЖИЛТТАЙ хадгалагдсан
+                // мэт харагдсан ч бодит байдал дээр дараалал нь хуучин хэвээрээ vлддэг
+                // байсан. Иймд эхлээд БvГДИЙГ давхцахгvй СӨРӨГ дугаарт шилжvvлж,
+                // дараа нь эцсийн дугааруудыг тавьдаг 2 vе шаттай болгов.
                 for (let i = 0; i < editChapterExistingImages.length; i++) {
-                  const img = editChapterExistingImages[i];
-                  if (img.page_number !== i + 1) {
-                    await supabase.from('chapter_images').update({ page_number: i + 1 }).eq('id', img.id);
-                  }
+                  await supabase.from('chapter_images').update({ page_number: -(i + 1) }).eq('id', editChapterExistingImages[i].id);
+                }
+                for (let i = 0; i < editChapterExistingImages.length; i++) {
+                  await supabase.from('chapter_images').update({ page_number: i + 1 }).eq('id', editChapterExistingImages[i].id);
                 }
                 // Шинэ зургуудыг upload хийж, vлдсэн зургуудын араас дараалуулж нэмнэ
                 let nextPage = editChapterExistingImages.length + 1;
@@ -4187,6 +4249,43 @@ export default function App() {
               }} style={{ width: '100%', background: editChapterSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editChapterSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
                 {editChapterSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #161: бvлэг ЗАСАХ цонхны "БvТЭН ХАРАХ" — одоо байгаа (order-той) зурган
+            дараалал + шинээр нэмсэн зургуудыг хамт, жинхэнэ уншигчийн хуудастай адил харуулна */}
+        {editChapterPreviewOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: '#0a0a0a', zIndex: 1000, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', position: 'sticky', top: 0, zIndex: 10, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)' }}>
+              <button onClick={() => setEditChapterPreviewOpen(false)} title="Буцах"
+                style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Бvтэн харах ({editChapterExistingImages.length + editChapterNewFiles.length} зураг)</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
+                  style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
+                  −
+                </button>
+                <span style={{ fontSize: 11, color: '#aaa', minWidth: 34, textAlign: 'center' }}>{readerZoom}%</span>
+                <button onClick={() => setReaderZoom(z => Math.min(200, z + 10))} title="Томруулах"
+                  style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
+                  +
+                </button>
+              </div>
+            </div>
+            <div style={{ maxWidth: 720, margin: '0 auto' }}>
+              <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
+                {editChapterExistingImages.map((img, i) => (
+                  <img key={img.id} src={img.image_url} alt={`${i + 1}`}
+                    style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
+                ))}
+                {editChapterNewFiles.map((file, i) => (
+                  <img key={`new${i}`} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`}
+                    style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
+                ))}
+              </div>
             </div>
           </div>
         )}
