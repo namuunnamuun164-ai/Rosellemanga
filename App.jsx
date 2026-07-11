@@ -704,7 +704,25 @@ export default function App() {
       setSelected(manga);
       if (chMatch) {
         supabase.from('chapters').select('id, manga_id, chapter_number, title, label, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url').eq('manga_id', mangaId).eq('chapter_number', Number(chMatch[2])).maybeSingle()
-          .then(({ data }) => { if (data) { setSelectedChapter(data); setPage('reader'); } else setPage('detail'); });
+          .then(({ data }) => {
+            if (!data) { setPage('detail'); return; }
+            // ЗАСВАР #163: шууд линкээр (deep-link) орж ирэхэд ч openReader-тэй
+            // ижил VIP/цагийн шалгалтыг хийнэ — эс бол RLS-ээр далдлагдсан зурагны
+            // "Ачааллаж байна..." дэлгэц дээр хэрэглэгч учрыг олохгvй царцдаг байсан.
+            if (data.is_vip && !isVip) {
+              notify('👑 Энэ бол VIP бүлэг. Унших эрх авна уу!');
+              setPreviousPage('detail');
+              setPage('vip');
+              return;
+            }
+            if (chapterLocked(data) && !isStaff) {
+              notify(`⏳ Энэ бүлэг ${formatRemaining(new Date(data.publish_at).getTime() - nowTs)}-ийн дараа нээгдэнэ!`);
+              setPage('detail');
+              return;
+            }
+            setSelectedChapter(data);
+            setPage('reader');
+          });
       } else {
         setPage('detail');
       }
@@ -712,7 +730,7 @@ export default function App() {
     }
     const seg = pathname.replace(/^\//, '');
     setPage(['all', 'schedule', 'vip', 'library', 'admin', 'reels'].includes(seg) ? seg : 'home');
-  }, [dbMangas]);
+  }, [dbMangas, isVip, isStaff, nowTs, chapterLocked, notify]);
 
   // Анх ачаалахад (эсвэл dbMangas ирэхэд) одоогийн URL-аас хуудсыг сэргээнэ
   useEffect(() => {
@@ -931,7 +949,17 @@ export default function App() {
       sticker_url: parentId ? null : selectedSticker,
     });
     setCommentSending(false);
-    if (error) { notify('Алдаа: ' + error.message); return; }
+    if (error) {
+      // ЗАСВАР #163: RLS-ийн 5 секундийн rate-limit (migration_21) энд "эрх байхгvй"
+      // гэсэн ерөнхий орчуулгатай ижил алдаа (violates row-level security) буцаадаг
+      // тул хэрэглэгчид тодорхой (яагаад блоклогдсоноо ойлгомжтой) мессеж vзvvлнэ.
+      if (/row-level security|permission denied/i.test(error.message)) {
+        notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
+      } else {
+        notify('Алдаа: ' + error.message);
+      }
+      return;
+    }
     if (parentId) { setReplyText(''); setReplyTo(null); }
     else { setCommentText(''); setSelectedSticker(null); }
     fetchComments(selectedChapter.id);
@@ -994,7 +1022,14 @@ export default function App() {
       sticker_url: parentId ? null : mangaSelectedSticker,
     });
     setMangaCommentSending(false);
-    if (error) { notify('Алдаа: ' + error.message); return; }
+    if (error) {
+      if (/row-level security|permission denied/i.test(error.message)) {
+        notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
+      } else {
+        notify('Алдаа: ' + error.message);
+      }
+      return;
+    }
     if (parentId) { setMangaReplyText(''); setMangaReplyTo(null); }
     else { setMangaCommentText(''); setMangaSelectedSticker(null); }
     fetchMangaComments(selected.id);
@@ -1886,7 +1921,7 @@ export default function App() {
                     .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
-                        onClick={() => ch.mangas && openReader({ id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
+                        onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
                         style={{ ...scrollCardStyle, cursor: 'pointer' }}>
                         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
                           <img src={ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -1996,7 +2031,7 @@ export default function App() {
                     .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
-                        onClick={() => ch.mangas && openReader({ id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
+                        onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
                         style={{ cursor: 'pointer' }}>
                         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
                           <img src={ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -2559,6 +2594,7 @@ export default function App() {
                       <div style={{ flex: 1 }}>
                         <textarea value={mangaCommentText} onChange={e => setMangaCommentText(e.target.value)}
                           placeholder="Энэ манганы тухай сэтгэгдлээ бичнэ vv..."
+                          maxLength={2000}
                           rows={2}
                           style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
                         {/* ЗАСВАР #111: профайлд хадгалсан стикерээ сэтгэгдэлдээ хавсаргах */}
@@ -2636,6 +2672,7 @@ export default function App() {
                                 <input value={mangaReplyText} onChange={e => setMangaReplyText(e.target.value)}
                                   onKeyDown={e => { if (e.key === 'Enter') postMangaComment(c.id, mangaReplyText); }}
                                   placeholder={`${c.users?.name || 'Хэрэглэгч'}-д хариулах...`}
+                                  maxLength={2000}
                                   autoFocus
                                   style={{ flex: 1, background: '#10141d', border: '1px solid #232a38', borderRadius: 10, padding: '9px 14px', color: '#fff', fontSize: 13, outline: 'none' }} />
                                 <button onClick={() => postMangaComment(c.id, mangaReplyText)} disabled={!mangaReplyText.trim()}
@@ -2849,6 +2886,7 @@ export default function App() {
                   <div style={{ flex: 1 }}>
                     <textarea value={commentText} onChange={e => setCommentText(e.target.value)}
                       placeholder="Сэтгэгдлээ бичнэ үү..."
+                      maxLength={2000}
                       rows={2}
                       style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
                     {/* ЗАСВАР #108: профайлд хадгалсан стикерээ сэтгэгдэлдээ хавсаргах */}
@@ -2932,6 +2970,7 @@ export default function App() {
                             <input value={replyText} onChange={e => setReplyText(e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') postComment(c.id, replyText); }}
                               placeholder={`${c.users?.name || 'Хэрэглэгч'}-д хариулах...`}
+                              maxLength={2000}
                               autoFocus
                               style={{ flex: 1, background: '#10141d', border: '1px solid #232a38', borderRadius: 10, padding: '9px 14px', color: '#fff', fontSize: 13, outline: 'none' }} />
                             <button onClick={() => postComment(c.id, replyText)} disabled={!replyText.trim()}
@@ -3274,7 +3313,12 @@ export default function App() {
                         // ЗАСВАР #163: зургууд бvгд амжилттай орох хvртэл нуугдмал байлгана —
                         // эс бол эхний секундээс "published" болоод хагас хуудастай харагдана.
                         // Бvх зураг амжилттай орсны дараа доор is_hidden:false болгоно.
-                        is_hidden: true,
+                        // editorOnly-ийн хувьд status аль хэдийн 'pending' тул нэмж нуух
+                        // шаардлагагvй — БОЛОХГvй ч, учир нь chapters_update_moderate RLS
+                        // policy зөвхөн admin/moderator-т update зөвшөөрдөг тул editor доорх
+                        // is_hidden:false update-ыг өөрөө хийж чадахгvй (чимээгvй RLS-д
+                        // хориглогдож), бvлэг нь admin батласны дараа ч мөнхөд нуугдмал vлдэнэ.
+                        is_hidden: editorOnly ? false : true,
                       })
                       .select()
                       .single();
@@ -3703,6 +3747,10 @@ export default function App() {
                         const { data, error } = await supabase.from('chapters').update({
                           status: 'published',
                           publish_at: t ? new Date(t).toISOString() : null,
+                          // ЗАСВАР #163: editor upload-ын vед is_hidden:false update нь editor-т
+                          // байхгvй RLS эрхээр чимээгvй бvтэлгvйтдэг байсан тул энд admin/moderator-
+                          // ийн батлах vйлдэлд ч мөн адил (найдвартай байдлаар) нээж өгнө.
+                          is_hidden: false,
                         }).eq('id', ch.id).eq('status', 'pending').select();
                         if (error) { notify('Алдаа: ' + error.message); return; }
                         if (!data || data.length === 0) {
@@ -4308,19 +4356,16 @@ export default function App() {
                 if (removedIds.length > 0) {
                   await supabase.from('chapter_images').delete().in('id', removedIds);
                 }
-                // ЗАСВАР #161: vлдсэн зургуудын дарааллыг (page_number) шинэчилнэ —
-                // (chapter_id, page_number) дээр unique constraint байдаг тул шууд
-                // эцсийн дугаар руу update хийхэд зарим мөр давхцаж (жишээ нь 2-р
-                // зургийг 1 болгох vед 1-р зураг хараахан шинэчлэгдээгvй хэвээр 1
-                // хэвээрээ байх үед) алдаа гарч, зарим зураг ЯГ АМЖИЛТТАЙ хадгалагдсан
-                // мэт харагдсан ч бодит байдал дээр дараалал нь хуучин хэвээрээ vлддэг
-                // байсан. Иймд эхлээд БvГДИЙГ давхцахгvй СӨРӨГ дугаарт шилжvvлж,
-                // дараа нь эцсийн дугааруудыг тавьдаг 2 vе шаттай болгов.
-                for (let i = 0; i < editChapterExistingImages.length; i++) {
-                  await supabase.from('chapter_images').update({ page_number: -(i + 1) }).eq('id', editChapterExistingImages[i].id);
-                }
-                for (let i = 0; i < editChapterExistingImages.length; i++) {
-                  await supabase.from('chapter_images').update({ page_number: i + 1 }).eq('id', editChapterExistingImages[i].id);
+                // ЗАСВАР #163: vлдсэн зургуудын дарааллыг (page_number) НЭГ transaction-той
+                // security definer RPC-ээр шинэчилнэ (өмнө нь 2N дараалсан HTTP update
+                // явуулдаг байсан тул сvлжээ дундаа тасарвал дараалал хагас эвдэрч vлдэх
+                // эрсдэлтэй байв — RPC бvгдийг нэг дор, бvтэн эсвэл огт биш хийнэ).
+                if (editChapterExistingImages.length > 0) {
+                  const { error: reorderError } = await supabase.rpc('reorder_chapter_images', {
+                    chapter_id_in: editChapter.id,
+                    image_ids: editChapterExistingImages.map(img => img.id),
+                  });
+                  if (reorderError) notify('Дараалал шинэчлэх алдаа: ' + reorderError.message);
                 }
                 // Шинэ зургуудыг upload хийж, vлдсэн зургуудын араас дараалуулж нэмнэ
                 let nextPage = editChapterExistingImages.length + 1;

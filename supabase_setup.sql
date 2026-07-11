@@ -112,8 +112,18 @@ create table if not exists public.chapters (
   -- ЗАСВАР #60: "ҮНЭГҮЙ"/"VIP" бэлгэдлийн оронд admin-ийн бичдэг дурын тэмдэглэгээ
   label text,
   publish_at timestamptz,
+  -- ЗАСВАР #125 (migration_13): moderator/editor "УСТГАХ ХvСЭЛТ" vvсгэдэг,
+  -- admin л эцсийн баталгаажуулалт хийж бодитоор устгадаг 2 шатлалт хамгаалалт.
+  pending_delete boolean not null default false,
+  delete_requested_by uuid references public.users(id) on delete set null,
+  delete_requested_at timestamptz,
   created_at timestamptz not null default now()
 );
+-- Хуучин (энэ баганагvйгээр аль хэдийн vvссэн) хvснэгт дээр ч найдвартай
+-- ажиллахын тулд ("create table if not exists" шинэ багана нэмдэггvй тул):
+alter table public.chapters add column if not exists pending_delete boolean not null default false;
+alter table public.chapters add column if not exists delete_requested_by uuid references public.users(id) on delete set null;
+alter table public.chapters add column if not exists delete_requested_at timestamptz;
 
 -- ============================================================
 -- 4) CHAPTER_IMAGES
@@ -215,7 +225,7 @@ create table if not exists public.manga_view_events (
   -- ЗАСВАР #139 (migration_22): тухайн (манга, vзэгч) хослол сvvлийн 30 минутад
   -- аль хэдийн бvртгэгдсэн эсэхийг шалгаж, script-ээр давтан дуудаж vзэлт хиймлээр
   -- өсгөхөөс сэргийлнэ. Нэвтэрсэн бол auth.uid(), зочинд browser-ийн санамсаргvй key.
-  viewer_key text
+  viewer_key text check (char_length(viewer_key) <= 64)
 );
 -- Энэ хүснэгтэд ЗӨВХӨН доорх security definer функцүүдээр л хандана (RLS-д
 -- policy огт нэмээгүй тул шууд REST-ээр select/insert хийх боломжгүй).
@@ -243,7 +253,9 @@ declare
   effective_key text;
   recent_count int;
 begin
-  effective_key := coalesce(auth.uid()::text, nullif(trim(viewer_key), ''));
+  -- ЗАСВАР #163 (код шинжилгээ): хорлонтой клиент хэт урт viewer_key дамжуулж
+  -- хvснэгт/индексийг бөглөхөөс сэргийлж 64 тэмдэгтээр таслав.
+  effective_key := coalesce(auth.uid()::text, left(nullif(trim(viewer_key), ''), 64));
   if effective_key is null then
     return;
   end if;
@@ -298,7 +310,42 @@ as $$
   delete from public.manga_view_events where viewed_at < now() - interval '45 days';
 $$;
 
-grant execute on function public.purge_old_manga_view_events() to authenticated;
+-- ЗАСВАР #163 (код шинжилгээ): pg_cron нь SQL Editor-т ГАРААР "select
+-- cron.schedule(...)" ажиллуулсан admin/superuser эрхээр л функцийг дуудна
+-- (энгийн authenticated хэрэглэгчийн token-оор биш) тул энд grant шаардлагагvй
+-- байсныг хассан — өмнө нь ямар ч нэвтэрсэн хэрэглэгч энэ функцийг дуудаж
+-- чаддаг байв (хор багатай ч, зарчмын хувьд илvvц эрх).
+
+-- ЗАСВАР #159-ийн App.jsx-д "top_manga_cache хvснэгтээс уншина" гэж бичсэн ч,
+-- энэ хvснэгт хаана ч vvсгэгдээгvй байсан (App.jsx-ийн query алдаад
+-- top_manga_last_days RPC руу чимээгvй fallback хийдэг байв — сайт эвдрээгvй
+-- ч, зорьсон "цагийн 1 удаа тооцоод хадгалах" оновчлол бодитоор ажилладаггvй).
+create table if not exists public.top_manga_cache (
+  rank int primary key,
+  manga_id bigint not null references public.mangas(id) on delete cascade,
+  refreshed_at timestamptz not null default now()
+);
+alter table public.top_manga_cache enable row level security;
+drop policy if exists "top_manga_cache_select_all" on public.top_manga_cache;
+create policy "top_manga_cache_select_all" on public.top_manga_cache for select using (true);
+
+create or replace function public.refresh_top_manga_cache()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.top_manga_cache;
+  insert into public.top_manga_cache (rank, manga_id)
+  select row_number() over (order by count(*) desc), manga_id
+  from public.manga_view_events
+  where viewed_at > now() - interval '30 days'
+  group by manga_id
+  order by count(*) desc
+  limit 10;
+end;
+$$;
 
 -- ============================================================
 -- 8b) REELS — ЗАСВАР #113: "Юу уншихаа мэдэхгvй vv?" TikTok маягийн feed
@@ -482,10 +529,13 @@ create policy "mangas_update_moderate" on public.mangas for update
 -- бус хэрэглэгчээс далдалж, App.jsx-ийн "жагсаалтад харуулаад 🔒-ээр
 -- түгжих" урсгалыг эвдсэн тул буцаагдсан — жинхэнэ хамгаалалт (VIP/цаг)
 -- зөвхөн доорх "chapter_images_select" дээр (бодит хуудасны ЗУРАГ дээр) байна.
+-- ЗАСВАР #163 (код шинжилгээ): is_hidden/pending_delete-тэй бvлгийн МЕТАДАТА
+-- (гарчиг, дугаар) ч REST-ээр шууд query хийвэл харагддаг байсныг хаав — эдгээр
+-- нь VIP/цагийн шалгалтаас (migration_24) ялгаатай нь ЕР НЬ ХАРАГДАХ учиргvй.
 drop policy if exists "chapters_select" on public.chapters;
 create policy "chapters_select" on public.chapters for select
   using (
-    status = 'published'
+    (status = 'published' and coalesce(is_hidden, false) = false and coalesce(pending_delete, false) = false)
     or public.has_any_role(auth.uid(), array['admin','moderator','editor'])
   );
 
@@ -504,6 +554,18 @@ create policy "chapters_insert_staff" on public.chapters for insert
 drop policy if exists "chapters_update_moderate" on public.chapters;
 create policy "chapters_update_moderate" on public.chapters for update
   using (public.has_any_role(auth.uid(), array['admin','moderator']));
+
+-- ЗАСВАР #163 (код шинжилгээ): editor өөрийн ЗАВСАРЛАГА ("pending") бvлгээ
+-- (жишээ нь: pending_delete хvсэлт vvсгэх, эсвэл ирээдvйд засварлах) update
+-- хийж чадахаар нээж өгнө — гэхдээ status='pending'-ээс өөр рvv (жишээ нь
+-- шууд "published") шилжvvлж чадахгvй хэвээр (with check-ээр хамгаалагдсан).
+drop policy if exists "chapters_update_editor_own_pending" on public.chapters;
+create policy "chapters_update_editor_own_pending" on public.chapters for update
+  using (
+    public.has_any_role(auth.uid(), array['editor'])
+    and status = 'pending'
+  )
+  with check (status = 'pending');
 
 -- ЗАСВАР #135 (migration_19): moderator шууд (admin-ийг алгасаад) бvлэг устгаж
 -- чадахгvй болгов — moderator/editor зөвхөн "УСТГАХ ХvСЭЛТ" (pending_delete=true)
@@ -538,15 +600,60 @@ create policy "chapter_images_select" on public.chapter_images for select
     )
   );
 
+-- ЗАСВАР #163 (код шинжилгээ): editor нь өөрийн upload урсгалд ("pending"
+-- бvлэгт зураг нэмэх) л зориулагдсан байх ёстой байсан ч, chapter_id аль ч
+-- (бусдын published) бvлгийнх байж болдог тул editor-т дурын нийтлэгдсэн
+-- бvлэгт (vandalism-аар) зураг чихэх боломж vлдсэн байв.
 drop policy if exists "chapter_images_insert_staff" on public.chapter_images;
 create policy "chapter_images_insert_staff" on public.chapter_images for insert
-  with check (public.has_any_role(auth.uid(), array['admin','moderator','editor']));
+  with check (
+    public.has_any_role(auth.uid(), array['admin','moderator'])
+    or (
+      public.has_any_role(auth.uid(), array['editor'])
+      and exists (select 1 from public.chapters c where c.id = chapter_id and c.status = 'pending')
+    )
+  );
 
 -- ЗАСВАР #140 (migration_23): DELETE policy огт байгаагvй тул "БvЛЭГ ЗАСАХ"
 -- цонхноос admin/moderator тодорхой хуудсыг хассан ч мөр бодитоор устгагдаагvй байв.
 drop policy if exists "chapter_images_delete_moderate" on public.chapter_images;
 create policy "chapter_images_delete_moderate" on public.chapter_images for delete
   using (public.has_any_role(auth.uid(), array['admin','moderator']));
+
+-- ЗАСВАР #163 (код шинжилгээ): хуудасны дараалал солихдоо клиентээс 2N дараалсан
+-- HTTP update явуулдаг байсан (сөрөг дугаарт шилжvvлээд, дараа нь эцсийн
+-- дугаарт шилжvvлдэг 2 vе шаттай логик) — сvлжээ дундаа тасарвал сөрөг
+-- page_number хагас vлдэж дараалал эвдэрч болзошгvй байв. Одоо тэр ХОЁР vе
+-- шатыг НЭГ transaction дотор, нэг RPC дуудлагаар хийнэ.
+create or replace function public.reorder_chapter_images(chapter_id_in bigint, image_ids bigint[])
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  i int;
+begin
+  if not public.has_any_role(auth.uid(), array['admin','moderator','editor']) then
+    raise exception 'Зөвхөн staff энэ vйлдлийг хийж болно';
+  end if;
+  if exists (
+    select 1 from unnest(image_ids) as iid
+    where not exists (select 1 from public.chapter_images ci where ci.id = iid and ci.chapter_id = chapter_id_in)
+  ) then
+    raise exception 'Зарим зураг энэ бvлэгт харьяалагдахгvй байна';
+  end if;
+
+  for i in 1 .. coalesce(array_length(image_ids, 1), 0) loop
+    update public.chapter_images set page_number = -i where id = image_ids[i];
+  end loop;
+  for i in 1 .. coalesce(array_length(image_ids, 1), 0) loop
+    update public.chapter_images set page_number = i where id = image_ids[i];
+  end loop;
+end;
+$$;
+
+grant execute on function public.reorder_chapter_images(bigint, bigint[]) to authenticated;
 
 -- comments
 drop policy if exists "comments_select_all" on public.comments;
@@ -731,27 +838,20 @@ insert into storage.buckets (id, name, public)
 values ('manga-site', 'manga-site', true)
 on conflict (id) do nothing;
 
+-- ЗАСВАР #94-ээр upload бvгд Cloudflare R2 руу шилжсэн (upload-to-r2 edge
+-- function-оор дамждаг) тул энэ Supabase Storage "manga-site" bucket vнэндээ
+-- ашиглагдахгvй болсон. Гэвч (кэшлэгдсэн хуучин холбоос гэх мэт зvйлсийг
+-- эвдэхгvйн тулд) bucket-ыг бvрэн устгахгvй, зөвхөн нээлттэй УПЛОАД policy-г
+-- (өмнө нь ямар ч нэвтэрсэн хэрэглэгч дурын нэр/хэмжээгээр чөлөөтэй upload
+-- хийж чаддаг, vнэгvй file-hosting/DoS-зардлын цоорхой байсан) хассан.
+-- Хэрэв энэ bucket-ыг vнэхээр огт хэрэглэдэггvй бол Dashboard-аас бvрэн
+-- устгаж/private болгож болно.
 drop policy if exists "manga_site_public_read" on storage.objects;
 create policy "manga_site_public_read" on storage.objects for select
   using (bucket_id = 'manga-site');
 
--- avatars/ — нэвтэрсэн хэн ч өөрийн зургаа оруулж болно
 drop policy if exists "manga_site_avatar_upload" on storage.objects;
-create policy "manga_site_avatar_upload" on storage.objects for insert
-  with check (
-    bucket_id = 'manga-site'
-    and (storage.foldername(name))[1] = 'avatars'
-    and auth.role() = 'authenticated'
-  );
-
--- posters/ banners/ chapters/ — зөвхөн staff
 drop policy if exists "manga_site_staff_upload" on storage.objects;
-create policy "manga_site_staff_upload" on storage.objects for insert
-  with check (
-    bucket_id = 'manga-site'
-    and (storage.foldername(name))[1] in ('posters', 'banners', 'chapters')
-    and public.has_any_role(auth.uid(), array['admin','moderator','editor'])
-  );
 
 -- Анхны admin-аа гараар тохируулна уу (доор жишээ — өөрийн имэйлээр солино):
 -- update public.users set roles = array['admin'] where email = 'ТАНЫ_ИМЭЙЛ@жишээ.com';
@@ -771,11 +871,11 @@ create index if not exists comments_manga_idx on public.comments (manga_id, crea
 create index if not exists comments_user_recent_idx on public.comments (user_id, created_at desc);
 
 -- ============================================================
--- 13) manga_view_events PURGE-ийг өдөр бvр автоматаар ажиллуулах (сонголттой,
---     гэхдээ 20,000+ хэрэглэгчтэй болмогц зайлшгvй хэрэгтэй болно):
+-- 13) pg_cron-оор автоматаар ажиллуулах 2 зvйл (сонголттой, гэхдээ 20,000+
+--     хэрэглэгчтэй болмогц зайлшгvй хэрэгтэй болно):
 --
 --   1) Supabase Dashboard → Database → Extensions → "pg_cron"-г идэвхжvvл
---   2) Дараах командыг SQL Editor-т НЭГ УДАА гараар ажиллуул:
+--   2) Дараах 2 командыг SQL Editor-т НЭГ УДАА гараар ажиллуул:
 --
 --      select cron.schedule(
 --        'purge-manga-view-events',
@@ -783,6 +883,13 @@ create index if not exists comments_user_recent_idx on public.comments (user_id,
 --        $$select public.purge_old_manga_view_events()$$
 --      );
 --
---   Идэвхжvvлээгvй ч сайт хэвийн ажиллана — зөвхөн manga_view_events хvснэгт
---   хугацаа өнгөрөх тусам (жилд ойролцоогоор 35 сая мөр хvртэл) томорсоор байх болно.
+--      select cron.schedule(
+--        'refresh-top-manga-cache',
+--        '0 * * * *',  -- цаг тутам
+--        $$select public.refresh_top_manga_cache()$$
+--      );
+--
+--   Идэвхжvvлээгvй ч сайт хэвийн ажиллана (нvvр хуудасны "Санал болгох" fallback-аар
+--   top_manga_last_days RPC руу ордог, manga_view_events л удаан хугацаанд
+--   (жилд ойролцоогоор 35 сая мөр хvртэл) томорсоор байх болно).
 -- ============================================================
