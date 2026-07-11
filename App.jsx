@@ -250,6 +250,12 @@ export default function App() {
   // ЗАСВАР #130: бvлэг устгах хvсэлттэй холбоотой цайвар browser window.confirm()-г
   // site-тэй өнгө нийцсэн загвартай цонхоор сольсон.
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
+  // ЗАСВАР #163: манганы 7 хоног бvрийн хуваарь засах window.prompt()-г (2 удаагийн
+  // цайвар browser prompt) site-тэй өнгө нийцсэн нэг загварт цонхоор сольсон.
+  const [scheduleEditModal, setScheduleEditModal] = useState(null); // { manga, day, time }
+  // ЗАСВАР #163: сэтгэгдэл мэдэгдэх (report) шалтгаан бичих window.prompt()-г
+  // site-тэй өнгө нийцсэн загварт цонхоор сольсон.
+  const [reportReasonModal, setReportReasonModal] = useState(null); // { onSubmit, reason }
   const askConfirm = (message, onConfirm) => setConfirmModal({ message, onConfirm });
 
   // ЗАСВАР #150: "Smut" төрөлтэй манганы дэлгэрэнгvй хуудсанд ороход 18+
@@ -356,32 +362,36 @@ export default function App() {
   // ЗАСВАР #146: admin "ГАРАХ ХУВААРЬ" хуудаснаас тодорхой бvлгийн товлолтыг
   // (эсвэл манганы 7 хоног бvрийн давтагдах хуваарийг) гараар устгаж болно —
   // бvлэг/мангаг vvнээр бvрэн устгахгvй, зөвхөн ХУВААРИАС нь хасна.
-  const removeChapterSchedule = async (ch) => {
-    if (!window.confirm(`Бvлэг ${ch.chapter_number}-ийн товлолтыг хуваариас хасах уу?`)) return;
-    const { error } = await supabase.from('chapters').update({ publish_at: null }).eq('id', ch.id);
-    if (error) { notify('Алдаа: ' + error.message); return; }
-    setScheduledChapters(prev => prev.filter(x => x.id !== ch.id));
-    notify('Товлолт хуваариас хасагдлаа.');
+  const removeChapterSchedule = (ch) => {
+    askConfirm(`Бvлэг ${ch.chapter_number}-ийн товлолтыг хуваариас хасах уу?`, async () => {
+      const { error } = await supabase.from('chapters').update({ publish_at: null }).eq('id', ch.id);
+      if (error) { notify('Алдаа: ' + error.message); return; }
+      setScheduledChapters(prev => prev.filter(x => x.id !== ch.id));
+      notify('Товлолт хуваариас хасагдлаа.');
+    });
   };
-  const removeMangaSchedule = async (m) => {
-    if (!window.confirm(`"${m.title}"-ийн 7 хоног бvрийн хуваарийг хасах уу?`)) return;
-    const { error } = await supabase.from('mangas').update({ schedule_day: null, schedule_time: null }).eq('id', m.id);
-    if (error) { notify('Алдаа: ' + error.message); return; }
-    setDbMangas(prev => prev.map(x => x.id === m.id ? { ...x, schedule_day: null, schedule_time: null } : x));
-    notify('Хуваариас хасагдлаа.');
+  const removeMangaSchedule = (m) => {
+    askConfirm(`"${m.title}"-ийн 7 хоног бvрийн хуваарийг хасах уу?`, async () => {
+      const { error } = await supabase.from('mangas').update({ schedule_day: null, schedule_time: null }).eq('id', m.id);
+      if (error) { notify('Алдаа: ' + error.message); return; }
+      setDbMangas(prev => prev.map(x => x.id === m.id ? { ...x, schedule_day: null, schedule_time: null } : x));
+      notify('Хуваариас хасагдлаа.');
+    });
   };
   // ЗАСВАР #157: admin манганы 7 хоног бvрийн давтагдах хуваарийг ("өдөр",
   // "цаг") Хуваарь хуудаснаас шууд гараар засаж болно
-  const editMangaSchedule = async (m) => {
-    const dayInput = window.prompt('Шинэ өдрийг тоогоор оруулна уу (0=Ням, 1=Даваа, 2=Мягмар, 3=Лхагва, 4=Пvрэв, 5=Баасан, 6=Бямба):', String(m.schedule_day ?? ''));
-    if (dayInput === null || dayInput.trim() === '') return;
+  const editMangaSchedule = (m) => {
+    setScheduleEditModal({ manga: m, day: String(m.schedule_day ?? ''), time: m.schedule_time || '' });
+  };
+  const saveMangaSchedule = async () => {
+    const { manga: m, day: dayInput, time: timeInput } = scheduleEditModal;
     const dayNum = Number(dayInput);
-    if (!Number.isInteger(dayNum) || dayNum < 0 || dayNum > 6) { notify('Алдаа: 0-6 хооронд тоо оруулна уу!'); return; }
-    const timeInput = window.prompt('Шинэ цагийг ЦЦ:ММ (жишээ нь 18:30) хэлбэрээр оруулна уу:', m.schedule_time || '');
-    if (timeInput === null || !/^\d{1,2}:\d{2}$/.test(timeInput.trim())) { if (timeInput !== null) notify('Алдаа: цагийг ЦЦ:ММ хэлбэрээр оруулна уу!'); return; }
+    if (dayInput.trim() === '' || !Number.isInteger(dayNum) || dayNum < 0 || dayNum > 6) { notify('Алдаа: 0-6 хооронд тоо оруулна уу!'); return; }
+    if (!/^\d{1,2}:\d{2}$/.test(timeInput.trim())) { notify('Алдаа: цагийг ЦЦ:ММ хэлбэрээр оруулна уу!'); return; }
     const { error } = await supabase.from('mangas').update({ schedule_day: dayNum, schedule_time: timeInput.trim() }).eq('id', m.id);
     if (error) { notify('Алдаа: ' + error.message); return; }
     setDbMangas(prev => prev.map(x => x.id === m.id ? { ...x, schedule_day: dayNum, schedule_time: timeInput.trim() } : x));
+    setScheduleEditModal(null);
     notify('Хуваарь шинэчлэгдлээ.');
   };
 
@@ -481,7 +491,7 @@ export default function App() {
   const fetchMangas = useCallback(() => {
     // ЗАСВАР #159: select('*')-ийн оронд шаардлагатай баганаа зааж татна — egress багасна
     supabase.from('mangas')
-      .select('id, title, description, genres, genre, status, poster_url, banner_url, views, is_hidden, schedule_day, schedule_time, created_at, admin_note, is_recommended')
+      .select('id, title, description, genres, status, poster_url, banner_url, views, is_hidden, schedule_day, schedule_time, created_at, admin_note, is_recommended')
       .then(({ data, error }) => {
       if (error) console.error('Supabase манга алдаа:', error);
       if (data && data.length > 0) {
@@ -489,9 +499,9 @@ export default function App() {
           id: m.id,
           title: m.title,
           desc: m.description,
-          // ЗАСВАР #56: 1-3 төрөл зэрэг байж болно; хуучин ганц genre баганатай
-          // мөрүүд рүү буцаад тохирохын тулд нөөц (fallback) байдлаар хамааруулна
-          genres: (m.genres && m.genres.length > 0) ? m.genres : (m.genre ? [m.genre] : []),
+          // ЗАСВАР #56: хуучин ганц "genre" багана migration_5-аар бvх мөрөнд
+          // "genres" рvv нэг удаа backfill хийгдсэн тул одоо зөвхөн үvнийг уншина
+          genres: m.genres || [],
           status: m.status,
           poster: m.poster_url,
           banner_url: m.banner_url, // ШИНЭ: нүүр хэсгийн "Санал болгох" мөрөнд ашиглах урт нарийн зураг
@@ -990,24 +1000,28 @@ export default function App() {
     fetchMangaComments(selected.id);
   };
 
-  const deleteMangaComment = async (c) => {
-    if (!window.confirm('Сэтгэгдлийг устгах уу?')) return;
-    const { error } = await supabase.from('comments').delete().eq('id', c.id);
-    if (error) notify('Алдаа: ' + error.message);
-    else fetchMangaComments(selected.id);
+  const deleteMangaComment = (c) => {
+    askConfirm('Сэтгэгдлийг устгах уу?', async () => {
+      const { error } = await supabase.from('comments').delete().eq('id', c.id);
+      if (error) notify('Алдаа: ' + error.message);
+      else fetchMangaComments(selected.id);
+    });
   };
 
-  const reportMangaComment = async (c) => {
+  const reportMangaComment = (c) => {
     if (!currentUser) { setAuthPage('login'); return; }
-    const reason = window.prompt('Шалтгаанаа бичнэ vv (заавал биш):');
-    if (reason === null) return;
-    const { error } = await supabase.from('reports').insert({
-      comment_id: c.id,
-      reporter_id: currentUser.id,
-      reason: reason || '',
+    setReportReasonModal({
+      reason: '',
+      onSubmit: async (reason) => {
+        const { error } = await supabase.from('reports').insert({
+          comment_id: c.id,
+          reporter_id: currentUser.id,
+          reason: reason || '',
+        });
+        if (error) notify('Алдаа: ' + error.message);
+        else notify('Мэдэгдэл илгээгдлээ. Модератор шалгах болно 🚩');
+      },
     });
-    if (error) notify('Алдаа: ' + error.message);
-    else notify('Мэдэгдэл илгээгдлээ. Модератор шалгах болно 🚩');
   };
 
   // ЗАСВАР #109: 1-10 vнэлгээ — татах болон санал өгөх (upsert, дараа нь өөрчилж болно)
@@ -1172,17 +1186,18 @@ export default function App() {
   // ЗАСВАР #128: нэг товч дарахад moderator+editor хоёуланг зэрэг хураадаг
   // байсныг өөрчилж, эрх тус бvрийг (admin-г ч оролцуулаад) тусад нь сонгож
   // хураах боломжтой болгов.
-  const revokeSingleRole = async (user, role) => {
+  const revokeSingleRole = (user, role) => {
     if (user.id === currentUser?.id && role === 'admin') {
       notify('Алдаа: өөрийн Админ эрхийг өөрөө хураах боломжгүй.');
       return;
     }
-    if (!window.confirm(`${user.email} хэрэглэгчээс ${ROLE_LABELS[role] || role} эрхийг хураах уу?`)) return;
-    const newRoles = (user.roles || []).filter(r => r !== role);
-    const { error } = await supabase.from('users').update({ roles: newRoles }).eq('id', user.id);
-    if (error) { notify('Алдаа: ' + error.message); return; }
-    notify('Эрх хураагдлаа.');
-    fetchStaffUsers();
+    askConfirm(`${user.email} хэрэглэгчээс ${ROLE_LABELS[role] || role} эрхийг хураах уу?`, async () => {
+      const newRoles = (user.roles || []).filter(r => r !== role);
+      const { error } = await supabase.from('users').update({ roles: newRoles }).eq('id', user.id);
+      if (error) { notify('Алдаа: ' + error.message); return; }
+      notify('Эрх хураагдлаа.');
+      fetchStaffUsers();
+    });
   };
 
   // Удирдлагын хуудас нээгдэхэд бодит статистик татна
@@ -1309,25 +1324,29 @@ export default function App() {
   };
 
   // ШИНЭ: сэтгэгдэл устгах (өөрийн эсвэл moderator/admin)
-  const deleteComment = async (c) => {
-    if (!window.confirm('Сэтгэгдлийг устгах уу?')) return;
-    const { error } = await supabase.from('comments').delete().eq('id', c.id);
-    if (error) notify('Алдаа: ' + error.message);
-    else fetchComments(selectedChapter.id);
+  const deleteComment = (c) => {
+    askConfirm('Сэтгэгдлийг устгах уу?', async () => {
+      const { error } = await supabase.from('comments').delete().eq('id', c.id);
+      if (error) notify('Алдаа: ' + error.message);
+      else fetchComments(selectedChapter.id);
+    });
   };
 
   // ШИНЭ: сэтгэгдэл report хийх
-  const reportComment = async (c) => {
+  const reportComment = (c) => {
     if (!currentUser) { setAuthPage('login'); return; }
-    const reason = window.prompt('Шалтгаанаа бичнэ үү (заавал биш):');
-    if (reason === null) return;
-    const { error } = await supabase.from('reports').insert({
-      comment_id: c.id,
-      reporter_id: currentUser.id,
-      reason: reason || '',
+    setReportReasonModal({
+      reason: '',
+      onSubmit: async (reason) => {
+        const { error } = await supabase.from('reports').insert({
+          comment_id: c.id,
+          reporter_id: currentUser.id,
+          reason: reason || '',
+        });
+        if (error) notify('Алдаа: ' + error.message);
+        else notify('Мэдэгдэл илгээгдлээ. Модератор шалгах болно 🚩');
+      },
     });
-    if (error) notify('Алдаа: ' + error.message);
-    else notify('Мэдэгдэл илгээгдлээ. Модератор шалгах болно 🚩');
   };
 
   const navItems = [
@@ -3250,6 +3269,10 @@ export default function App() {
                         // болсон тул энд хуурч (жишээ нь Network tab-аар мутлаж) болохгүй.
                         status: editorOnly ? 'pending' : 'published',
                         publish_at: !editorOnly && chapterPublishAt ? new Date(chapterPublishAt).toISOString() : null,
+                        // ЗАСВАР #163: зургууд бvгд амжилттай орох хvртэл нуугдмал байлгана —
+                        // эс бол эхний секундээс "published" болоод хагас хуудастай харагдана.
+                        // Бvх зураг амжилттай орсны дараа доор is_hidden:false болгоно.
+                        is_hidden: true,
                       })
                       .select()
                       .single();
@@ -3261,6 +3284,7 @@ export default function App() {
                     }
 
                     let thumbnailUrl = '';
+                    let uploadFailed = false;
 
                     // ШИНЭ: тусдаа cover зураг оруулсан бол эхэлж upload хийнэ
                     if (chapterCover) {
@@ -3268,7 +3292,7 @@ export default function App() {
                       const cName = `chapters/${chapterData.id}/cover.${cExt}`;
                       try {
                         thumbnailUrl = await uploadToR2(chapterCover, cName);
-                      } catch (cErr) { notify('Cover upload алдаа: ' + cErr.message); }
+                      } catch (cErr) { notify('Cover upload алдаа: ' + cErr.message); uploadFailed = true; }
                       markUploadDone();
                     }
 
@@ -3282,6 +3306,7 @@ export default function App() {
                         publicUrl = await uploadToR2(file, fileName);
                       } catch (uploadError) {
                         notify(`Зураг ${i + 1} upload алдаа: ` + uploadError.message);
+                        uploadFailed = true;
                         markUploadDone();
                         continue;
                       }
@@ -3291,22 +3316,33 @@ export default function App() {
                       // хассан — тэр нь дурын (санамсаргүй харагдах) хуудасны зургийг "cover"
                       // мэт харуулдаг байсан. Одоо зөвхөн admin ЗОРИУДАА оруулсан cover л
                       // thumbnail болно; оруулаагүй бол харуулах хэсэгт манга poster ашиглана.
-                      await supabase.from('chapter_images').insert({
+                      const { error: imgError } = await supabase.from('chapter_images').insert({
                         chapter_id: chapterData.id,
                         image_url: publicUrl,
                         page_number: i + 1,
                       });
+                      if (imgError) { notify(`Зураг ${i + 1} хадгалах алдаа: ` + imgError.message); uploadFailed = true; }
                     }
 
-                    if (thumbnailUrl) {
+                    // ЗАСВАР #163: бvх зураг амжилттай орсон vед л ил болгоно; аль нэг нь
+                    // амжилтгvй болсон бол is_hidden:true хэвээр vлдээж, admin/moderator-т л
+                    // (staff тул is_hidden vл харгалзан) харагдаж дутуу хуудсаа нөхөх боломжтой байна.
+                    const chapterUpdates = {};
+                    if (!uploadFailed) chapterUpdates.is_hidden = false;
+                    if (thumbnailUrl) chapterUpdates.thumbnail_url = thumbnailUrl;
+                    if (Object.keys(chapterUpdates).length > 0) {
                       await supabase.from('chapters')
-                        .update({ thumbnail_url: thumbnailUrl })
+                        .update(chapterUpdates)
                         .eq('id', chapterData.id);
                     }
 
-                    notify(editorOnly
-                      ? 'Бүлэг илгээгдлээ! Модератор баталсны дараа нийтлэгдэнэ ✅'
-                      : 'Бүлэг амжилттай нэмэгдлээ! 🎉');
+                    if (uploadFailed) {
+                      notify('⚠️ Зарим зураг амжилтгvй боллоо — бvлгийг "нуугдсан" төлөвтэй vлдээлээ, дутуу хуудсаа chapter засварлах цэснээс нөхнө vv');
+                    } else {
+                      notify(editorOnly
+                        ? 'Бүлэг илгээгдлээ! Модератор баталсны дараа нийтлэгдэнэ ✅'
+                        : 'Бүлэг амжилттай нэмэгдлээ! 🎉');
+                    }
                     setChapterManga('');
                     setChapterNumber('');
                     setChapterTitle('');
@@ -3398,11 +3434,10 @@ export default function App() {
                           <div key={reel.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#1a1a1a', borderRadius: 8, padding: '8px 10px' }}>
                             <video src={reel.video_url} muted style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6, background: '#000', flexShrink: 0 }} />
                             <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{manga?.title || 'Манга'}</div>
-                            <span onClick={async () => {
-                              if (!window.confirm('Энэ reel-ийг устгах уу?')) return;
+                            <span onClick={() => askConfirm('Энэ reel-ийг устгах уу?', async () => {
                               const { error } = await supabase.from('reels').delete().eq('id', reel.id);
                               if (error) notify('Алдаа: ' + error.message); else fetchReels();
-                            }}
+                            })}
                               title="Устгах"
                               style={{ cursor: 'pointer', color: '#8B0000', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>✕</span>
                           </div>
@@ -3594,22 +3629,17 @@ export default function App() {
                     <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', background: '#1a1a1a', borderRadius: 10, marginBottom: 10, flexWrap: 'wrap' }}>
                       <div style={{ flex: 1, minWidth: 180 }}>
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{req.users?.name || 'Хэрэглэгч'} <span style={{ color: '#666', fontWeight: 400 }}>({req.users?.email})</span></div>
-                        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{plan ? `${plan.label} — ${plan.price}` : req.plan_key} · {formatMnDate(req.created_at)}</div>
+                        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{plan ? `${plan.label} — ${req.paid_price || plan.price}` : req.plan_key} · {formatMnDate(req.created_at)}</div>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button onClick={async () => {
+                          // ЗАСВАР #163: VIP олгох + хvсэлтийг "approved" болгохыг НЭГ transaction-той
+                          // security definer RPC-ээр хийнэ — эс бол хоёрын нэг нь fail болоход
+                          // хvсэлт "pending" хэвээр vлдэж, дахин "БАТЛАХ" дарахад VIP давхар
+                          // нэмэгдэх эрсдэлтэй байсан (RPC мөрийг түгжиж давхар батлахыг ч хориглоно).
                           const days = PLAN_DAYS[req.plan_key] || 30;
-                          const { data: userData, error: userError } = await supabase.from('users').select('vip_expires_at, is_vip').eq('id', req.user_id).single();
-                          if (userError) { notify('Алдаа: ' + userError.message); return; }
-                          const base = (userData.is_vip && userData.vip_expires_at && new Date(userData.vip_expires_at).getTime() > Date.now())
-                            ? new Date(userData.vip_expires_at)
-                            : new Date();
-                          base.setDate(base.getDate() + days);
-                          const { error: vipError } = await supabase.from('users').update({ is_vip: true, vip_expires_at: base.toISOString() }).eq('id', req.user_id);
-                          if (vipError) { notify('Алдаа: ' + vipError.message); return; }
-                          const { error: reqError } = await supabase.from('payment_requests')
-                            .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: currentUser.id }).eq('id', req.id);
-                          if (reqError) { notify('Алдаа: ' + reqError.message); return; }
+                          const { error: approveError } = await supabase.rpc('approve_payment_request', { request_id: req.id, vip_days: days });
+                          if (approveError) { notify('Алдаа: ' + approveError.message); return; }
                           notify(`VIP ${days} хоногоор олгогдлоо! 👑`);
                           fetchPaymentRequests();
                         }} style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
@@ -3682,13 +3712,12 @@ export default function App() {
                       }} style={{ background: '#1e5c2e', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                         ✓ БАТЛАХ
                       </button>
-                      <button onClick={async () => {
-                        if (!window.confirm('Энэ бүлгийг татгалзах уу?')) return;
+                      <button onClick={() => askConfirm('Энэ бүлгийг татгалзах уу?', async () => {
                         const { data, error } = await supabase.from('chapters').update({ status: 'rejected' }).eq('id', ch.id).eq('status', 'pending').select();
                         if (error) { notify('Алдаа: ' + error.message); return; }
                         if (!data || data.length === 0) notify('Энэ бvлгийг өөр moderator аль хэдийн шалгасан байна.');
                         fetchPending();
-                      }} style={{ background: 'rgba(139,0,0,0.2)', color: '#8B0000', border: '1px solid #8B0000', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                      })} style={{ background: 'rgba(139,0,0,0.2)', color: '#8B0000', border: '1px solid #8B0000', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                         ✕ ТАТГАЛЗАХ
                       </button>
                     </div>
@@ -3770,11 +3799,10 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', gap: 10 }}>
                       {r.comments && (
-                        <button onClick={async () => {
-                          if (!window.confirm('Сэтгэгдлийг устгах уу?')) return;
+                        <button onClick={() => askConfirm('Сэтгэгдлийг устгах уу?', async () => {
                           await supabase.from('comments').delete().eq('id', r.comments.id);
                           fetchReports();
-                        }} style={{ background: 'rgba(139,0,0,0.2)', color: '#8B0000', border: '1px solid #8B0000', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                        })} style={{ background: 'rgba(139,0,0,0.2)', color: '#8B0000', border: '1px solid #8B0000', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                           🗑 СЭТГЭГДЛИЙГ УСТГАХ
                         </button>
                       )}
@@ -3868,7 +3896,14 @@ export default function App() {
               <button disabled={paymentRequestSending} onClick={async () => {
                 if (!currentUser || !selectedPlan) { setShowPopup(false); return; }
                 setPaymentRequestSending(true);
-                const { error } = await supabase.from('payment_requests').insert({ user_id: currentUser.id, plan_key: selectedPlan });
+                // ЗАСВАР #163: хямдралын vед хvсэлт илгээхэд хэдэн төгрөгөөр төлөхийг
+                // хvлээж байсныг хадгална (хямдрал дуусаад ч тvvхэнд мэдэгдэхээр)
+                const planForPrice = PLANS.find(p => p.key === selectedPlan);
+                const salePriceForReq = SALE.prices[selectedPlan];
+                const paidPrice = (!!salePriceForReq && Date.now() < new Date(SALE.endsAt).getTime())
+                  ? salePriceForReq
+                  : planForPrice?.price;
+                const { error } = await supabase.from('payment_requests').insert({ user_id: currentUser.id, plan_key: selectedPlan, paid_price: paidPrice });
                 setPaymentRequestSending(false);
                 if (error) { notify('Алдаа: ' + error.message); return; }
                 notify('Хүсэлт илгээгдлээ! Admin шалгаад баталгаажуулах болно 🎉');
@@ -3931,6 +3966,60 @@ export default function App() {
                 <button onClick={() => { const fn = confirmModal.onConfirm; setConfirmModal(null); fn(); }}
                   style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                   Тийм
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #163: манганы 7 хоног бvрийн хуваарь засах цонх (window.prompt-ийн оронд) */}
+        {scheduleEditModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+            <div style={{ width: 340, maxWidth: '100%', background: '#111', border: '1px solid #222', borderRadius: 16, padding: '1.75rem', boxSizing: 'border-box' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: '1.25rem' }}>"{scheduleEditModal.manga.title}" — хуваарь засах</div>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>ӨДӨР</div>
+                <select value={scheduleEditModal.day} onChange={e => setScheduleEditModal(prev => ({ ...prev, day: e.target.value }))}
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}>
+                  {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                </select>
+              </div>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>ЦАГ (ЦЦ:ММ, жишээ нь 18:30)</div>
+                <input value={scheduleEditModal.time} onChange={e => setScheduleEditModal(prev => ({ ...prev, time: e.target.value }))}
+                  placeholder="18:30"
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setScheduleEditModal(null)}
+                  style={{ background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  Болих
+                </button>
+                <button onClick={saveMangaSchedule}
+                  style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  Хадгалах
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #163: сэтгэгдэл мэдэгдэх шалтгаан бичих цонх (window.prompt-ийн оронд) */}
+        {reportReasonModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+            <div style={{ width: 380, maxWidth: '100%', background: '#111', border: '1px solid #222', borderRadius: 16, padding: '1.75rem', boxSizing: 'border-box' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 12 }}>🚩 Мэдэгдэх шалтгаан</div>
+              <textarea value={reportReasonModal.reason} onChange={e => setReportReasonModal(prev => ({ ...prev, reason: e.target.value }))}
+                placeholder="Шалтгаанаа бичнэ vv (заавал биш)" rows={3}
+                style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', resize: 'vertical', marginBottom: '1.5rem', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setReportReasonModal(null)}
+                  style={{ background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  Болих
+                </button>
+                <button onClick={() => { const fn = reportReasonModal.onSubmit; const reason = reportReasonModal.reason; setReportReasonModal(null); fn(reason); }}
+                  style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  Илгээх
                 </button>
               </div>
             </div>

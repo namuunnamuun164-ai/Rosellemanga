@@ -16,6 +16,16 @@
 -- Ажиллуулахаас өмнө: rosellemanga хүснэгт хоосон (0 багана, өгөгдөлгүй)
 -- гэдгийг би REST API-аар шалгаад баталгаажуулсан тул устгахад дата алдагдахгүй.
 -- Supabase Dashboard → SQL Editor-т бүхлээр нь ГАРААР ажиллуулна уу.
+--
+-- ЗАСВАР #163 (код шинжилгээ): ЭНЭ ФАЙЛ ЗӨВХӨН АНХНЫ ("cold start") ТӨСЛИЙН
+-- ТОХИРГОО — supabase_migration_2.sql-ээс supabase_migration_24.sql хvртэлх
+-- бvх дараагийн засваруудыг ДАХИН ОРУУЛААГvй. Тиймээс шинэ (хоосон) Supabase
+-- төсөл дээр зөвхөн ЭНЭ файлыг ажиллуулаад зогсчихвол App.jsx-ийн одоогийн
+-- код (жишээ нь sticker_4-6, mangas_update_moderate гэх мэт) ажиллахгvй.
+-- Зөв дараалал: эхлээд ЭНЭ файл, дараа нь migration_2 → migration_24-ийг
+-- ДАРААЛУУЛАН ГАРААР ажиллуулна уу. Доорх sticker_4-6 болон
+-- mangas_update_moderate хэсгvvдийг тухайн migration-уудтай (10, 14) яг
+-- тааруулж энд хамт нэмсэн тул давхар ажиллуулахад аюулгvй (idempotent).
 
 -- ============================================================
 -- 1) MANGAS
@@ -57,10 +67,14 @@ create table if not exists public.users (
   -- ЗАСВАР #20: VIP-г roles-оос тусад нь, дуусах хугацаатайгаар хадгална
   is_vip boolean not null default false,
   vip_expires_at timestamptz,
-  -- ЗАСВАР #10 (migration_10): хэрэглэгчийн сэтгэгдэлд ашиглах 3 хvртэлх стикер
+  -- ЗАСВАР #10 (migration_10) + #15 (migration_15): хэрэглэгчийн сэтгэгдэлд
+  -- ашиглах 6 хvртэлх стикер (App.jsx-ийн stickerSlots үvнтэй тааруулсан байх ёстой)
   sticker_1 text,
   sticker_2 text,
   sticker_3 text,
+  sticker_4 text,
+  sticker_5 text,
+  sticker_6 text,
   created_at timestamptz not null default now()
 );
 
@@ -266,12 +280,19 @@ as $$
 begin
   -- auth.uid() нь NULL байвал энэ бол SQL Editor эсвэл service_role-оор хийгдэж буй
   -- итгэмжлэгдсэн (trusted) өөрчлөлт гэсэн үг тул чөлөөтэй зөвшөөрнө. Харин browser-ээс
-  -- нэвтэрсэн энгийн (admin биш) хэрэглэгч өөрийгөө/бусдыг admin болгохыг хориглоно.
-  if new.roles is distinct from old.roles then
+  -- нэвтэрсэн энгийн (admin биш) хэрэглэгч өөрийгөө/бусдыг admin/VIP болгохыг хориглоно.
+  -- ЗАСВАР #126 (migration_14): is_vip/vip_expires_at-г ч мөн roles-той адил
+  -- хамгаалав — эс бол хэрэглэгч Network tab-аар шууд .update({is_vip:true}) дуудаж
+  -- төлбөргvйгээр өөрийгөө VIP болгож чаддаг байсан.
+  if new.roles is distinct from old.roles
+     or new.is_vip is distinct from old.is_vip
+     or new.vip_expires_at is distinct from old.vip_expires_at then
     if auth.uid() is not null and not exists (
       select 1 from public.users u where u.id = auth.uid() and 'admin' = any(u.roles)
     ) then
       new.roles := old.roles;
+      new.is_vip := old.is_vip;
+      new.vip_expires_at := old.vip_expires_at;
     end if;
   end if;
   return new;
@@ -301,8 +322,31 @@ alter table public.reels enable row level security;
 alter table public.reel_likes enable row level security;
 
 -- users
+-- ЗАСВАР #126 (migration_14): "using (true)" хэн ч бvх хэрэглэгчийн мөрийг (имэйл
+-- гэх мэт) бvрэн уншиж чаддаг байсан цоорхойг таслаж, зөвхөн өөрийн мөр/staff-аар
+-- хязгаарлав. Сэтгэгдлийн эзэмшигчийн нэр/зураг vзvvлэхэд шаардлагатай нээлттэй
+-- мэдээллийг (email биш) get_public_profiles() security definer функцээр дамжуулна.
 drop policy if exists "users_select_all" on public.users;
-create policy "users_select_all" on public.users for select using (true);
+drop policy if exists "users_select_own_or_staff" on public.users;
+create policy "users_select_own_or_staff" on public.users for select
+  using (
+    auth.uid() = id
+    or exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor'])
+  );
+
+create or replace function public.get_public_profiles(user_ids uuid[])
+returns table(id uuid, name text, avatar_url text, roles text[])
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select u.id, u.name, u.avatar_url, u.roles
+  from public.users u
+  where u.id = any(user_ids);
+$$;
+
+grant execute on function public.get_public_profiles(uuid[]) to anon, authenticated;
 
 drop policy if exists "users_update_own" on public.users;
 create policy "users_update_own" on public.users for update
@@ -325,21 +369,47 @@ drop policy if exists "mangas_insert_staff" on public.mangas;
 create policy "mangas_insert_staff" on public.mangas for insert
   with check (exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor']));
 
+-- ЗАСВАР #126/#136 (migration_14/20): editor нь мангыг шууд засах ёсгvй (нуух,
+-- санал болгох гэх мэт зөвхөн admin/moderator-д зориулсан) тул admin/moderator-аар
+-- хязгаарласан (хуучин нэр нь "mangas_update_staff" байсан бөгөөд editor-ийг ч
+-- оруулдаг байсан цоорхойг migration_14-ээр таслав).
 drop policy if exists "mangas_update_staff" on public.mangas;
-create policy "mangas_update_staff" on public.mangas for update
-  using (exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor']));
+drop policy if exists "mangas_update_moderate" on public.mangas;
+create policy "mangas_update_moderate" on public.mangas for update
+  using (exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator']));
 
 -- chapters
+-- ЗАСВАР #126 (migration_14): published байсан ч VIP-тэй бөгөөд хэрэглэгч VIP
+-- биш бол, эсвэл publish_at ирээгvй бол харагдахгvй байхаар нэмж хамгаалав
+-- (өмнө нь хэн ч REST API-аар шууд дуудаж vнэгvй авч чаддаг байсан цоорхой).
 drop policy if exists "chapters_select" on public.chapters;
 create policy "chapters_select" on public.chapters for select
   using (
-    status = 'published'
-    or exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor'])
+    exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor'])
+    or (
+      status = 'published'
+      and (publish_at is null or publish_at <= now())
+      and (
+        not is_vip
+        or exists (
+          select 1 from public.users u where u.id = auth.uid()
+            and u.is_vip and (u.vip_expires_at is null or u.vip_expires_at > now())
+        )
+      )
+    )
   );
 
+-- ЗАСВАР #126 (migration_14): editor эрхтэй хэрэглэгч зөвхөн "pending" төлөвтэй
+-- бvлэг оруулж болно (шууд "published" болгож чадахгvй); admin/moderator хязгааргvй.
 drop policy if exists "chapters_insert_staff" on public.chapters;
 create policy "chapters_insert_staff" on public.chapters for insert
-  with check (exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor']));
+  with check (
+    exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator'])
+    or (
+      exists (select 1 from public.users u where u.id = auth.uid() and 'editor' = any(u.roles))
+      and status = 'pending'
+    )
+  );
 
 drop policy if exists "chapters_update_moderate" on public.chapters;
 create policy "chapters_update_moderate" on public.chapters for update
@@ -349,14 +419,28 @@ drop policy if exists "chapters_delete_moderate" on public.chapters;
 create policy "chapters_delete_moderate" on public.chapters for delete
   using (exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator']));
 
--- chapter_images (published бүлгийн зургийг хэн ч харна; staff бүгдийг)
+-- chapter_images (published бүлгийн зургийг хэн ч харна; staff бүгдийг; VIP/publish_at
+-- шалгалт chapters_select-тэй ижил логикоор — ЗАСВАР #126, migration_14)
 drop policy if exists "chapter_images_select" on public.chapter_images;
 create policy "chapter_images_select" on public.chapter_images for select
   using (
     exists (
       select 1 from public.chapters c
       where c.id = chapter_id
-        and (c.status = 'published' or exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor']))
+        and (
+          exists (select 1 from public.users u where u.id = auth.uid() and u.roles && array['admin','moderator','editor'])
+          or (
+            c.status = 'published'
+            and (c.publish_at is null or c.publish_at <= now())
+            and (
+              not c.is_vip
+              or exists (
+                select 1 from public.users u where u.id = auth.uid()
+                  and u.is_vip and (u.vip_expires_at is null or u.vip_expires_at > now())
+              )
+            )
+          )
+        )
     )
   );
 
@@ -436,6 +520,33 @@ create policy "manga_ratings_select_all" on public.manga_ratings for select usin
 drop policy if exists "manga_ratings_own" on public.manga_ratings;
 create policy "manga_ratings_own" on public.manga_ratings for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ЗАСВАР #136 (migration_20): "is_recommended" (нvvр хэсгийн "САНАЛ БОЛГОХ" hero)
+-- UI дээр зөвхөн isAdmin-д харагддаг тул RLS-ээр ч мөн зөвхөн admin-аар
+-- хязгаарлав — moderator mangas_update_moderate эрхтэй ч энэ баганыг өөрчилбол
+-- чимээгvй хуучин утга руугаа буцна.
+create or replace function public.prevent_unauthorized_manga_recommend()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.is_recommended is distinct from old.is_recommended then
+    if auth.uid() is not null and not exists (
+      select 1 from public.users u where u.id = auth.uid() and 'admin' = any(u.roles)
+    ) then
+      new.is_recommended := old.is_recommended;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_prevent_unauthorized_manga_recommend on public.mangas;
+create trigger trg_prevent_unauthorized_manga_recommend
+  before update on public.mangas
+  for each row execute function public.prevent_unauthorized_manga_recommend();
 
 -- reels — зөвхөн admin/moderator нэмж/устгаж болно, бvгд хардаг
 drop policy if exists "reels_select_all" on public.reels;
