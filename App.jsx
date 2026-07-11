@@ -2688,23 +2688,25 @@ export default function App() {
                 const remainingMs = new Date(SALE.endsAt).getTime() - nowTs;
                 return (
                 <div key={plan.key}
-                  style={{ width: 300, background: '#111', padding: 30, borderRadius: 20, border: onSale ? '2px solid #f5a623' : '2px solid #8B0000', transition: '0.3s', cursor: 'pointer', position: 'relative', boxShadow: plan.recommended ? '0 0 30px #8B0000' : 'none' }}
+                  style={{ width: 300, background: '#111', padding: 30, borderRadius: 20, border: onSale ? '1px solid #7c3aed' : '2px solid #8B0000', transition: '0.3s', cursor: 'pointer', position: 'relative', boxShadow: plan.recommended ? '0 0 30px #8B0000' : 'none' }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.boxShadow = '0 0 30px rgba(139,0,0,0.5)'; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = plan.recommended ? '0 0 30px #8B0000' : 'none'; }}>
                   {plan.recommended && !onSale && (
                     <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', background: '#8B0000', padding: '4px 16px', borderRadius: 20, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>САНАЛ БОЛГОХ</div>
                   )}
                   {onSale && (
-                    <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', background: '#f5a623', color: '#000', padding: '4px 16px', borderRadius: 20, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>🔥 -{percentOff}% ХЯМДРАЛ</div>
+                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: '#7c3aed', color: '#fff', padding: '3px 14px', borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>-{percentOff}%</div>
                   )}
                   <h2 style={{ textAlign: 'center', color: '#fff', marginBottom: 8 }}>{plan.label}</h2>
                   {onSale ? (
-                    <div style={{ position: 'relative', textAlign: 'center', margin: '20px 0' }}>
-                      <div style={{ position: 'absolute', top: -12, right: 4, transform: 'rotate(6deg)', background: '#f5a623', color: '#000', border: '1.5px dashed #000', borderRadius: 8, padding: '3px 8px', fontSize: 10, fontWeight: 800, lineHeight: 1.3, whiteSpace: 'nowrap' }}>
-                        ХЯМДРАЛ<br />{remainingMs > 0 ? formatRemaining(remainingMs) || '1 мин' : ''} vлдсэн
+                    <div style={{ textAlign: 'center', margin: '20px 0' }}>
+                      <div>
+                        <span style={{ fontSize: 16, color: '#666', textDecoration: 'line-through', marginRight: 10 }}>{plan.price}</span>
+                        <span style={{ fontSize: 40, fontWeight: 900, color: '#c4b5fd' }}>{salePrice}</span>
                       </div>
-                      <span style={{ fontSize: 18, color: '#666', textDecoration: 'line-through', marginRight: 10 }}>{plan.price}</span>
-                      <span style={{ fontSize: 40, fontWeight: 900, color: '#f5a623' }}>{salePrice}</span>
+                      {remainingMs > 0 && (
+                        <div style={{ fontSize: 11, color: '#9d7fe0', marginTop: 6 }}>{formatRemaining(remainingMs) || '1 мин'} vлдсэн</div>
+                      )}
                     </div>
                   ) : (
                     <div style={{ textAlign: 'center', fontSize: 40, fontWeight: 900, margin: '20px 0', color: '#fff' }}>{plan.price}</div>
