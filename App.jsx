@@ -3210,7 +3210,7 @@ export default function App() {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, maxHeight: 320, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
                       {chapterFiles.map((file, i) => (
                         <div key={i} style={{ position: 'relative', width: 76 }}>
-                          <img src={chapterFileUrls[i]} alt={`${i + 1}`}
+                          <img src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
                             style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
                           <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{i + 1}</div>
                           <span onClick={() => setChapterFiles(prev => prev.filter((_, idx) => idx !== i))}
@@ -3995,7 +3995,7 @@ export default function App() {
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
                 {chapterFiles.map((file, i) => (
-                  <img key={i} src={chapterFileUrls[i]} alt={`${i + 1}`}
+                  <img key={i} src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
                     style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                 ))}
               </div>
@@ -4279,7 +4279,7 @@ export default function App() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: 260, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
                     {editChapterExistingImages.map((img, i) => (
                       <div key={img.id} style={{ position: 'relative', width: 76 }}>
-                        <img src={img.image_url} alt={`${i + 1}`} style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
+                        <img src={img.image_url} alt={`${i + 1}`} loading="lazy" decoding="async" style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
                         <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{i + 1}</div>
                         <span onClick={() => setEditChapterExistingImages(prev => prev.filter((_, idx) => idx !== i))}
                           title="Устгах"
@@ -4309,7 +4309,7 @@ export default function App() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, maxHeight: 260, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
                     {editChapterNewFiles.map((file, i) => (
                       <div key={i} style={{ position: 'relative', width: 76 }}>
-                        <img src={editChapterNewFileUrls[i]} alt="" style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
+                        <img src={editChapterNewFileUrls[i]} alt="" loading="lazy" decoding="async" style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a', display: 'block' }} />
                         <div style={{ position: 'absolute', top: 3, left: 3, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 6px', borderRadius: 4 }}>{editChapterExistingImages.length + i + 1}</div>
                         <span onClick={() => setEditChapterNewFiles(prev => prev.filter((_, idx) => idx !== i))}
                           title="Устгах"
@@ -4414,11 +4414,11 @@ export default function App() {
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
                 {editChapterExistingImages.map((img, i) => (
-                  <img key={img.id} src={img.image_url} alt={`${i + 1}`}
+                  <img key={img.id} src={img.image_url} alt={`${i + 1}`} loading="lazy" decoding="async"
                     style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                 ))}
                 {editChapterNewFiles.map((file, i) => (
-                  <img key={`new${i}`} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`}
+                  <img key={`new${i}`} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} loading="lazy" decoding="async"
                     style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                 ))}
               </div>
