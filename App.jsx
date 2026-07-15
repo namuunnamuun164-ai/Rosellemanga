@@ -21,6 +21,9 @@ export default function App() {
   const [paymentRequests, setPaymentRequests] = useState([]);
   // ЗАСВАР #163: admin-д VIP эрх авсан хэрэглэгчдийн жагсаалт (имэйл + vлдсэн хоног)
   const [vipUsers, setVipUsers] = useState([]);
+  // ЗАСВАР #163: admin-ий статистик таб — цагаар идэвхжил + сvvлийн 1 сарын топ манга
+  const [viewsByHour, setViewsByHour] = useState([]);
+  const [topMangaMonth, setTopMangaMonth] = useState([]);
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeGenre, setActiveGenre] = useState('Бүгд');
@@ -1233,6 +1236,22 @@ export default function App() {
       });
   }, []);
 
+  // ЗАСВАР #163: admin-ий "📊 СТАТИСТИК" таб — цагаар идэвхжил (сvvлийн 30 хоног)
+  // + сvvлийн 1 сарын хамгийн их уншигдсан 10 манга (top_manga_last_days-тэй ижил
+  // өгөгдлийг ашиглана, зөвхөн admin-д харагдана).
+  const fetchAnalytics = useCallback(() => {
+    supabase.rpc('admin_views_by_hour', { days_back: 30 })
+      .then(({ data, error }) => {
+        if (error) { console.error('Цагийн статистик татах алдаа:', error); return; }
+        setViewsByHour(data || []);
+      });
+    supabase.rpc('top_manga_last_days', { days_back: 30, result_limit: 10 })
+      .then(({ data, error }) => {
+        if (error) { console.error('Топ манга татах алдаа:', error); return; }
+        setTopMangaMonth(data || []);
+      });
+  }, []);
+
   // ЗАСВАР #128: нэг товч дарахад moderator+editor хоёуланг зэрэг хураадаг
   // байсныг өөрчилж, эрх тус бvрийг (admin-г ч оролцуулаад) тусад нь сонгож
   // хураах боломжтой болгов.
@@ -1270,8 +1289,9 @@ export default function App() {
       fetchStaffUsers();
       fetchPendingDeleteChapters();
       fetchVipUsers();
+      fetchAnalytics();
     }
-  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers]);
+  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers, fetchAnalytics]);
 
   // ЗАСВАР #21: тодорхой цагт (publish_at) товлогдсон бvлгvvдийг татаж,
   // хуваарийн хуудсанд манга-түвшний долоо хоногийн хуваариас гадна харуулна
@@ -3054,6 +3074,7 @@ export default function App() {
                 { key: 'pending', label: `ХҮЛЭЭГДЭЖ БУЙ (${pendingChapters.length})`, show: canModerate },
                 { key: 'deleteRequests', label: `УСТГАХ ХҮСЭЛТ (${pendingDeleteChapters.length})`, show: isAdmin },
                 { key: 'reports', label: `МЭДЭГДЭЛ (${reportsList.length})`, show: canModerate },
+                { key: 'analytics', label: '📊 СТАТИСТИК', show: isAdmin },
               ].filter(t => t.show).map(t => (
                 <div key={t.key} onClick={() => setAdminTab(t.key)}
                   style={{ padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, background: adminTab === t.key ? '#8B0000' : '#161616', color: adminTab === t.key ? '#fff' : '#888' }}>
@@ -3919,6 +3940,65 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* ЗАСВАР #163: admin-ий статистик таб — цагаар идэвхжил + сvvлийн 1 сарын топ манга */}
+            {adminTab === 'analytics' && isAdmin && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
+                    🕐 ЦАГААР ИДЭВХЖИЛ (сvvлийн 30 хоног)
+                  </div>
+                  {viewsByHour.length === 0 ? (
+                    <div style={{ fontSize: 13, color: '#555' }}>Одоогоор өгөгдөл алга</div>
+                  ) : (() => {
+                    const maxCount = Math.max(...viewsByHour.map(h => Number(h.view_count)), 1);
+                    const byHour = {};
+                    viewsByHour.forEach(h => { byHour[h.hour_of_day] = Number(h.view_count); });
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 140 }}>
+                        {Array.from({ length: 24 }, (_, h) => {
+                          const count = byHour[h] || 0;
+                          return (
+                            <div key={h} title={`${h}:00 — ${count} vзэлт`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                              <div style={{ width: '100%', height: 100, display: 'flex', alignItems: 'flex-end' }}>
+                                <div style={{ width: '100%', height: `${Math.max(2, (count / maxCount) * 100)}%`, background: count > 0 ? '#8B0000' : '#222', borderRadius: '3px 3px 0 0' }} />
+                              </div>
+                              <span style={{ fontSize: 8, color: '#555' }}>{h}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                  <div style={{ fontSize: 11, color: '#555', marginTop: 10 }}>Цаг нь Улаанбаатарын цагийн бvсээр (UTC+8)</div>
+                </div>
+
+                <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e', maxWidth: 480 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
+                    🔥 СvvЛИЙН 1 САРЫН ТОП МАНГА
+                  </div>
+                  {topMangaMonth.length === 0 ? (
+                    <div style={{ fontSize: 13, color: '#555' }}>Одоогоор өгөгдөл алга</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {topMangaMonth.map((row, i) => {
+                        const m = dbMangas.find(x => x.id === row.manga_id);
+                        return (
+                          <div key={row.manga_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: '#1a1a1a', borderRadius: 8 }}>
+                            <span style={{ width: 20, textAlign: 'center', fontWeight: 800, color: '#8B0000', flexShrink: 0 }}>{i + 1}</span>
+                            {m?.poster && <img src={m.poster} alt="" loading="lazy" style={{ width: 32, height: 44, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />}
+                            <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m?.title || `Манга #${row.manga_id}`}</div>
+                            <div style={{ fontSize: 12, color: '#888', flexShrink: 0 }}>{row.recent_views} vзэлт</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -295,6 +295,30 @@ $$;
 
 grant execute on function public.top_manga_last_days(int, int) to anon, authenticated;
 
+-- ЗАСВАР #163: admin-ий "📊 СТАТИСТИК" таб — өдрийн аль цагт хамгийн их
+-- уншигддагийг харуулна. Зөвхөн admin дуудаж болно (function дотроо шалгана).
+create or replace function public.admin_views_by_hour(days_back int default 30)
+returns table(hour_of_day int, view_count bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.has_any_role(auth.uid(), array['admin']) then
+    raise exception 'Зөвхөн admin энэ vйлдлийг хийж болно.';
+  end if;
+  return query
+    select extract(hour from (e.viewed_at at time zone 'Asia/Ulaanbaatar'))::int as hour_of_day,
+           count(*) as view_count
+    from public.manga_view_events e
+    where e.viewed_at > now() - (days_back || ' days')::interval
+    group by 1
+    order by 1;
+end;
+$$;
+
+grant execute on function public.admin_views_by_hour(int) to authenticated;
+
 -- ЗАСВАР #163 (код шинжилгээ): 20,000 хэрэглэгчтэй vед ч manga_view_events
 -- жилд ~35 сая мөр хvртэл өсөж болзошгvй тул хуучин (top_manga_last_days-ийн
 -- дээд тал 30 хоногоос хамаагvй хуучин) мөрийг устгах purge функц. Үvнийг
