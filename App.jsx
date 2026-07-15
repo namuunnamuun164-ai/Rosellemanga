@@ -19,6 +19,8 @@ export default function App() {
   // ЗАСВАР #91: "Төлбөр төлсөн" хүсэлт admin-д очиж, admin шалгаад батлах/цуцлах
   const [paymentRequestSending, setPaymentRequestSending] = useState(false);
   const [paymentRequests, setPaymentRequests] = useState([]);
+  // ЗАСВАР #163: admin-д VIP эрх авсан хэрэглэгчдийн жагсаалт (имэйл + vлдсэн хоног)
+  const [vipUsers, setVipUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeGenre, setActiveGenre] = useState('Бүгд');
@@ -1218,6 +1220,19 @@ export default function App() {
       .then(({ data, error }) => { if (error) console.error('Staff татах алдаа:', error); else setStaffUsers(data || []); });
   }, []);
 
+  // ЗАСВАР #163: одоо идэвхтэй (дуусаагvй) VIP эрхтэй хэрэглэгчдийг vлдсэн
+  // хугацаагаар нь эрэмбэлж татна — админ хуудсанд имэйл + vлдсэн хоногийг харуулна
+  const fetchVipUsers = useCallback(() => {
+    supabase.from('users').select('id, email, name, vip_expires_at')
+      .eq('is_vip', true)
+      .order('vip_expires_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) { console.error('VIP хэрэглэгч татах алдаа:', error); return; }
+        const now = Date.now();
+        setVipUsers((data || []).filter(u => !u.vip_expires_at || new Date(u.vip_expires_at).getTime() > now));
+      });
+  }, []);
+
   // ЗАСВАР #128: нэг товч дарахад moderator+editor хоёуланг зэрэг хураадаг
   // байсныг өөрчилж, эрх тус бvрийг (admin-г ч оролцуулаад) тусад нь сонгож
   // хураах боломжтой болгов.
@@ -1254,8 +1269,9 @@ export default function App() {
       fetchPaymentRequests();
       fetchStaffUsers();
       fetchPendingDeleteChapters();
+      fetchVipUsers();
     }
-  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters]);
+  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers]);
 
   // ЗАСВАР #21: тодорхой цагт (publish_at) товлогдсон бvлгvvдийг татаж,
   // хуваарийн хуудсанд манга-түвшний долоо хоногийн хуваариас гадна харуулна
@@ -3598,6 +3614,7 @@ export default function App() {
 
               {/* ЗАСВАР #20: VIP олгох — role-оос тусад нь, хэдэн хоногийн хугацаатай */}
               {adminTab === 'vip' && isAdmin && (
+              <>
               <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e', maxWidth: 480 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 4, height: 16, background: '#f5a623', borderRadius: 2 }} />
@@ -3658,9 +3675,46 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* ЗАСВАР #163: одоо идэвхтэй VIP эрхтэй хэрэглэгчдийн жагсаалт —
+                  vлдсэн хугацаагаар нь (хамгийн эрт дуусах нь эхэндээ) эрэмбэлнэ */}
+              <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e', maxWidth: 480, marginTop: '1.5rem' }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 4, height: 16, background: '#f5a623', borderRadius: 2 }} />
+                  👑 ИДЭВХТЭЙ VIP ХЭРЭГЛЭГЧИД ({vipUsers.length})
+                </div>
+                {vipUsers.length === 0 ? (
+                  <div style={{ fontSize: 13, color: '#555' }}>Одоогоор VIP хэрэглэгч алга</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
+                    {vipUsers.map(u => {
+                      const daysLeft = u.vip_expires_at ? Math.max(0, Math.ceil((new Date(u.vip_expires_at).getTime() - nowTs) / 86400000)) : null;
+                      return (
+                        <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#1a1a1a', borderRadius: 8 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || 'Хэрэглэгч'}</div>
+                            <div style={{ fontSize: 11, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#f5a623', whiteSpace: 'nowrap' }}>
+                            {daysLeft === null ? 'Хугацаагvй' : `${daysLeft} хоног vлдсэн`}
+                          </div>
+                          <span onClick={() => askConfirm(`${u.email}-ийн VIP эрхийг цуцлах уу?`, async () => {
+                            const { error } = await supabase.from('users').update({ is_vip: false, vip_expires_at: null }).eq('id', u.id);
+                            if (error) { notify('Алдаа: ' + error.message); return; }
+                            notify('VIP цуцлагдлаа');
+                            fetchVipUsers();
+                          })} title="VIP цуцлах"
+                            style={{ cursor: 'pointer', color: '#8B0000', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>✕</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              </>
               )}
 
-              {/* ЗАСВАР #91: "ТӨЛБӨР ТӨЛСӨН" хүсэлтүүд — admin шалгаад батлах/цуцлах */}
+              {/* ЗАСВАР #91: "ТӨЛБӨР ТӨЛСӨН" хvсэлтvvд — admin шалгаад батлах/цуцлах */}
               {adminTab === 'payments' && isAdmin && (
               <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
