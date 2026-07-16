@@ -136,6 +136,8 @@ export default function App() {
       return arr;
     });
     setEditChapterEditTarget({ kind, index: newIndex });
+    setEditChapterCropActive(false);
+    setEditChapterCropBox(null);
   };
 
   // ЗАСВАР #163: аль хэдийн R2-д байгаа зургийг crop/replace хийхэд шинэ файлыг
@@ -392,6 +394,10 @@ export default function App() {
       return arr;
     });
     setChapterEditIndex(newIndex);
+    // ЗАСВАР #163: crop идэвхтэй vед байрлал сольвол хуучин crop хvрээ шинэ
+    // байрлал дээр "тээгдэж" очиж буруу тайрагдах эрсдэлийг таслав.
+    setChapterCropActive(false);
+    setChapterCropBox(null);
   };
 
   const chapterReplaceInputRef = useRef(null);
@@ -4465,7 +4471,7 @@ export default function App() {
                 {chapterFiles.map((file, i) => {
                   const isSelected = chapterEditIndex === i;
                   return (
-                    <div key={i} onClick={() => !isSelected && setChapterEditIndex(i)}
+                    <div key={i} onClick={() => { if (!isSelected) { setChapterEditIndex(i); setChapterCropActive(false); setChapterCropBox(null); } }}
                       style={{ position: 'relative', cursor: isSelected ? 'default' : 'pointer', border: isSelected ? '3px solid #f5a623' : '3px solid transparent', boxSizing: 'border-box' }}>
                       <img ref={isSelected ? chapterEditImgRef : undefined} src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && chapterEditBusy ? 0.4 : 1 }} />
@@ -4972,7 +4978,7 @@ export default function App() {
                 {editChapterExistingImages.map((img, i) => {
                   const isSelected = editChapterEditTarget?.kind === 'existing' && editChapterEditTarget.index === i;
                   return (
-                    <div key={img.id} onClick={() => !isSelected && setEditChapterEditTarget({ kind: 'existing', index: i })}
+                    <div key={img.id} onClick={() => { if (!isSelected) { setEditChapterEditTarget({ kind: 'existing', index: i }); setEditChapterCropActive(false); setEditChapterCropBox(null); } }}
                       style={{ position: 'relative', cursor: isSelected ? 'default' : 'pointer', border: isSelected ? '3px solid #f5a623' : '3px solid transparent', boxSizing: 'border-box' }}>
                       <img ref={isSelected ? editChapterEditImgRef : undefined} src={img.image_url} alt={`${i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && editChapterEditBusy ? 0.4 : 1 }} />
@@ -5003,7 +5009,7 @@ export default function App() {
                 {editChapterNewFiles.map((file, i) => {
                   const isSelected = editChapterEditTarget?.kind === 'new' && editChapterEditTarget.index === i;
                   return (
-                    <div key={`new${i}`} onClick={() => !isSelected && setEditChapterEditTarget({ kind: 'new', index: i })}
+                    <div key={`new${i}`} onClick={() => { if (!isSelected) { setEditChapterEditTarget({ kind: 'new', index: i }); setEditChapterCropActive(false); setEditChapterCropBox(null); } }}
                       style={{ position: 'relative', cursor: isSelected ? 'default' : 'pointer', border: isSelected ? '3px solid #f5a623' : '3px solid transparent', boxSizing: 'border-box' }}>
                       <img ref={isSelected ? editChapterEditImgRef : undefined} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && editChapterEditBusy ? 0.4 : 1 }} />
