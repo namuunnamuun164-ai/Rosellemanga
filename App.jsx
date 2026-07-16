@@ -90,8 +90,9 @@ export default function App() {
   }, [editChapterNewFiles]);
 
   // ЗАСВАР #124: хадгалахдаа анх татсан зурагнуудаас алийг нь хассаныг мэдэхийн тулд
-  // анхны id-нуудыг тусад нь хадгална (устгагдсан мөрийг ганцаарчлан хасахын тулд)
-  const editChapterInitialImageIds = useRef([]);
+  // анхны мөрvvдийг (id + image_url) тусад нь хадгална (устгагдсан мөрийг ганцаарчлан
+  // хасах, ЗАСВАР #163: мөн R2-с бодит файлыг нь устгахад image_url хэрэгтэй тул).
+  const editChapterInitialImages = useRef([]);
   // ЗАСВАР #145: гарах цагийг эдитлээд өөрчилсөн эсэхийг мэдэхийн тулд анхны
   // (DB-д байгаа) утгыг хадгална — өөрчилсөн vед л created_at-ыг "одоо" болгож,
   // бvлгийг шинэ мэт "ШИНЭ БvЛЭГ" мөрөнд дахин гаргана.
@@ -113,7 +114,7 @@ export default function App() {
     supabase.from('chapter_images').select('id, chapter_id, image_url, page_number').eq('chapter_id', ch.id).order('page_number')
       .then(({ data }) => {
         setEditChapterExistingImages(data || []);
-        editChapterInitialImageIds.current = (data || []).map(img => img.id);
+        editChapterInitialImages.current = data || [];
       });
   };
   // ШИНЭ: "Хувиар" тусдаа хуудас байхаа больж, avatar дээр дарахад буланд гарч ирэх жижиг цонх боллоо
@@ -1133,11 +1134,17 @@ export default function App() {
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     setStickerUploading(slot);
+    const oldUrl = userProfile?.[`sticker_${slot}`];
     try {
       const ext = file.name.split('.').pop();
       const url = await uploadToR2(file, `stickers/${currentUser.id}/${slot}-${Date.now()}.${ext}`);
       const { error } = await supabase.from('users').update({ [`sticker_${slot}`]: url }).eq('id', currentUser.id);
-      if (error) { notify('Алдаа: ' + error.message); } else { fetchProfile(currentUser.id); notify('Стикер нэмэгдлээ! 🎉'); }
+      if (error) { notify('Алдаа: ' + error.message); } else {
+        fetchProfile(currentUser.id);
+        notify('Стикер нэмэгдлээ! 🎉');
+        // ЗАСВАР #163: хуучин стикер файл R2-д мөнхөд орхигддог байсныг засав
+        if (oldUrl) { try { await deleteFromR2([oldUrl]); } catch { /* хор хөнөөлгvй */ } }
+      }
     } catch (e) {
       notify('Upload алдаа: ' + e.message);
     }
@@ -1146,9 +1153,12 @@ export default function App() {
 
   const deleteSticker = async (slot) => {
     if (!currentUser) return;
+    const oldUrl = userProfile?.[`sticker_${slot}`];
     const { error } = await supabase.from('users').update({ [`sticker_${slot}`]: null }).eq('id', currentUser.id);
-    if (error) notify('Алдаа: ' + error.message);
-    else fetchProfile(currentUser.id);
+    if (error) { notify('Алдаа: ' + error.message); return; }
+    fetchProfile(currentUser.id);
+    // ЗАСВАР #163: устгасан стикерийн бодит файлыг R2-с ч мөн хасна
+    if (oldUrl) { try { await deleteFromR2([oldUrl]); } catch { /* хор хөнөөлгvй */ } }
   };
 
   // ШИНЭ: профайл зураг (avatar) оруулах
@@ -1157,6 +1167,7 @@ export default function App() {
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     setAvatarUploading(true);
+    const oldUrl = userProfile?.avatar_url;
     const fileExt = file.name.split('.').pop();
     const fileName = `avatars/${currentUser.id}-${Date.now()}.${fileExt}`;
     let publicUrl;
@@ -1168,6 +1179,8 @@ export default function App() {
     if (error) { notify('Алдаа: ' + error.message); return; }
     fetchProfile(currentUser.id);
     notify('Профайл зураг шинэчлэгдлээ! 🎉');
+    // ЗАСВАР #163: хуучин avatar файл R2-д мөнхөд орхигддог байсныг засав
+    if (oldUrl) { try { await deleteFromR2([oldUrl]); } catch { /* хор хөнөөлгvй */ } }
   };
 
   // ШИНЭ: профайл нэр хадгалах
@@ -3203,10 +3216,12 @@ export default function App() {
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>МАНГА СОНГО</div>
+                  {/* ЗАСВАР #163: "Дууссан" төлөвтэй мангад шинэ бvлэг нэмэх шаардлагагvй тул
+                      жагсаалтаас хасаж, олдоцыг хялбарчилав (мангатай олон болсноор нэр олоход хэцvv болсон). */}
                   <select value={chapterManga} onChange={e => setChapterManga(e.target.value)}
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }}>
                     <option value="">-- Манга сонгох --</option>
-                    {dbMangas.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                    {dbMangas.filter(m => m.status !== 'Дууссан').map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
                   </select>
                 </div>
 
@@ -4323,16 +4338,21 @@ export default function App() {
                 if (editPosterFile) {
                   const fileExt = editPosterFile.name.split('.').pop();
                   const fileName = `${Date.now()}.${fileExt}`;
+                  const oldPosterUrl = editManga.poster;
                   try {
                     updates.poster_url = await uploadToR2(editPosterFile, `posters/${fileName}`);
                   } catch (upErr) { notify('Poster upload алдаа: ' + upErr.message); setEditSaving(false); return; }
+                  // ЗАСВАР #163: poster солиход хуучин файл R2-д мөнхөд орхигддог байсныг засав
+                  if (oldPosterUrl) { try { await deleteFromR2([oldPosterUrl]); } catch { /* хор хөнөөлгvй */ } }
                 }
                 if (editBannerFile) {
                   const fileExt = editBannerFile.name.split('.').pop();
                   const fileName = `${Date.now()}-banner.${fileExt}`;
+                  const oldBannerUrl = editManga.banner_url;
                   try {
                     updates.banner_url = await uploadToR2(editBannerFile, `banners/${fileName}`);
                   } catch (upErr) { notify('Баннер upload алдаа: ' + upErr.message); setEditSaving(false); return; }
+                  if (oldBannerUrl) { try { await deleteFromR2([oldBannerUrl]); } catch { /* хор хөнөөлгvй */ } }
                 }
                 const { error } = await supabase.from('mangas').update(updates).eq('id', editManga.id);
                 setEditSaving(false);
@@ -4476,19 +4496,26 @@ export default function App() {
                 if (publishAtChanged) updates.created_at = new Date().toISOString();
                 if (editChapterCoverFile) {
                   const ext = editChapterCoverFile.name.split('.').pop();
+                  const oldThumbnailUrl = editChapter.thumbnail_url;
                   try {
                     updates.thumbnail_url = await uploadToR2(editChapterCoverFile, `chapters/${editChapter.id}/cover-${Date.now()}.${ext}`);
                   } catch (e) { notify('Cover upload алдаа: ' + e.message); setEditChapterSaving(false); return; }
+                  // ЗАСВАР #163: cover солиход хуучин файл R2-д мөнхөд орхигддог байсныг засав
+                  if (oldThumbnailUrl) { try { await deleteFromR2([oldThumbnailUrl]); } catch { /* хор хөнөөлгvй, orphan хэвээр vлдэнэ */ } }
                 }
 
                 const { error: chError } = await supabase.from('chapters').update(updates).eq('id', editChapter.id);
                 if (chError) { notify('Алдаа: ' + chError.message); setEditChapterSaving(false); return; }
 
-                // Устгагдсан (жагсаалтаас хассан) зургуудыг DB-с хасна
+                // Устгагдсан (жагсаалтаас хассан) зургуудыг R2-с БОЛОН DB-с хасна
+                // (ЗАСВАР #163: өмнө нь зөвхөн DB мөрийг устгаад, бодит файлыг R2-д
+                // мөнхөд орхидог байсан — "хассан" зургууд хэзээ ч устдаггvй хуримтлагдаж байв).
                 const keptIds = editChapterExistingImages.map(img => img.id);
-                const removedIds = editChapterInitialImageIds.current.filter(id => !keptIds.includes(id));
-                if (removedIds.length > 0) {
-                  await supabase.from('chapter_images').delete().in('id', removedIds);
+                const removedImages = editChapterInitialImages.current.filter(img => !keptIds.includes(img.id));
+                if (removedImages.length > 0) {
+                  const removedUrls = removedImages.map(img => img.image_url).filter(Boolean);
+                  try { await deleteFromR2(removedUrls); } catch (e) { notify('Анхаар: зарим зураг R2-с устгагдсангvй (' + e.message + ').'); }
+                  await supabase.from('chapter_images').delete().in('id', removedImages.map(img => img.id));
                 }
                 // ЗАСВАР #163: vлдсэн зургуудын дарааллыг (page_number) НЭГ transaction-той
                 // security definer RPC-ээр шинэчилнэ (өмнө нь 2N дараалсан HTTP update
