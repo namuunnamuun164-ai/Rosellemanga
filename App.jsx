@@ -119,6 +119,25 @@ export default function App() {
     closeEditChapterEditor();
   };
 
+  // ЗАСВАР #163: per-image edit цонхноос дараалал сольно — "existing"/"new" 2
+  // бvлгийн дотор л шилждэг (тэдгээрийн хоорондох хилийг (эхлээд existing, дараа
+  // нь new) хадгалах save-логиктой нийцvvлэхийн тулд).
+  const moveEditChapterEditImage = (dir) => {
+    if (!editChapterEditTarget) return;
+    const { kind, index } = editChapterEditTarget;
+    const isExisting = kind === 'existing';
+    const len = isExisting ? editChapterExistingImages.length : editChapterNewFiles.length;
+    const newIndex = index + dir;
+    if (newIndex < 0 || newIndex >= len) return;
+    const setter = isExisting ? setEditChapterExistingImages : setEditChapterNewFiles;
+    setter(prev => {
+      const arr = [...prev];
+      [arr[index], arr[newIndex]] = [arr[newIndex], arr[index]];
+      return arr;
+    });
+    setEditChapterEditTarget({ kind, index: newIndex });
+  };
+
   // ЗАСВАР #163: аль хэдийн R2-д байгаа зургийг crop/replace хийхэд шинэ файлыг
   // тэр даруй R2-д upload хийж, chapter_images мөрийг шинэ URL руу шинэчилж,
   // хуучин файлыг R2-с устгана (эх зургийг бvтнээр нь татаж канвас дээр авчрах
@@ -158,22 +177,20 @@ export default function App() {
   const openEditChapterCrop = () => {
     const imgEl = editChapterEditImgRef.current;
     if (!imgEl) return;
-    const w = imgEl.clientWidth;
     const h = imgEl.clientHeight;
-    setEditChapterCropBox({ x: w * 0.1, y: h * 0.1, w: w * 0.8, h: h * 0.8 });
+    setEditChapterCropBox({ top: h * 0.1, bottom: h * 0.9 });
     setEditChapterCropActive(true);
   };
 
   const confirmEditChapterCrop = async () => {
     const imgEl = editChapterEditImgRef.current;
     if (!imgEl || !editChapterCropBox || !editChapterEditTarget) return;
-    const scaleX = imgEl.naturalWidth / imgEl.clientWidth;
     const scaleY = imgEl.naturalHeight / imgEl.clientHeight;
     const rect = {
-      x: Math.round(editChapterCropBox.x * scaleX),
-      y: Math.round(editChapterCropBox.y * scaleY),
-      width: Math.round(editChapterCropBox.w * scaleX),
-      height: Math.round(editChapterCropBox.h * scaleY),
+      x: 0,
+      y: Math.round(editChapterCropBox.top * scaleY),
+      width: imgEl.naturalWidth,
+      height: Math.round((editChapterCropBox.bottom - editChapterCropBox.top) * scaleY),
     };
     if (editChapterEditTarget.kind === 'new') {
       setEditChapterEditBusy(true);
@@ -196,42 +213,28 @@ export default function App() {
     setEditChapterCropBox(null);
   };
 
-  // Add-chapter-тай ижил логиктой crop-хvрээ чирэх/хэмжээ өөрчлөх
+  // Add-chapter-тай ижил логиктой — зөвхөн дээд/доод шугамыг дээшээ/доошоо чирнэ
   const startEditChapterCropDrag = (mode) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     const point = e.touches ? e.touches[0] : e;
-    const startX = point.clientX;
     const startY = point.clientY;
     const startBox = { ...editChapterCropBox };
     const imgEl = editChapterEditImgRef.current;
-    const bounds = { width: imgEl.clientWidth, height: imgEl.clientHeight };
+    const boundsHeight = imgEl.clientHeight;
     const MIN = 30;
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
       const p = ev.touches ? ev.touches[0] : ev;
-      const dx = p.clientX - startX;
       const dy = p.clientY - startY;
-      let { x, y, w, h } = startBox;
-      if (mode === 'move') {
-        x = Math.min(Math.max(startBox.x + dx, 0), bounds.width - startBox.w);
-        y = Math.min(Math.max(startBox.y + dy, 0), bounds.height - startBox.h);
+      let { top, bottom } = startBox;
+      if (mode === 'top') {
+        top = Math.min(Math.max(startBox.top + dy, 0), startBox.bottom - MIN);
       } else {
-        if (mode.includes('right')) w = Math.min(Math.max(startBox.w + dx, MIN), bounds.width - startBox.x);
-        if (mode.includes('left')) {
-          const newX = Math.min(Math.max(startBox.x + dx, 0), startBox.x + startBox.w - MIN);
-          w = startBox.w + (startBox.x - newX);
-          x = newX;
-        }
-        if (mode.includes('bottom')) h = Math.min(Math.max(startBox.h + dy, MIN), bounds.height - startBox.y);
-        if (mode.includes('top')) {
-          const newY = Math.min(Math.max(startBox.y + dy, 0), startBox.y + startBox.h - MIN);
-          h = startBox.h + (startBox.y - newY);
-          y = newY;
-        }
+        bottom = Math.min(Math.max(startBox.bottom + dy, startBox.top + MIN), boundsHeight);
       }
-      setEditChapterCropBox({ x, y, w, h });
+      setEditChapterCropBox({ top, bottom });
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
@@ -304,26 +307,26 @@ export default function App() {
   // ЗАСВАР #163: "БvТНЭЭР ХАРАХ" preview-с дарж нээгдэх per-image edit vйлдлvvд
   const closeChapterEdit = () => { setChapterEditIndex(null); setChapterCropActive(false); setChapterCropBox(null); };
 
+  // ЗАСВАР #163: manga хуудас vргэлж бvтэн өргөнөөрөө vлддэг тул crop-ыг
+  // зөвхөн ДЭЭД/ДООД хvрээгээр (StitchPics шиг) хийдэг болгов — өргөн хэвээрээ,
+  // зөвхөн дээшээ/доошоо чирж тайрах хэсгээ тохируулна.
   const openChapterCrop = () => {
     const imgEl = chapterEditImgRef.current;
     if (!imgEl) return;
-    const w = imgEl.clientWidth;
     const h = imgEl.clientHeight;
-    // Анхны crop хvрээг зурагны 80%-иар төвд нь тавина
-    setChapterCropBox({ x: w * 0.1, y: h * 0.1, w: w * 0.8, h: h * 0.8 });
+    setChapterCropBox({ top: h * 0.1, bottom: h * 0.9 });
     setChapterCropActive(true);
   };
 
   const confirmChapterCrop = async () => {
     const imgEl = chapterEditImgRef.current;
     if (!imgEl || !chapterCropBox || chapterEditIndex === null) return;
-    const scaleX = imgEl.naturalWidth / imgEl.clientWidth;
     const scaleY = imgEl.naturalHeight / imgEl.clientHeight;
     const rect = {
-      x: Math.round(chapterCropBox.x * scaleX),
-      y: Math.round(chapterCropBox.y * scaleY),
-      width: Math.round(chapterCropBox.w * scaleX),
-      height: Math.round(chapterCropBox.h * scaleY),
+      x: 0,
+      y: Math.round(chapterCropBox.top * scaleY),
+      width: imgEl.naturalWidth,
+      height: Math.round((chapterCropBox.bottom - chapterCropBox.top) * scaleY),
     };
     setChapterEditBusy(true);
     try {
@@ -337,43 +340,28 @@ export default function App() {
     setChapterCropBox(null);
   };
 
-  // Crop хvрээг чирч зөөх/хэмжээг өөрчлөх (mode: 'move' эсвэл булангийн нэр,
-  // жишээ нь 'top-left', 'bottom-right')
+  // Дээд/доод тайрах шугамыг дээшээ/доошоо чирнэ (mode: 'top' эсвэл 'bottom')
   const startChapterCropDrag = (mode) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     const point = e.touches ? e.touches[0] : e;
-    const startX = point.clientX;
     const startY = point.clientY;
     const startBox = { ...chapterCropBox };
     const imgEl = chapterEditImgRef.current;
-    const bounds = { width: imgEl.clientWidth, height: imgEl.clientHeight };
+    const boundsHeight = imgEl.clientHeight;
     const MIN = 30;
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
       const p = ev.touches ? ev.touches[0] : ev;
-      const dx = p.clientX - startX;
       const dy = p.clientY - startY;
-      let { x, y, w, h } = startBox;
-      if (mode === 'move') {
-        x = Math.min(Math.max(startBox.x + dx, 0), bounds.width - startBox.w);
-        y = Math.min(Math.max(startBox.y + dy, 0), bounds.height - startBox.h);
+      let { top, bottom } = startBox;
+      if (mode === 'top') {
+        top = Math.min(Math.max(startBox.top + dy, 0), startBox.bottom - MIN);
       } else {
-        if (mode.includes('right')) w = Math.min(Math.max(startBox.w + dx, MIN), bounds.width - startBox.x);
-        if (mode.includes('left')) {
-          const newX = Math.min(Math.max(startBox.x + dx, 0), startBox.x + startBox.w - MIN);
-          w = startBox.w + (startBox.x - newX);
-          x = newX;
-        }
-        if (mode.includes('bottom')) h = Math.min(Math.max(startBox.h + dy, MIN), bounds.height - startBox.y);
-        if (mode.includes('top')) {
-          const newY = Math.min(Math.max(startBox.y + dy, 0), startBox.y + startBox.h - MIN);
-          h = startBox.h + (startBox.y - newY);
-          y = newY;
-        }
+        bottom = Math.min(Math.max(startBox.bottom + dy, startBox.top + MIN), boundsHeight);
       }
-      setChapterCropBox({ x, y, w, h });
+      setChapterCropBox({ top, bottom });
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
@@ -391,6 +379,19 @@ export default function App() {
     if (chapterEditIndex === null) return;
     setChapterFiles(prev => prev.filter((_, idx) => idx !== chapterEditIndex));
     closeChapterEdit();
+  };
+
+  // ЗАСВАР #163: per-image edit цонхноос шууд дараалал сольж болно (дээш/доош)
+  const moveChapterEditImage = (dir) => {
+    if (chapterEditIndex === null) return;
+    const newIndex = chapterEditIndex + dir;
+    if (newIndex < 0 || newIndex >= chapterFiles.length) return;
+    setChapterFiles(prev => {
+      const arr = [...prev];
+      [arr[chapterEditIndex], arr[newIndex]] = [arr[newIndex], arr[chapterEditIndex]];
+      return arr;
+    });
+    setChapterEditIndex(newIndex);
   };
 
   const chapterReplaceInputRef = useRef(null);
@@ -4491,26 +4492,22 @@ export default function App() {
                   style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', opacity: chapterEditBusy ? 0.4 : 1 }} />
                 {chapterCropActive && chapterCropBox && (
                   <>
-                    {/* Тайрсны гадна харанхуйлах overlay (4 талаас) */}
-                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: chapterCropBox.y, background: 'rgba(0,0,0,0.6)' }} />
-                    <div style={{ position: 'absolute', left: 0, top: chapterCropBox.y + chapterCropBox.h, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)' }} />
-                    <div style={{ position: 'absolute', left: 0, top: chapterCropBox.y, width: chapterCropBox.x, height: chapterCropBox.h, background: 'rgba(0,0,0,0.6)' }} />
-                    <div style={{ position: 'absolute', left: chapterCropBox.x + chapterCropBox.w, top: chapterCropBox.y, right: 0, height: chapterCropBox.h, background: 'rgba(0,0,0,0.6)' }} />
-                    {/* Crop хvрээ — чирж зөөнө */}
-                    <div onPointerDown={startChapterCropDrag('move')}
-                      style={{ position: 'absolute', left: chapterCropBox.x, top: chapterCropBox.y, width: chapterCropBox.w, height: chapterCropBox.h, border: '2px dashed #f5a623', cursor: 'move', touchAction: 'none' }}>
-                      {/* Булангийн handle-vvд — хэмжээг өөрчилнө */}
-                      {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
-                        <div key={corner} onPointerDown={startChapterCropDrag(corner)}
-                          style={{
-                            position: 'absolute',
-                            width: 18, height: 18, background: '#f5a623', borderRadius: '50%', border: '2px solid #000', touchAction: 'none',
-                            top: corner.includes('top') ? -9 : 'auto', bottom: corner.includes('bottom') ? -9 : 'auto',
-                            left: corner.includes('left') ? -9 : 'auto', right: corner.includes('right') ? -9 : 'auto',
-                            cursor: corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize',
-                          }} />
-                      ))}
-                    </div>
+                    {/* Тайрсны гадна харанхуйлах overlay (StitchPics шиг зөвхөн дээш/доош) */}
+                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: chapterCropBox.top, background: 'rgba(0,0,0,0.6)' }} />
+                    <div style={{ position: 'absolute', left: 0, top: chapterCropBox.bottom, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)' }} />
+                    {/* Тайрах хvрээний хvрд (өргөн бvтэн, зөвхөн дээш/доош чирнэ) */}
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: chapterCropBox.top, height: chapterCropBox.bottom - chapterCropBox.top, border: '2px dashed #f5a623', pointerEvents: 'none' }} />
+                    {['top', 'bottom'].map(mode => (
+                      <div key={mode} onPointerDown={startChapterCropDrag(mode)}
+                        style={{
+                          position: 'absolute', left: 0, right: 0,
+                          top: (mode === 'top' ? chapterCropBox.top : chapterCropBox.bottom) - 14,
+                          height: 28, cursor: 'ns-resize', touchAction: 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                        <div style={{ width: 56, height: 6, borderRadius: 3, background: '#f5a623', boxShadow: '0 1px 4px rgba(0,0,0,0.5)' }} />
+                      </div>
+                    ))}
                   </>
                 )}
               </div>
@@ -4530,6 +4527,14 @@ export default function App() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button disabled={chapterEditBusy || chapterEditIndex === 0} onClick={() => moveChapterEditImage(-1)}
+                    style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: chapterEditIndex === 0 ? '#444' : '#ccc', fontWeight: 700, fontSize: 12, cursor: chapterEditIndex === 0 ? 'not-allowed' : 'pointer' }}>
+                    ⬆️ Дээш
+                  </button>
+                  <button disabled={chapterEditBusy || chapterEditIndex === chapterFiles.length - 1} onClick={() => moveChapterEditImage(1)}
+                    style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: chapterEditIndex === chapterFiles.length - 1 ? '#444' : '#ccc', fontWeight: 700, fontSize: 12, cursor: chapterEditIndex === chapterFiles.length - 1 ? 'not-allowed' : 'pointer' }}>
+                    ⬇️ Доош
+                  </button>
                   <button disabled={chapterEditBusy} onClick={() => chapterReplaceInputRef.current?.click()}
                     style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                     🖼️ Солих
@@ -5009,23 +5014,20 @@ export default function App() {
                   style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', opacity: editChapterEditBusy ? 0.4 : 1 }} />
                 {editChapterCropActive && editChapterCropBox && (
                   <>
-                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: editChapterCropBox.y, background: 'rgba(0,0,0,0.6)' }} />
-                    <div style={{ position: 'absolute', left: 0, top: editChapterCropBox.y + editChapterCropBox.h, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)' }} />
-                    <div style={{ position: 'absolute', left: 0, top: editChapterCropBox.y, width: editChapterCropBox.x, height: editChapterCropBox.h, background: 'rgba(0,0,0,0.6)' }} />
-                    <div style={{ position: 'absolute', left: editChapterCropBox.x + editChapterCropBox.w, top: editChapterCropBox.y, right: 0, height: editChapterCropBox.h, background: 'rgba(0,0,0,0.6)' }} />
-                    <div onPointerDown={startEditChapterCropDrag('move')}
-                      style={{ position: 'absolute', left: editChapterCropBox.x, top: editChapterCropBox.y, width: editChapterCropBox.w, height: editChapterCropBox.h, border: '2px dashed #f5a623', cursor: 'move', touchAction: 'none' }}>
-                      {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
-                        <div key={corner} onPointerDown={startEditChapterCropDrag(corner)}
-                          style={{
-                            position: 'absolute',
-                            width: 18, height: 18, background: '#f5a623', borderRadius: '50%', border: '2px solid #000', touchAction: 'none',
-                            top: corner.includes('top') ? -9 : 'auto', bottom: corner.includes('bottom') ? -9 : 'auto',
-                            left: corner.includes('left') ? -9 : 'auto', right: corner.includes('right') ? -9 : 'auto',
-                            cursor: corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize',
-                          }} />
-                      ))}
-                    </div>
+                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: editChapterCropBox.top, background: 'rgba(0,0,0,0.6)' }} />
+                    <div style={{ position: 'absolute', left: 0, top: editChapterCropBox.bottom, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)' }} />
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: editChapterCropBox.top, height: editChapterCropBox.bottom - editChapterCropBox.top, border: '2px dashed #f5a623', pointerEvents: 'none' }} />
+                    {['top', 'bottom'].map(mode => (
+                      <div key={mode} onPointerDown={startEditChapterCropDrag(mode)}
+                        style={{
+                          position: 'absolute', left: 0, right: 0,
+                          top: (mode === 'top' ? editChapterCropBox.top : editChapterCropBox.bottom) - 14,
+                          height: 28, cursor: 'ns-resize', touchAction: 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                        <div style={{ width: 56, height: 6, borderRadius: 3, background: '#f5a623', boxShadow: '0 1px 4px rgba(0,0,0,0.5)' }} />
+                      </div>
+                    ))}
                   </>
                 )}
               </div>
@@ -5045,6 +5047,23 @@ export default function App() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {(() => {
+                    const arrLen = editChapterEditTarget.kind === 'existing' ? editChapterExistingImages.length : editChapterNewFiles.length;
+                    const atStart = editChapterEditTarget.index === 0;
+                    const atEnd = editChapterEditTarget.index === arrLen - 1;
+                    return (
+                      <>
+                        <button disabled={editChapterEditBusy || atStart} onClick={() => moveEditChapterEditImage(-1)}
+                          style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: atStart ? '#444' : '#ccc', fontWeight: 700, fontSize: 12, cursor: atStart ? 'not-allowed' : 'pointer' }}>
+                          ⬆️ Дээш
+                        </button>
+                        <button disabled={editChapterEditBusy || atEnd} onClick={() => moveEditChapterEditImage(1)}
+                          style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: atEnd ? '#444' : '#ccc', fontWeight: 700, fontSize: 12, cursor: atEnd ? 'not-allowed' : 'pointer' }}>
+                          ⬇️ Доош
+                        </button>
+                      </>
+                    );
+                  })()}
                   <button disabled={editChapterEditBusy} onClick={() => editChapterReplaceInputRef.current?.click()}
                     style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                     🖼️ Солих
