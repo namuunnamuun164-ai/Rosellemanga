@@ -103,6 +103,60 @@ export const formatRemaining = (ms) => {
   return `${m} мин`;
 };
 
+// ЗАСВАР #163: "Хуваах" горим — 4000px-ээс өндөр (урт) зургийг тэр өндрөөр нь
+// (өргөнийг vл өөрчлөн) олон хэсэг болгож таслана. 4000px-ээс богино/тэнцvv
+// зургийг vл хөндөж, нэг элементтэй массив (өөрөө) хэвээр буцаана. Зургуудыг
+// НЭГ НЭГЭЭР нь (Promise.all биш) дараалуулж дуудахыг зөвлөнө — эс бол олон
+// том зургийг зэрэг декодлож санах ойн ачаалал vvсгэнэ (өмнөх ЗАСВАР #163-ийн
+// urt зургийн crash-тай адил асуудал).
+export const splitTallImageFile = async (file, maxHeight = 4000) => {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+  if (height <= maxHeight) {
+    bitmap.close?.();
+    return [file];
+  }
+
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const mimeType = file.type || (ext === 'png' ? 'image/png' : 'image/jpeg');
+  const baseName = file.name.replace(/\.[^.]+$/, '');
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  const ctx = canvas.getContext('2d');
+
+  const pieces = [];
+  let y = 0;
+  let partIndex = 1;
+  while (y < height) {
+    const pieceHeight = Math.min(maxHeight, height - y);
+    canvas.height = pieceHeight;
+    ctx.clearRect(0, 0, width, pieceHeight);
+    ctx.drawImage(bitmap, 0, y, width, pieceHeight, 0, 0, width, pieceHeight);
+    // eslint-disable-next-line no-await-in-loop
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
+    pieces.push(new File([blob], `${baseName}-p${partIndex}.${ext}`, { type: mimeType }));
+    y += pieceHeight;
+    partIndex += 1;
+  }
+  bitmap.close?.();
+  return pieces;
+};
+
+// ЗАСВАР #163: зургийг өгөгдсөн тэгш өнцөгт хэсгээр нь таслана. rect нь эх
+// зургийн БОДИТ (natural) пикселийн нэгжээр өгөгдсөн байх ёстой.
+export const cropImageFile = async (file, rect) => {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(rect.width);
+  canvas.height = Math.round(rect.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const mimeType = file.type || 'image/jpeg';
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
+  return new File([blob], file.name, { type: mimeType });
+};
+
 // ЗАСВАР #146: "цаг:минут:секунд" (жишээ нь 12:15:28) маягийн цэвэрхэн тоон
 // countdown формат — хуваарийн хуудсанд секунд тутам шинэчлэгдэж харагдана
 export const formatCountdownClock = (ms) => {

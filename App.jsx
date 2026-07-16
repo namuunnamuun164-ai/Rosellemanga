@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu } from './icons';
 import { PasswordField } from './PasswordField';
 
@@ -125,6 +125,16 @@ export default function App() {
   const [chapterNumber, setChapterNumber] = useState('');
   const [chapterTitle, setChapterTitle] = useState('');
   const [chapterFiles, setChapterFiles] = useState([]);
+  // ЗАСВАР #163: "Бvтнээр" (өөрчлөхгvй) эсвэл "Хуваах" (4000px-ээс урт зургийг
+  // тэр хэмжээгээр таслаж, олон хуудас болгох) горим сонгох.
+  const [chapterSplitMode, setChapterSplitMode] = useState('full');
+  // ЗАСВАР #163: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж шууд засварлах
+  // (crop/rotate/flip/delete) — Scrollshot апп шиг.
+  const [chapterEditIndex, setChapterEditIndex] = useState(null); // chapterFiles-ийн alь index засварлаж буй
+  const [chapterCropActive, setChapterCropActive] = useState(false);
+  const [chapterCropBox, setChapterCropBox] = useState(null); // {x,y,w,h} дэлгэц дээрх (CSS) px
+  const [chapterEditBusy, setChapterEditBusy] = useState(false);
+  const chapterEditImgRef = useRef(null);
   // ЗАСВАР #118: URL.createObjectURL-ийг render болгонд шинээр үүсгэдэг байсан
   // memory leak-ийг засав — blob URL-уудыг файл өөрчлөгдөх үед л нэг удаа
   // үүсгэж, хуучныг нь revoke хийнэ.
@@ -134,6 +144,109 @@ export default function App() {
     setChapterFileUrls(urls);
     return () => urls.forEach(u => URL.revokeObjectURL(u));
   }, [chapterFiles]);
+
+  // ЗАСВАР #163: "БvТНЭЭР ХАРАХ" preview-с дарж нээгдэх per-image edit vйлдлvvд
+  const closeChapterEdit = () => { setChapterEditIndex(null); setChapterCropActive(false); setChapterCropBox(null); };
+
+  const openChapterCrop = () => {
+    const imgEl = chapterEditImgRef.current;
+    if (!imgEl) return;
+    const w = imgEl.clientWidth;
+    const h = imgEl.clientHeight;
+    // Анхны crop хvрээг зурагны 80%-иар төвд нь тавина
+    setChapterCropBox({ x: w * 0.1, y: h * 0.1, w: w * 0.8, h: h * 0.8 });
+    setChapterCropActive(true);
+  };
+
+  const confirmChapterCrop = async () => {
+    const imgEl = chapterEditImgRef.current;
+    if (!imgEl || !chapterCropBox || chapterEditIndex === null) return;
+    const scaleX = imgEl.naturalWidth / imgEl.clientWidth;
+    const scaleY = imgEl.naturalHeight / imgEl.clientHeight;
+    const rect = {
+      x: Math.round(chapterCropBox.x * scaleX),
+      y: Math.round(chapterCropBox.y * scaleY),
+      width: Math.round(chapterCropBox.w * scaleX),
+      height: Math.round(chapterCropBox.h * scaleY),
+    };
+    setChapterEditBusy(true);
+    try {
+      const newFile = await cropImageFile(chapterFiles[chapterEditIndex], rect);
+      setChapterFiles(prev => prev.map((f, idx) => idx === chapterEditIndex ? newFile : f));
+    } catch (e) {
+      notify('Алдаа: ' + e.message);
+    }
+    setChapterEditBusy(false);
+    setChapterCropActive(false);
+    setChapterCropBox(null);
+  };
+
+  // Crop хvрээг чирч зөөх/хэмжээг өөрчлөх (mode: 'move' эсвэл булангийн нэр,
+  // жишээ нь 'top-left', 'bottom-right')
+  const startChapterCropDrag = (mode) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const point = e.touches ? e.touches[0] : e;
+    const startX = point.clientX;
+    const startY = point.clientY;
+    const startBox = { ...chapterCropBox };
+    const imgEl = chapterEditImgRef.current;
+    const bounds = { width: imgEl.clientWidth, height: imgEl.clientHeight };
+    const MIN = 30;
+
+    const onMove = (ev) => {
+      if (ev.touches) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      const dx = p.clientX - startX;
+      const dy = p.clientY - startY;
+      let { x, y, w, h } = startBox;
+      if (mode === 'move') {
+        x = Math.min(Math.max(startBox.x + dx, 0), bounds.width - startBox.w);
+        y = Math.min(Math.max(startBox.y + dy, 0), bounds.height - startBox.h);
+      } else {
+        if (mode.includes('right')) w = Math.min(Math.max(startBox.w + dx, MIN), bounds.width - startBox.x);
+        if (mode.includes('left')) {
+          const newX = Math.min(Math.max(startBox.x + dx, 0), startBox.x + startBox.w - MIN);
+          w = startBox.w + (startBox.x - newX);
+          x = newX;
+        }
+        if (mode.includes('bottom')) h = Math.min(Math.max(startBox.h + dy, MIN), bounds.height - startBox.y);
+        if (mode.includes('top')) {
+          const newY = Math.min(Math.max(startBox.y + dy, 0), startBox.y + startBox.h - MIN);
+          h = startBox.h + (startBox.y - newY);
+          y = newY;
+        }
+      }
+      setChapterCropBox({ x, y, w, h });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const deleteChapterEditImage = () => {
+    if (chapterEditIndex === null) return;
+    setChapterFiles(prev => prev.filter((_, idx) => idx !== chapterEditIndex));
+    closeChapterEdit();
+  };
+
+  const chapterReplaceInputRef = useRef(null);
+  const handleChapterReplaceFile = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file || chapterEditIndex === null) return;
+    const invalid = validateImageFile(file);
+    if (invalid) { notify(invalid); return; }
+    setChapterFiles(prev => prev.map((f, idx) => idx === chapterEditIndex ? file : f));
+  };
+
   // ШИНЭ: upload хийхийн өмнө сонгосон зургуудыг бүлэг уншиж байгаа мэт бүтнээр нь харах
   const [chapterPreviewOpen, setChapterPreviewOpen] = useState(false);
   // ШИНЭ: уншиж байгаа хуудасны дээд талд бүлгийн дугаар дарахад бусад бүлгүүд жагсаана
@@ -765,9 +878,24 @@ export default function App() {
   useEffect(() => {
     if (!routeReady) return;
     const path = computePath();
-    if (window.location.pathname === path) return;
+    const oldPath = window.location.pathname;
+    if (oldPath === path) return;
     if (isPopStateNav.current) {
       isPopStateNav.current = false;
+      return;
+    }
+    // ЗАСВАР #163: нэг мангын дотор бvлэг сольж уншихад ("дараагийн/өмнөх
+    // бvлэг", chapter switcher) шинэ history мөр нэмэхийн оронд одоогийнхыг
+    // нь ЗАСНА (replaceState) — эс бол унших бvр л шинэ мөр нэмэгдэж, Safari-ийн
+    // native "буцах" (товч/swipe) дарахад нvvр/дэлгэрэнгvй хуудас руу биш
+    // өмнөх (аль хэдийн уншсан) бvлэг рvv буцдаг тул хэрэглэгчид "буруу
+    // мангад орлоо" мэт төөрөгдөл vvсгэдэг байв.
+    const chapterPathRe = /^\/manga\/(\d+)\/chapter\//;
+    const oldMatch = oldPath.match(chapterPathRe);
+    const newMatch = path.match(chapterPathRe);
+    const sameMangaChapterNav = oldMatch && newMatch && oldMatch[1] === newMatch[1];
+    if (sameMangaChapterNav) {
+      window.history.replaceState(null, '', path);
     } else {
       window.history.pushState(null, '', path);
     }
@@ -3250,6 +3378,23 @@ export default function App() {
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БҮЛГИЙН ЗУРАГНУУД (хуудас бүрээр, дараалсан)</div>
+
+                  {/* ЗАСВАР #163: "Бvтнээр" (өөрчлөхгvй) / "Хуваах" (4000px-ээс урт зургийг
+                      тэр хэмжээгээр таслаж олон хуудас болгох) горим сонголт. */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <button type="button" onClick={() => setChapterSplitMode('full')}
+                      style={{ flex: 1, padding: '7px 10px', borderRadius: 8, border: chapterSplitMode === 'full' ? '1px solid #8B0000' : '1px solid #2a2a2a', background: chapterSplitMode === 'full' ? 'rgba(139,0,0,0.15)' : '#1a1a1a', color: chapterSplitMode === 'full' ? '#fff' : '#888', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Бvтнээр
+                    </button>
+                    <button type="button" onClick={() => setChapterSplitMode('split')}
+                      style={{ flex: 1, padding: '7px 10px', borderRadius: 8, border: chapterSplitMode === 'split' ? '1px solid #8B0000' : '1px solid #2a2a2a', background: chapterSplitMode === 'split' ? 'rgba(139,0,0,0.15)' : '#1a1a1a', color: chapterSplitMode === 'split' ? '#fff' : '#888', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Хуваах (4000px)
+                    </button>
+                  </div>
+                  {chapterSplitMode === 'split' && (
+                    <div style={{ fontSize: 10, color: '#f5a623', marginBottom: 8 }}>4000px-ээс урт зураг тэр хэмжээгээр нь автоматаар олон хуудас болж хуваагдана (өргөн хэвээрээ vлдэнэ). Upload хийхэд арай удаан байж болно.</div>
+                  )}
+
                   {/* ЗАСВАР #23: сонгосон зургуудыг шууд upload хийдэггүй болгож, эхлээд
                       шалгах/устгах/дараалал сольж болдог preview үзүүлдэг болгосон.
                       Дахин файл сонговол ХУУЧНЫГ ДАРААГҮЙ нэмэгдэнэ (өмнө нь бүхэлд нь орлуулдаг байсан). */}
@@ -3339,9 +3484,24 @@ export default function App() {
 
                     setChapterUploading(true);
                     setChapterUploadProgress(0);
+
+                    // ЗАСВАР #163: "Хуваах" горим сонгосон бол 4000px-ээс урт зургийг
+                    // upload эхлэхээс өмнө хэсэг хэсэг болгож таслана (нэг нэгээр нь,
+                    // зэрэг биш — олон том зургийг зэрэг декодлож санах ойг дvvргэхээс сэргийлнэ).
+                    let filesToUpload = chapterFiles;
+                    if (chapterSplitMode === 'split') {
+                      const expanded = [];
+                      for (const f of chapterFiles) {
+                        // eslint-disable-next-line no-await-in-loop
+                        const parts = await splitTallImageFile(f, 4000);
+                        expanded.push(...parts);
+                      }
+                      filesToUpload = expanded;
+                    }
+
                     // ШИНЭ: cover (байвал) + бvх хуудасны зургийг тоолж, upload
                     // болгонд хэдэн хувь дуусаж байгааг тооцно.
-                    const totalUploads = (chapterCover ? 1 : 0) + chapterFiles.length;
+                    const totalUploads = (chapterCover ? 1 : 0) + filesToUpload.length;
                     let doneUploads = 0;
                     const markUploadDone = () => {
                       doneUploads += 1;
@@ -3394,8 +3554,8 @@ export default function App() {
                       markUploadDone();
                     }
 
-                    for (let i = 0; i < chapterFiles.length; i++) {
-                      const file = chapterFiles[i];
+                    for (let i = 0; i < filesToUpload.length; i++) {
+                      const file = filesToUpload[i];
                       const fileExt = file.name.split('.').pop();
                       const fileName = `chapters/${chapterData.id}/${i + 1}.${fileExt}`;
 
@@ -4143,11 +4303,92 @@ export default function App() {
             </div>
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
+                {/* ЗАСВАР #163: зураг дээр дарахад засварлах цонх (crop/rotate/flip/
+                    delete/replace) нээгдэнэ — Scrollshot апп шиг. */}
                 {chapterFiles.map((file, i) => (
-                  <img key={i} src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
-                    style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
+                  <div key={i} onClick={() => setChapterEditIndex(i)} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <img src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
+                      style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
+                    <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>✏️</div>
+                  </div>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ЗАСВАР #163: зурагны per-image edit цонх — crop/rotate/flip/delete/replace */}
+        {chapterEditIndex !== null && chapterFileUrls[chapterEditIndex] && (
+          <div style={{ position: 'fixed', inset: 0, background: '#0a0a0a', zIndex: 1001, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', flexShrink: 0 }}>
+              <button onClick={closeChapterEdit} title="Хаах"
+                style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>Хуудас {chapterEditIndex + 1} засах</div>
+              <div style={{ width: 36 }} />
+            </div>
+
+            <div style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+              <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}>
+                <img ref={chapterEditImgRef} src={chapterFileUrls[chapterEditIndex]} alt="" draggable={false}
+                  style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', opacity: chapterEditBusy ? 0.4 : 1 }} />
+                {chapterCropActive && chapterCropBox && (
+                  <>
+                    {/* Тайрсны гадна харанхуйлах overlay (4 талаас) */}
+                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: chapterCropBox.y, background: 'rgba(0,0,0,0.6)' }} />
+                    <div style={{ position: 'absolute', left: 0, top: chapterCropBox.y + chapterCropBox.h, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)' }} />
+                    <div style={{ position: 'absolute', left: 0, top: chapterCropBox.y, width: chapterCropBox.x, height: chapterCropBox.h, background: 'rgba(0,0,0,0.6)' }} />
+                    <div style={{ position: 'absolute', left: chapterCropBox.x + chapterCropBox.w, top: chapterCropBox.y, right: 0, height: chapterCropBox.h, background: 'rgba(0,0,0,0.6)' }} />
+                    {/* Crop хvрээ — чирж зөөнө */}
+                    <div onPointerDown={startChapterCropDrag('move')}
+                      style={{ position: 'absolute', left: chapterCropBox.x, top: chapterCropBox.y, width: chapterCropBox.w, height: chapterCropBox.h, border: '2px dashed #f5a623', cursor: 'move', touchAction: 'none' }}>
+                      {/* Булангийн handle-vvд — хэмжээг өөрчилнө */}
+                      {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
+                        <div key={corner} onPointerDown={startChapterCropDrag(corner)}
+                          style={{
+                            position: 'absolute',
+                            width: 18, height: 18, background: '#f5a623', borderRadius: '50%', border: '2px solid #000', touchAction: 'none',
+                            top: corner.includes('top') ? -9 : 'auto', bottom: corner.includes('bottom') ? -9 : 'auto',
+                            left: corner.includes('left') ? -9 : 'auto', right: corner.includes('right') ? -9 : 'auto',
+                            cursor: corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize',
+                          }} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '1rem', borderTop: '1px solid #1e1e1e' }}>
+              {chapterCropActive ? (
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                  <button disabled={chapterEditBusy} onClick={() => { setChapterCropActive(false); setChapterCropBox(null); }}
+                    style={{ flex: 1, maxWidth: 160, padding: '10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#ccc', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                    Цуцлах
+                  </button>
+                  <button disabled={chapterEditBusy} onClick={confirmChapterCrop}
+                    style={{ flex: 1, maxWidth: 160, padding: '10px', borderRadius: 8, border: 'none', background: chapterEditBusy ? '#555' : '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, cursor: chapterEditBusy ? 'not-allowed' : 'pointer' }}>
+                    {chapterEditBusy ? '...' : 'Тайрах'}
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button disabled={chapterEditBusy} onClick={() => chapterReplaceInputRef.current?.click()}
+                    style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                    🖼️ Солих
+                  </button>
+                  <input ref={chapterReplaceInputRef} type="file" accept="image/*" onChange={handleChapterReplaceFile} style={{ display: 'none' }} />
+                  <button disabled={chapterEditBusy} onClick={openChapterCrop}
+                    style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                    ✂️ Тайрах
+                  </button>
+                  <button disabled={chapterEditBusy} onClick={() => askConfirm('Энэ хуудсыг устгах уу?', deleteChapterEditImage)}
+                    style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                    🗑 Устгах
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
