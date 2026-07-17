@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { IconCheck, IconChevronUp, IconChevronDown, IconPencil } from './icons';
 
-// ЗАСВАР #170: StitchPics (iOS) шиг — олон зургийг ГАРААР (автомат
-// тааруулгагvй) зэрэгцvvлэн харуулж, ирмэг бvрийг нь CROP хийх editor.
+// ЗАСВАР #171: StitchPics (iOS) шиг — олон зургийг ГАРААР (автомат
+// тааруулгагvй) зэрэгцvvлэн харуулж, ирмэг (дээд/доод/зvvн/баруун) бvрийг нь
+// CROP хийх editor.
 //
 // ЗАСВАР #170: өмнө нь бvх зургийг НЭГ канвас дээр буулгаж, ганц том зураг
 // (merged file) болгодог байсныг өөрчилсөн — тэгвэл зурагнууд хэт том болж,
 // дараа нь тэдгээрийг дахин "4000px хуваах" шаардлагатай болдог байв. Одоо
-// зураг бvр (crop хийсний дараа) ТУСДАА, өөрийн хэмжээгээрээ vлдэнэ — зөвхөн
-// давхцаж буй/хэрэггvй ирмэгvvдийг (жишээ нь статус мөр, navigation bar,
-// давхцсан контент) л тайрна, ганц зураг болгож нийлvvлдэггvй. Тиймээс
-// хэвтээ (offsetX) шилжилт vvнд ач холбогдолгvй тул хассан.
+// зураг бvр (crop хийсний дараа) ТУСДАА, өөрийн хэмжээгээрээ vлдэнэ.
 //
 // props:
 //   files       (File[])                  — зэрэгцvvлж/тайрах зургууд (дор хаяж 2)
@@ -21,15 +19,19 @@ import { IconCheck, IconChevronUp, IconChevronDown, IconPencil } from './icons';
 export default function StitchEditor({ files, onCancel, onExport, exportType = 'image/jpeg', exportQuality = 0.92 }) {
   const [naturalDims, setNaturalDims] = useState(null); // [{width,height}, ...]
   const [fileUrls, setFileUrls] = useState([]);
-  const [crops, setCrops] = useState([]); // [{cropTop, cropBottom}, ...] — natural (base-normalized) px
+  const [crops, setCrops] = useState([]); // [{cropTop, cropBottom, cropLeft, cropRight}, ...] — natural (base-normalized) px
   const [zoom, setZoom] = useState(1);
   const [activeIndex, setActiveIndex] = useState(null);
-  const [activeHandle, setActiveHandle] = useState('top'); // 'top'|'bottom' — nudge товч аль ирмэгт нөлөөлөхийг заана
-  const [dragKind, setDragKind] = useState(null); // 'top'|'bottom'|null
+  const [activeHandle, setActiveHandle] = useState('top'); // 'top'|'bottom'|'left'|'right' — nudge товч аль ирмэгт нөлөөлөхийг заана
+  const [dragKind, setDragKind] = useState(null); // 'top'|'bottom'|'left'|'right'|null
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const containerRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(0);
+
+  const AXIS = { top: 'y', bottom: 'y', left: 'x', right: 'x' };
+  const KEY = { top: 'cropTop', bottom: 'cropBottom', left: 'cropLeft', right: 'cropRight' };
+  const HANDLE_LABEL = { top: 'дээд', bottom: 'доод', left: 'зvvн', right: 'баруун' };
 
   // Blob URL-уудыг файл өөрчлөгдөх vед л нэг удаа vvсгэж, cleanup дээр revoke хийнэ
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
     return () => urls.forEach(u => URL.revokeObjectURL(u));
   }, [files]);
 
-  // Зураг бvрийн БОДИТ (natural) хэмжээг нэг удаа уншиж, cropTop/cropBottom-ыг 0-ээр эхлvvлнэ
+  // Зураг бvрийн БОДИТ (natural) хэмжээг нэг удаа уншиж, crop утгуудыг 0-ээр эхлvvлнэ
   useEffect(() => {
     let cancelled = false;
     setNaturalDims(null);
@@ -54,7 +56,7 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
       urls.forEach(u => URL.revokeObjectURL(u));
       if (cancelled) return;
       setNaturalDims(dims);
-      setCrops(dims.map(() => ({ cropTop: 0, cropBottom: 0 })));
+      setCrops(dims.map(() => ({ cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 })));
     }).catch(e => {
       urls.forEach(u => URL.revokeObjectURL(u));
       if (!cancelled) setError(e.message);
@@ -92,6 +94,7 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
   // Бvх зургийг эхний зурагны (base) өргөнд proportional тааруулсан natural өндөр — зөвхөн ЗЭРЭГЦvvЛЖ ХАРУУЛАХ preview-д
   const scaledHeights = naturalDims.map(d => d.height * baseWidth / d.width);
   const visibleHeights = scaledHeights.map((h, i) => h - (crops[i]?.cropTop || 0) - (crops[i]?.cropBottom || 0));
+  const visibleWidths = scaledHeights.map((h, i) => baseWidth - (crops[i]?.cropLeft || 0) - (crops[i]?.cropRight || 0));
 
   // top[i] (natural, base-normalized px) — cumulative, ЗАЙГvй шууд наалдана (preview-д зориулсан, export нь тус тусдаа)
   const tops = [0];
@@ -100,10 +103,14 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
 
   const displayScale = containerWidth > 0 ? (containerWidth * zoom) / baseWidth : 0;
 
-  // Тухайн зурагны cropTop/cropBottom-ийн дээд хязгаар — дор хаяж 1px vлдэнэ
-  const maxCropFor = (i, which) => {
-    const other = which === 'top' ? (crops[i]?.cropBottom || 0) : (crops[i]?.cropTop || 0);
-    return Math.max(0, scaledHeights[i] - 1 - other);
+  // Тухайн зурагны crop-ийн дээд хязгаар (тэнхлэг бvрээр) — дор хаяж 1px vлдэнэ
+  const maxCropFor = (i, handle) => {
+    if (AXIS[handle] === 'y') {
+      const other = handle === 'top' ? (crops[i]?.cropBottom || 0) : (crops[i]?.cropTop || 0);
+      return Math.max(0, scaledHeights[i] - 1 - other);
+    }
+    const other = handle === 'left' ? (crops[i]?.cropRight || 0) : (crops[i]?.cropLeft || 0);
+    return Math.max(0, baseWidth - 1 - other);
   };
 
   const startCropDrag = (e, i, handle) => {
@@ -111,8 +118,10 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
     e.stopPropagation();
     if (displayScale <= 0) return;
     const point = e.touches ? e.touches[0] : e;
-    const startY = point.clientY;
-    const startVal = handle === 'top' ? (crops[i].cropTop || 0) : (crops[i].cropBottom || 0);
+    const axis = AXIS[handle];
+    const startCoord = axis === 'y' ? point.clientY : point.clientX;
+    const key = KEY[handle];
+    const startVal = crops[i][key] || 0;
     const maxVal = maxCropFor(i, handle);
     setActiveIndex(i);
     setActiveHandle(handle);
@@ -121,14 +130,15 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
       const p = ev.touches ? ev.touches[0] : ev;
-      const deltaNatural = (p.clientY - startY) / displayScale;
-      // Дээд бариулыг доош чирэх (deltaY эерэг) → cropTop ихэснэ.
-      // Доод бариулыг дээш чирэх (deltaY сөрөг) → cropBottom ихэснэ.
-      const raw = handle === 'top' ? startVal + deltaNatural : startVal - deltaNatural;
+      const coord = axis === 'y' ? p.clientY : p.clientX;
+      const deltaNatural = (coord - startCoord) / displayScale;
+      // Дээд/зvvн бариулыг "дотогш" (доош/баруун тийш) чирэхэд тухайн crop ихэснэ.
+      // Доод/баруун бариулыг "дотогш" (дээш/зvvн тийш) чирэхэд тухайн crop ихэснэ.
+      const raw = (handle === 'top' || handle === 'left') ? startVal + deltaNatural : startVal - deltaNatural;
       const clamped = Math.max(0, Math.min(maxVal, raw));
       setCrops(prev => {
         const arr = [...prev];
-        arr[i] = { ...arr[i], [handle === 'top' ? 'cropTop' : 'cropBottom']: clamped };
+        arr[i] = { ...arr[i], [key]: clamped };
         return arr;
       });
     };
@@ -149,7 +159,7 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
   const nudgeCrop = (delta) => {
     if (activeIndex === null) return;
     const i = activeIndex;
-    const key = activeHandle === 'top' ? 'cropTop' : 'cropBottom';
+    const key = KEY[activeHandle];
     const maxVal = maxCropFor(i, activeHandle);
     setCrops(prev => {
       const arr = [...prev];
@@ -161,7 +171,7 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
     if (activeIndex === null) return;
     setCrops(prev => {
       const arr = [...prev];
-      arr[activeIndex] = { cropTop: 0, cropBottom: 0 };
+      arr[activeIndex] = { cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 };
       return arr;
     });
   };
@@ -178,18 +188,20 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
       for (let i = 0; i < files.length; i++) {
         // eslint-disable-next-line no-await-in-loop
         const bitmap = await createImageBitmap(files[i]);
-        const scaleToNatural = naturalDims[i].height / scaledHeights[i];
+        const scaleToNatural = naturalDims[i].height / scaledHeights[i]; // = naturalDims[i].width/baseWidth ч мөн
+        const srcX = (crops[i].cropLeft || 0) * scaleToNatural;
         const srcY = (crops[i].cropTop || 0) * scaleToNatural;
+        const srcW = visibleWidths[i] * scaleToNatural;
         const srcH = visibleHeights[i] * scaleToNatural;
         const canvas = document.createElement('canvas');
-        canvas.width = bitmap.width;
+        canvas.width = Math.max(1, Math.round(srcW));
         canvas.height = Math.max(1, Math.round(srcH));
         const ctx = canvas.getContext('2d');
         if (exportType === 'image/jpeg') {
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
         }
-        ctx.drawImage(bitmap, 0, srcY, bitmap.width, srcH, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
         bitmap.close?.();
         // eslint-disable-next-line no-await-in-loop
         const blob = await new Promise(resolve => canvas.toBlob(resolve, exportType, exportQuality));
@@ -207,6 +219,11 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
   };
 
   const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+  const cornerBadge = (handle) => (
+    <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
+      {dragKind === handle ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
+    </div>
+  );
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#0a0a0a', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
@@ -239,46 +256,49 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
               if (!isActive) {
                 return (
                   <div key={i} onClick={(e) => { e.stopPropagation(); setActiveIndex(i); }}
-                    style={{ position: 'absolute', left: 0, top: boxTopPx, width: boxWidthPx, height: visibleHeights[i] * displayScale, overflow: 'hidden', cursor: 'pointer' }}>
+                    style={{ position: 'absolute', left: 0, top: boxTopPx, width: visibleWidths[i] * displayScale, height: visibleHeights[i] * displayScale, overflow: 'hidden', cursor: 'pointer' }}>
                     <img src={fileUrls[i]} alt={`${i + 1}`} draggable={false}
-                      style={{ position: 'absolute', left: 0, top: -(crops[i].cropTop || 0) * displayScale, width: boxWidthPx, height: scaledHeights[i] * displayScale, pointerEvents: 'none' }} />
+                      style={{ position: 'absolute', left: -(crops[i].cropLeft || 0) * displayScale, top: -(crops[i].cropTop || 0) * displayScale, width: boxWidthPx, height: scaledHeights[i] * displayScale, pointerEvents: 'none' }} />
                   </div>
                 );
               }
 
-              // Идэвхтэй зураг — БvТЭН (тайраагvй) хэмжээгээр харуулж, тайрагдах хэсгийг
+              // Идэвхтэй зураг — БvТЭН (тайраагvй) хэмжээгээр харуулж, тайрагдах хэсгvvдийг
               // хагас тунгалаг улбар шар давхаргаар тэмдэглэнэ (StitchPics-ийн crop горим шиг).
               const boxHeightPx = scaledHeights[i] * displayScale;
               const cropTopPx = (crops[i].cropTop || 0) * displayScale;
               const cropBottomPx = (crops[i].cropBottom || 0) * displayScale;
+              const cropLeftPx = (crops[i].cropLeft || 0) * displayScale;
+              const cropRightPx = (crops[i].cropRight || 0) * displayScale;
               return (
                 <div key={i} onClick={(e) => e.stopPropagation()}
                   style={{ position: 'absolute', left: 0, top: boxTopPx, width: boxWidthPx, height: boxHeightPx, zIndex: files.length + 10, border: '2px solid #f5a623', boxSizing: 'border-box' }}>
                   <img src={fileUrls[i]} alt={`${i + 1}`} draggable={false}
                     style={{ position: 'absolute', left: 0, top: 0, width: boxWidthPx, height: boxHeightPx, pointerEvents: 'none' }} />
-                  {cropTopPx > 0 && (
-                    <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: cropTopPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />
-                  )}
-                  {cropBottomPx > 0 && (
-                    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: cropBottomPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />
-                  )}
+                  {cropTopPx > 0 && <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: cropTopPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />}
+                  {cropBottomPx > 0 && <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: cropBottomPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />}
+                  {cropLeftPx > 0 && <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: cropLeftPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />}
+                  {cropRightPx > 0 && <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: cropRightPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />}
+
+                  {/* Дээд/доод бариул — 4 буланд харандаа/зов тэмдэг */}
                   <div onPointerDown={(e) => startCropDrag(e, i, 'top')}
                     style={{ position: 'absolute', left: 0, right: 0, top: cropTopPx - 14, height: 28, cursor: 'ns-resize', touchAction: 'none', zIndex: 2 }}>
-                    <div style={{ position: 'absolute', left: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
-                      {dragKind === 'top' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
-                    </div>
-                    <div style={{ position: 'absolute', right: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
-                      {dragKind === 'top' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
-                    </div>
+                    <div style={{ position: 'absolute', left: 8, top: 0 }}>{cornerBadge('top')}</div>
+                    <div style={{ position: 'absolute', right: 8, top: 0 }}>{cornerBadge('top')}</div>
                   </div>
                   <div onPointerDown={(e) => startCropDrag(e, i, 'bottom')}
                     style={{ position: 'absolute', left: 0, right: 0, top: boxHeightPx - cropBottomPx - 14, height: 28, cursor: 'ns-resize', touchAction: 'none', zIndex: 2 }}>
-                    <div style={{ position: 'absolute', left: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
-                      {dragKind === 'bottom' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
-                    </div>
-                    <div style={{ position: 'absolute', right: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
-                      {dragKind === 'bottom' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
-                    </div>
+                    <div style={{ position: 'absolute', left: 8, top: 0 }}>{cornerBadge('bottom')}</div>
+                    <div style={{ position: 'absolute', right: 8, top: 0 }}>{cornerBadge('bottom')}</div>
+                  </div>
+                  {/* Зvvн/баруун бариул — ирмэгийн голд харандаа/зов тэмдэг */}
+                  <div onPointerDown={(e) => startCropDrag(e, i, 'left')}
+                    style={{ position: 'absolute', top: 0, bottom: 0, left: cropLeftPx - 14, width: 28, cursor: 'ew-resize', touchAction: 'none', zIndex: 2 }}>
+                    <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)' }}>{cornerBadge('left')}</div>
+                  </div>
+                  <div onPointerDown={(e) => startCropDrag(e, i, 'right')}
+                    style={{ position: 'absolute', top: 0, bottom: 0, left: boxWidthPx - cropRightPx - 14, width: 28, cursor: 'ew-resize', touchAction: 'none', zIndex: 2 }}>
+                    <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)' }}>{cornerBadge('right')}</div>
                   </div>
                 </div>
               );
@@ -291,7 +311,7 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
         {activeIndex !== null && (
           <div style={{ display: 'flex', gap: 18, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: 10, color: '#888' }}>Тайрах ({activeHandle === 'top' ? 'дээд' : 'доод'})</span>
+              <span style={{ fontSize: 10, color: '#888' }}>Тайрах ({HANDLE_LABEL[activeHandle]})</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => nudgeCrop(1)} title="Ихэсгэх" style={iconBtnStyle}><IconChevronUp size={14} /></button>
                 <button onClick={() => nudgeCrop(-1)} title="Багасгах" style={iconBtnStyle}><IconChevronDown size={14} /></button>
