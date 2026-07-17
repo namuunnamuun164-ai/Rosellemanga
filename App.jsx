@@ -103,6 +103,9 @@ export default function App() {
   const [editChapterStitchTop, setEditChapterStitchTop] = useState(0);
   const [editChapterStitchLeft, setEditChapterStitchLeft] = useState(0);
   const [editChapterStitchZoom, setEditChapterStitchZoom] = useState(1);
+  // ЗАСВАР #165: зургаа дарж чирж байгаа vед (гараа тавьсан хугацаанд) л шар
+  // хvрээ гарч ирнэ — хаана дарж чирч байгааг тодорхой харуулна.
+  const [editChapterStitchDragging, setEditChapterStitchDragging] = useState(false);
   const [editChapterEditBusy, setEditChapterEditBusy] = useState(false);
   const editChapterStitchPrevImgRef = useRef(null);
   const editChapterStitchCurImgRef = useRef(null);
@@ -213,6 +216,7 @@ export default function App() {
     const startClientY = point.clientY;
     const startTop = editChapterStitchTop;
     const startLeft = editChapterStitchLeft;
+    setEditChapterStitchDragging(true);
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
@@ -225,6 +229,7 @@ export default function App() {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
+      setEditChapterStitchDragging(false);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -316,6 +321,9 @@ export default function App() {
   const [chapterStitchTop, setChapterStitchTop] = useState(0); // одоогийн зурагны "top" (css px, цонхны хувьд)
   const [chapterStitchLeft, setChapterStitchLeft] = useState(0); // одоогийн зурагны "left" (css px)
   const [chapterStitchZoom, setChapterStitchZoom] = useState(1); // тольж харах өсгөлт (1=100%), эцсийн чанарт нөлөөгvй
+  // ЗАСВАР #165: зургаа дарж чирж байгаа vед (гараа тавьсан хугацаанд) л шар
+  // хvрээ гарч ирнэ — хаана дарж чирч байгааг тодорхой харуулна.
+  const [chapterStitchDragging, setChapterStitchDragging] = useState(false);
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
   const chapterStitchPrevImgRef = useRef(null); // өмнөх (index-1) зураг — эталон, байрлал өөрчлөгдөхгvй
   const chapterStitchCurImgRef = useRef(null); // одоогийн зураг — чирдэг, хагас тунгалаг
@@ -362,6 +370,7 @@ export default function App() {
     const startClientY = point.clientY;
     const startTop = chapterStitchTop;
     const startLeft = chapterStitchLeft;
+    setChapterStitchDragging(true);
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
@@ -374,6 +383,7 @@ export default function App() {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
+      setChapterStitchDragging(false);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -4514,7 +4524,7 @@ export default function App() {
                   if (isSelected && i > 0) {
                     return (
                       <div key={i} ref={chapterStitchFrameRef}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', boxShadow: chapterStitchDragging ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
                         <img ref={chapterStitchPrevImgRef} src={chapterFileUrls[i - 1]} alt="prev" draggable={false}
                           style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * chapterStitchZoom}%` }} />
                         <img ref={chapterStitchCurImgRef} src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
@@ -5048,7 +5058,7 @@ export default function App() {
                   if (isSelected && i > 0) {
                     return (
                       <div key={`new${i}`} ref={editChapterStitchFrameRef}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', boxShadow: editChapterStitchDragging ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
                         <img ref={editChapterStitchPrevImgRef} src={editChapterNewFileUrls[i - 1]} alt="prev" draggable={false}
                           style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * editChapterStitchZoom}%` }} />
                         <img ref={editChapterStitchCurImgRef} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
