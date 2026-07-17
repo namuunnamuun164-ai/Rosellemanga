@@ -119,9 +119,12 @@ export default function App() {
     if (!editChapterEditTarget || editChapterEditTarget.kind !== 'new' || editChapterEditTarget.index === 0) { setEditChapterStitchTop(0); return; }
     let rafId;
     let tries = 0;
+    // ЗАСВАР #166: "0 давхцал" (frameHeight, зургийг бvхэлдээ цонхны гадна)
+    // биш, ХАГАС ХАРАГДАХ байдлаар эхлvvлнэ — эс бол зураг бvхэлдээ цонхны
+    // гадна (харагдахгvй) байрлаж, хэрэглэгч барьж чирэх юм ер vгvй болдог байв.
     const tryInit = () => {
       const h = editChapterStitchFrameRef.current?.clientHeight || 0;
-      if (h > 0 || tries > 60) { setEditChapterStitchTop(h); return; }
+      if (h > 0 || tries > 60) { setEditChapterStitchTop(Math.round(h * 0.5)); return; }
       tries += 1;
       rafId = requestAnimationFrame(tryInit);
     };
@@ -236,7 +239,7 @@ export default function App() {
     setEditChapterStitchZoom(z => Math.max(0.3, Math.min(3, +(z + delta).toFixed(2))));
     setEditChapterStitchLeft(0);
     const h = editChapterStitchFrameRef.current?.clientHeight;
-    if (h) setEditChapterStitchTop(h);
+    if (h) setEditChapterStitchTop(Math.round(h * 0.5));
   };
 
   // ЗАСВАР #164: "Нийлvvлэх" дарахад одоогийн зэрэгцvvлэлтээр өмнөх + одоогийн
@@ -342,9 +345,12 @@ export default function App() {
     if (chapterEditIndex === null || chapterEditIndex === 0) { setChapterStitchTop(0); return; }
     let rafId;
     let tries = 0;
+    // ЗАСВАР #166: "0 давхцал" (frameHeight, зургийг бvхэлдээ цонхны гадна)
+    // биш, ХАГАС ХАРАГДАХ байдлаар эхлvvлнэ — эс бол зураг бvхэлдээ цонхны
+    // гадна (харагдахгvй) байрлаж, хэрэглэгч барьж чирэх юм ер vгvй болдог байв.
     const tryInit = () => {
       const h = chapterStitchFrameRef.current?.clientHeight || 0;
-      if (h > 0 || tries > 60) { setChapterStitchTop(h); return; }
+      if (h > 0 || tries > 60) { setChapterStitchTop(Math.round(h * 0.5)); return; }
       tries += 1;
       rafId = requestAnimationFrame(tryInit);
     };
@@ -387,7 +393,7 @@ export default function App() {
     setChapterStitchZoom(z => Math.max(0.3, Math.min(3, +(z + delta).toFixed(2))));
     setChapterStitchLeft(0);
     const h = chapterStitchFrameRef.current?.clientHeight;
-    if (h) setChapterStitchTop(h);
+    if (h) setChapterStitchTop(Math.round(h * 0.5));
   };
 
   // ЗАСВАР #164: "Нийлvvлэх" дарахад одоогийн зэрэгцvvлэлтээр өмнөх + одоогийн
@@ -4513,13 +4519,12 @@ export default function App() {
                   const isSelected = chapterEditIndex === i;
                   if (isSelected && i > 0) {
                     return (
-                      <div key={i} ref={chapterStitchFrameRef}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                      <div key={i} ref={chapterStitchFrameRef} onPointerDown={startChapterStitchDrag}
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={chapterStitchPrevImgRef} src={chapterFileUrls[i - 1]} alt="prev" draggable={false}
-                          style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * chapterStitchZoom}%` }} />
+                          style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * chapterStitchZoom}%`, pointerEvents: 'none' }} />
                         <img ref={chapterStitchCurImgRef} src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
-                          onPointerDown={startChapterStitchDrag}
-                          style={{ position: 'absolute', left: chapterStitchLeft, top: chapterStitchTop, width: `${100 * chapterStitchZoom}%`, opacity: chapterEditBusy ? 0.3 : 0.65, cursor: 'grab', touchAction: 'none' }} />
+                          style={{ position: 'absolute', left: chapterStitchLeft, top: chapterStitchTop, width: `${100 * chapterStitchZoom}%`, opacity: chapterEditBusy ? 0.3 : 0.65, pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, borderTop: '1px dashed rgba(80,220,150,0.85)', pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, top: chapterStitchTop, borderTop: '1px dashed #f5a623', pointerEvents: 'none' }} />
                       </div>
@@ -5047,13 +5052,12 @@ export default function App() {
                   const isSelected = editChapterEditTarget?.kind === 'new' && editChapterEditTarget.index === i;
                   if (isSelected && i > 0) {
                     return (
-                      <div key={`new${i}`} ref={editChapterStitchFrameRef}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                      <div key={`new${i}`} ref={editChapterStitchFrameRef} onPointerDown={startEditChapterStitchDrag}
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={editChapterStitchPrevImgRef} src={editChapterNewFileUrls[i - 1]} alt="prev" draggable={false}
-                          style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * editChapterStitchZoom}%` }} />
+                          style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * editChapterStitchZoom}%`, pointerEvents: 'none' }} />
                         <img ref={editChapterStitchCurImgRef} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
-                          onPointerDown={startEditChapterStitchDrag}
-                          style={{ position: 'absolute', left: editChapterStitchLeft, top: editChapterStitchTop, width: `${100 * editChapterStitchZoom}%`, opacity: editChapterEditBusy ? 0.3 : 0.65, cursor: 'grab', touchAction: 'none' }} />
+                          style={{ position: 'absolute', left: editChapterStitchLeft, top: editChapterStitchTop, width: `${100 * editChapterStitchZoom}%`, opacity: editChapterEditBusy ? 0.3 : 0.65, pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, borderTop: '1px dashed rgba(80,220,150,0.85)', pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, top: editChapterStitchTop, borderTop: '1px dashed #f5a623', pointerEvents: 'none' }} />
                       </div>
