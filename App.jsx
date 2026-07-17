@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock, splitTallImageFile, stitchImageFiles } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock, splitTallImageFile } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash } from './icons';
 import { PasswordField } from './PasswordField';
+import StitchEditor from './StitchEditor';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -94,47 +95,16 @@ export default function App() {
   // { kind: 'existing', index } (аль хэдийн R2-д байгаа, DB мөртэй) эсвэл
   // { kind: 'new', index } (шинээр сонгосон, хараахан upload хийгээгvй) байна.
   const [editChapterEditTarget, setEditChapterEditTarget] = useState(null);
-  // ЗАСВАР #164: StitchPics апп шиг — "new" (шинээр нэмсэн, upload хийгээгvй)
-  // зургуудыг өөр хоорондоо нь ГАРААР (X/Y чирж) зэрэгцvvлээд "Нийлvvлэх"-ээр
-  // нэг зураг болгож нийлvvлж болно (index>0 vед, өөрөөр хэлбэл өмнөх "new"
-  // зураг байгаа vед). Аль хэдийн R2/DB-д байгаа "existing" зургийг (DB
-  // мөрvvдийг нийлvvлэх нь дараалал/устгалтын нэмэлт логик шаардах тул) зөвхөн
-  // Солих/Устгах/Зөөх л ажиллана — align/stitch хийхгvй.
-  const [editChapterStitchTop, setEditChapterStitchTop] = useState(0);
-  const [editChapterStitchLeft, setEditChapterStitchLeft] = useState(0);
-  const [editChapterStitchZoom, setEditChapterStitchZoom] = useState(1);
-  // ЗАСВАР #167: зэрэгцvvлэх шугамын дээр харандаа/зов тэмдэг icon харуулж,
-  // яг хаанаас барьж чирэхийг тодорхой заана (чирж байх vед зов тэмдэг болно).
-  const [editChapterStitchDragging, setEditChapterStitchDragging] = useState(false);
   const [editChapterEditBusy, setEditChapterEditBusy] = useState(false);
-  const editChapterStitchPrevImgRef = useRef(null);
-  const editChapterStitchCurImgRef = useRef(null);
-  const editChapterStitchFrameRef = useRef(null);
   const editChapterReplaceInputRef = useRef(null);
+  // ЗАСВАР #169: олон зургийг StitchPics шиг ГАРААР зэрэгцvvлж (crop + хэвтээ
+  // шилжилт) нэг урт зураг болгох нь тусдаа StitchEditor компонентоор хийгдэнэ
+  // (editChapterStitchEditorOpen) — доор.
+  const [editChapterStitchEditorOpen, setEditChapterStitchEditorOpen] = useState(false);
+  const [editChapterStitchFiles, setEditChapterStitchFiles] = useState(null); // File[] эсвэл null (уншиж байна/хаалттай)
+  const [editChapterStitchLoading, setEditChapterStitchLoading] = useState(false);
 
-  const closeEditChapterEditor = () => { setEditChapterEditTarget(null); setEditChapterStitchTop(0); setEditChapterStitchLeft(0); setEditChapterStitchZoom(1); };
-
-  // ЗАСВАР #164: "new" зураг сонгогдох (index>0) бvрт цонхны ДООД ирмэгт (давхцалгvй)
-  // байрлуулж эхэлнэ.
-  useEffect(() => {
-    setEditChapterStitchLeft(0);
-    setEditChapterStitchZoom(1);
-    if (!editChapterEditTarget || editChapterEditTarget.kind !== 'new' || editChapterEditTarget.index === 0) { setEditChapterStitchTop(0); return; }
-    let rafId;
-    let tries = 0;
-    // ЗАСВАР #166: "0 давхцал" (frameHeight, зургийг бvхэлдээ цонхны гадна)
-    // биш, ХАГАС ХАРАГДАХ байдлаар эхлvvлнэ — эс бол зураг бvхэлдээ цонхны
-    // гадна (харагдахгvй) байрлаж, хэрэглэгч барьж чирэх юм ер vгvй болдог байв.
-    const tryInit = () => {
-      const h = editChapterStitchFrameRef.current?.clientHeight || 0;
-      if (h > 0 || tries > 60) { setEditChapterStitchTop(Math.round(h * 0.5)); return; }
-      tries += 1;
-      rafId = requestAnimationFrame(tryInit);
-    };
-    rafId = requestAnimationFrame(tryInit);
-    return () => cancelAnimationFrame(rafId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editChapterEditTarget, editChapterExistingImages[editChapterEditTarget?.index]?.image_url, editChapterNewFileUrls[editChapterEditTarget?.index]]);
+  const closeEditChapterEditor = () => { setEditChapterEditTarget(null); };
 
   const editChapterEditUrl = editChapterEditTarget
     ? (editChapterEditTarget.kind === 'existing'
@@ -170,8 +140,6 @@ export default function App() {
       return arr;
     });
     setEditChapterEditTarget({ kind, index: newIndex });
-    // ЗАСВАР #164: editChapterStitchTop/Left/Zoom нь useEffect-ээр editChapterEditTarget
-    // өөрчлөгдөх бvрт автоматаар дахин тохирдог тул энд гараар сэргээх шаардлагагvй.
   };
 
   // ЗАСВАР #163: аль хэдийн R2-д байгаа зургийг crop/replace хийхэд шинэ файлыг
@@ -210,70 +178,26 @@ export default function App() {
     }
   };
 
-  // ЗАСВАР #164: одоогийн ("new") зургийг цонхны дотор дээшээ/доошоо, зvvн/баруун
-  // тийш чирж, өмнөх "new" зурагтай зэрэгцvvлнэ.
-  const startEditChapterStitchDrag = (e) => {
-    e.preventDefault();
-    const point = e.touches ? e.touches[0] : e;
-    const startClientX = point.clientX;
-    const startClientY = point.clientY;
-    const startTop = editChapterStitchTop;
-    const startLeft = editChapterStitchLeft;
-    setEditChapterStitchDragging(true);
-
-    const onMove = (ev) => {
-      if (ev.touches) ev.preventDefault();
-      const p = ev.touches ? ev.touches[0] : ev;
-      setEditChapterStitchTop(startTop + (p.clientY - startClientY));
-      setEditChapterStitchLeft(startLeft + (p.clientX - startClientX));
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onUp);
-      setEditChapterStitchDragging(false);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('touchend', onUp);
-  };
-
-  const changeEditChapterStitchZoom = (delta) => {
-    setEditChapterStitchZoom(z => Math.max(0.3, Math.min(3, +(z + delta).toFixed(2))));
-    setEditChapterStitchLeft(0);
-    const h = editChapterStitchFrameRef.current?.clientHeight;
-    if (h) setEditChapterStitchTop(Math.round(h * 0.5));
-  };
-
-  // ЗАСВАР #164: "Нийлvvлэх" дарахад одоогийн зэрэгцvvлэлтээр өмнөх + одоогийн
-  // ("new") хоёр зургийг НЭГ зураг болгож нийлvvлнэ.
-  const confirmEditChapterStitch = async () => {
-    if (!editChapterEditTarget || editChapterEditTarget.kind !== 'new' || editChapterEditTarget.index === 0) return;
-    const prevImgEl = editChapterStitchPrevImgRef.current;
-    const curImgEl = editChapterStitchCurImgRef.current;
-    const frameEl = editChapterStitchFrameRef.current;
-    if (!prevImgEl || !curImgEl || !frameEl) return;
-    const displayWidth = curImgEl.clientWidth;
-    if (!displayWidth) return;
-    const canvasScale = prevImgEl.naturalWidth / displayWidth;
-    const offsetYNatural = (editChapterStitchTop - (frameEl.clientHeight - prevImgEl.clientHeight)) * canvasScale;
-    const offsetXNatural = editChapterStitchLeft * canvasScale;
-    const idx = editChapterEditTarget.index;
-    setEditChapterEditBusy(true);
+  // ЗАСВАР #169: "Зэрэгцvvлэх" дарахад одоо байгаа БvХ зургийг (existing нь
+  // fetch→blob→File болгож, new-той хамт дараалалаар нь) StitchEditor-т
+  // дамжуулна. Экспорт хийхэд НЭГ нийлvvлсэн файл гарна — existing бvгд
+  // "хасагдсан" тул эцсийн Хадгалахад DB-с устгагдана, харин нийлvvлсэн
+  // vр дvнг ганц "new" файл болгож vлдээнэ.
+  const openEditChapterStitchEditor = async () => {
+    setEditChapterStitchLoading(true);
     try {
-      const merged = await stitchImageFiles(editChapterNewFiles[idx - 1], editChapterNewFiles[idx], offsetXNatural, offsetYNatural);
-      setEditChapterNewFiles(prev => {
-        const arr = [...prev];
-        arr.splice(idx - 1, 2, merged);
-        return arr;
-      });
-      closeEditChapterEditor();
+      const existingFiles = await Promise.all(editChapterExistingImages.map(async (img) => {
+        const resp = await fetch(img.image_url);
+        const blob = await resp.blob();
+        const ext = (img.image_url.split('.').pop() || 'jpg').split('?')[0];
+        return new File([blob], `page.${ext}`, { type: blob.type });
+      }));
+      setEditChapterStitchFiles([...existingFiles, ...editChapterNewFiles]);
+      setEditChapterStitchEditorOpen(true);
     } catch (e) {
-      notify('Алдаа: ' + e.message);
+      notify('Зураг татаж чадсангvй: ' + e.message);
     }
-    setEditChapterEditBusy(false);
+    setEditChapterStitchLoading(false);
   };
 
   // ЗАСВАР #124: хадгалахдаа анх татсан зурагнуудаас алийг нь хассаныг мэдэхийн тулд
@@ -315,22 +239,13 @@ export default function App() {
   // ЗАСВАР #163: "Бvтнээр" (өөрчлөхгvй) эсвэл "Хуваах" (4000px-ээс урт зургийг
   // тэр хэмжээгээр таслаж, олон хуудас болгох) горим сонгох.
   const [chapterSplitMode, setChapterSplitMode] = useState('full');
-  // ЗАСВАР #164: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж шууд засварлах
-  // — StitchPics апп шиг: одоогийн зургийг ӨМНӨХ зурагтай (index-1) харьцуулан
-  // ГАРААР (X/Y чирж) зэрэгцvvлээд, "Нийлvvлэх" дарж хоёуланг нь НЭГ зураг
-  // болгож нийлvvлнэ (автомат тааруулгагvй, зөвхөн хэрэглэгчийн чирсэн байрлалаар).
-  // Эхний (index 0) зурагны хувьд өмнөх зураг байхгvй тул align хийх боломжгvй.
+  // ЗАСВАР #169: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж Солих/Устгах/Зөөх
+  // хийж болно. Олон зургийг StitchPics шиг ГАРААР зэрэгцvvлж (crop +
+  // хэвтээ шилжилт) нэг урт зураг болгох нь тусдаа StitchEditor компонентоор
+  // хийгдэнэ (chapterStitchEditorOpen) — доор.
   const [chapterEditIndex, setChapterEditIndex] = useState(null); // chapterFiles-ийн alь index засварлаж буй
-  const [chapterStitchTop, setChapterStitchTop] = useState(0); // одоогийн зурагны "top" (css px, цонхны хувьд)
-  const [chapterStitchLeft, setChapterStitchLeft] = useState(0); // одоогийн зурагны "left" (css px)
-  const [chapterStitchZoom, setChapterStitchZoom] = useState(1); // тольж харах өсгөлт (1=100%), эцсийн чанарт нөлөөгvй
-  // ЗАСВАР #167: зэрэгцvvлэх шугамын дээр харандаа/зов тэмдэг icon харуулж,
-  // яг хаанаас барьж чирэхийг тодорхой заана (чирж байх vед зов тэмдэг болно).
-  const [chapterStitchDragging, setChapterStitchDragging] = useState(false);
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
-  const chapterStitchPrevImgRef = useRef(null); // өмнөх (index-1) зураг — эталон, байрлал өөрчлөгдөхгvй
-  const chapterStitchCurImgRef = useRef(null); // одоогийн зураг — чирдэг, хагас тунгалаг
-  const chapterStitchFrameRef = useRef(null); // тогтмол өндөртэй харагдах "цонх"
+  const [chapterStitchEditorOpen, setChapterStitchEditorOpen] = useState(false);
   // ЗАСВАР #118: URL.createObjectURL-ийг render болгонд шинээр үүсгэдэг байсан
   // memory leak-ийг засав — blob URL-уудыг файл өөрчлөгдөх үед л нэг удаа
   // үүсгэж, хуучныг нь revoke хийнэ.
@@ -342,97 +257,7 @@ export default function App() {
   }, [chapterFiles]);
 
   // ЗАСВАР #164: "БvТНЭЭР ХАРАХ" preview-с дарж нээгдэх per-image edit vйлдлvvд
-  const closeChapterEdit = () => { setChapterEditIndex(null); setChapterStitchTop(0); setChapterStitchLeft(0); setChapterStitchZoom(1); };
-
-  // ЗАСВАР #164: зураг сонгогдох бvрт одоогийн зургийг цонхны ДООД ирмэгт (давхцалгvй,
-  // "0 offset") байрлуулж эхэлнэ — хэрэглэгч дараа нь дээшээ чирж өмнөх зурагтай
-  // давхцуулна. Цонх (frame) render хийгдэж, бодит хэмжээ нь гартал дараалан шалгана.
-  useEffect(() => {
-    setChapterStitchLeft(0);
-    setChapterStitchZoom(1);
-    if (chapterEditIndex === null || chapterEditIndex === 0) { setChapterStitchTop(0); return; }
-    let rafId;
-    let tries = 0;
-    // ЗАСВАР #166: "0 давхцал" (frameHeight, зургийг бvхэлдээ цонхны гадна)
-    // биш, ХАГАС ХАРАГДАХ байдлаар эхлvvлнэ — эс бол зураг бvхэлдээ цонхны
-    // гадна (харагдахгvй) байрлаж, хэрэглэгч барьж чирэх юм ер vгvй болдог байв.
-    const tryInit = () => {
-      const h = chapterStitchFrameRef.current?.clientHeight || 0;
-      if (h > 0 || tries > 60) { setChapterStitchTop(Math.round(h * 0.5)); return; }
-      tries += 1;
-      rafId = requestAnimationFrame(tryInit);
-    };
-    rafId = requestAnimationFrame(tryInit);
-    return () => cancelAnimationFrame(rafId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterEditIndex, chapterFileUrls[chapterEditIndex]]);
-
-  // ЗАСВАР #164: одоогийн зургийг цонхны дотор дээшээ/доошоо, зvvн/баруун тийш
-  // чирж, өмнөх зурагтай (доор нь тольж харагдах) зэрэгцvvлнэ.
-  const startChapterStitchDrag = (e) => {
-    e.preventDefault();
-    const point = e.touches ? e.touches[0] : e;
-    const startClientX = point.clientX;
-    const startClientY = point.clientY;
-    const startTop = chapterStitchTop;
-    const startLeft = chapterStitchLeft;
-    setChapterStitchDragging(true);
-
-    const onMove = (ev) => {
-      if (ev.touches) ev.preventDefault();
-      const p = ev.touches ? ev.touches[0] : ev;
-      setChapterStitchTop(startTop + (p.clientY - startClientY));
-      setChapterStitchLeft(startLeft + (p.clientX - startClientX));
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onUp);
-      setChapterStitchDragging(false);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('touchend', onUp);
-  };
-
-  // ЗАСВАР #164: тольж харах zoom өөрчлөгдөх бvрт (өөр хэмжээтэй болж харагдах
-  // тул өмнөх offset утга худал болдог) байрлалыг "0 давхцал"-руу дахин тохируулна.
-  const changeChapterStitchZoom = (delta) => {
-    setChapterStitchZoom(z => Math.max(0.3, Math.min(3, +(z + delta).toFixed(2))));
-    setChapterStitchLeft(0);
-    const h = chapterStitchFrameRef.current?.clientHeight;
-    if (h) setChapterStitchTop(Math.round(h * 0.5));
-  };
-
-  // ЗАСВАР #164: "Нийлvvлэх" дарахад одоогийн зэрэгцvvлэлтээр өмнөх + одоогийн
-  // хоёр зургийг НЭГ зураг болгож нийлvvлнэ.
-  const confirmChapterStitch = async () => {
-    if (chapterEditIndex === null || chapterEditIndex === 0) return;
-    const prevImgEl = chapterStitchPrevImgRef.current;
-    const curImgEl = chapterStitchCurImgRef.current;
-    const frameEl = chapterStitchFrameRef.current;
-    if (!prevImgEl || !curImgEl || !frameEl) return;
-    const displayWidth = curImgEl.clientWidth;
-    if (!displayWidth) return;
-    const canvasScale = prevImgEl.naturalWidth / displayWidth;
-    const offsetYNatural = (chapterStitchTop - (frameEl.clientHeight - prevImgEl.clientHeight)) * canvasScale;
-    const offsetXNatural = chapterStitchLeft * canvasScale;
-    setChapterEditBusy(true);
-    try {
-      const merged = await stitchImageFiles(chapterFiles[chapterEditIndex - 1], chapterFiles[chapterEditIndex], offsetXNatural, offsetYNatural);
-      setChapterFiles(prev => {
-        const arr = [...prev];
-        arr.splice(chapterEditIndex - 1, 2, merged);
-        return arr;
-      });
-      closeChapterEdit();
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    }
-    setChapterEditBusy(false);
-  };
+  const closeChapterEdit = () => { setChapterEditIndex(null); };
 
   const deleteChapterEditImage = () => {
     if (chapterEditIndex === null) return;
@@ -451,8 +276,6 @@ export default function App() {
       return arr;
     });
     setChapterEditIndex(newIndex);
-    // ЗАСВАР #164: chapterStitchTop/Left/Zoom нь useEffect-ээр chapterEditIndex
-    // өөрчлөгдөх бvрт автоматаар дахин тохирдог тул энд гараар сэргээх шаардлагагvй.
   };
 
   const chapterReplaceInputRef = useRef(null);
@@ -4508,6 +4331,12 @@ export default function App() {
                   гэж харагддаг байсан (бодит уншигчийн хуудсанд байдаг readerZoom
                   state-ийг хамт ашигладаг тул хоёр газар зэрэг тохирсон хэвээр байна). */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {chapterFiles.length >= 2 && (
+                  <button onClick={() => setChapterStitchEditorOpen(true)} title="Зэрэгцvvлэх"
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #f5a623', background: 'rgba(245,166,35,0.12)', color: '#f5a623', fontSize: 11, fontWeight: 700, cursor: 'pointer', marginRight: 4 }}>
+                    🖇 Зэрэгцvvлэх
+                  </button>
+                )}
                 <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
                   style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
                   −
@@ -4521,28 +4350,8 @@ export default function App() {
             </div>
             <div style={{ maxWidth: 720, margin: '0 auto', paddingBottom: chapterEditIndex !== null ? 90 : 0 }}>
               <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
-                {/* ЗАСВАР #164: StitchPics апп шиг — зураг дээр дарахад тэр дороо (тусдаа
-                    цонх нээхгvйгээр) сонгогдож, өмнөх зурагтай зэрэгцvvлэн (align)
-                    харуулна. Хэрэглэгч гараар X/Y чирж таарaaд "Нийлvvлэх" дарж хоёр
-                    зургийг нэг болгоно. Эхний зурагт өмнөх зураг байхгvй тул зөвхөн харна. */}
                 {chapterFiles.map((file, i) => {
                   const isSelected = chapterEditIndex === i;
-                  if (isSelected && i > 0) {
-                    return (
-                      <div key={i} ref={chapterStitchFrameRef} onPointerDown={startChapterStitchDrag}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
-                        <img ref={chapterStitchPrevImgRef} src={chapterFileUrls[i - 1]} alt="prev" draggable={false}
-                          style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * chapterStitchZoom}%`, pointerEvents: 'none' }} />
-                        <img ref={chapterStitchCurImgRef} src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
-                          style={{ position: 'absolute', left: chapterStitchLeft, top: chapterStitchTop, width: `${100 * chapterStitchZoom}%`, opacity: chapterEditBusy ? 0.3 : 0.65, pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, borderTop: '1px dashed rgba(80,220,150,0.85)', pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, right: 0, top: chapterStitchTop, borderTop: '1px dashed #f5a623', pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: '50%', top: chapterStitchTop, transform: 'translate(-50%, -50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {chapterStitchDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
-                        </div>
-                      </div>
-                    );
-                  }
                   if (isSelected) {
                     return (
                       <div key={i} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
@@ -4567,15 +4376,6 @@ export default function App() {
                 зөвхөн зураг сонгогдсон vед л гарч ирнэ. */}
             {chapterEditIndex !== null && (
               <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 20, background: 'rgba(10,10,10,0.95)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1e1e1e', padding: '1rem' }}>
-                {chapterEditIndex > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
-                    <button onClick={() => changeChapterStitchZoom(-0.1)} title="Жижигрvvлэх"
-                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>−</button>
-                    <span style={{ fontSize: 11, color: '#aaa', minWidth: 40, textAlign: 'center' }}>{Math.round(chapterStitchZoom * 100)}%</span>
-                    <button onClick={() => changeChapterStitchZoom(0.1)} title="Томруулах"
-                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+</button>
-                  </div>
-                )}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
                   <button disabled={chapterEditBusy || chapterEditIndex === 0} onClick={() => moveChapterEditImage(-1)} title="Дээш"
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: chapterEditIndex === 0 ? '#444' : '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: chapterEditIndex === 0 ? 'not-allowed' : 'pointer' }}>
@@ -4594,12 +4394,6 @@ export default function App() {
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     <IconTrash />
                   </button>
-                  {chapterEditIndex > 0 && (
-                    <button disabled={chapterEditBusy} onClick={confirmChapterStitch} title="Нийлvvлэх"
-                      style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #f5a623', background: 'rgba(245,166,35,0.12)', color: '#f5a623', fontWeight: 700, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                      <IconCheck size={14} /> Нийлvvлэх
-                    </button>
-                  )}
                   <button disabled={chapterEditBusy} onClick={() => { setChapterPreviewOpen(false); closeChapterEdit(); }}
                     style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                     <IconCheck size={15} /> Хадгалах
@@ -4608,6 +4402,20 @@ export default function App() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ЗАСВАР #169: StitchPics шиг — сонгосон БvХ зургийг гараар зэрэгцvvлж
+            (crop + хэвтээ шилжилт) нэг тасралтгvй урт зураг болгож нийлvvлнэ. */}
+        {chapterStitchEditorOpen && (
+          <StitchEditor
+            files={chapterFiles}
+            onCancel={() => setChapterStitchEditorOpen(false)}
+            onExport={(croppedFiles) => {
+              setChapterFiles(croppedFiles);
+              setChapterStitchEditorOpen(false);
+              closeChapterEdit();
+            }}
+          />
         )}
 
         {/* ЗАСВАР #130: устгах хvсэлттэй холбоотой баталгаажуулах цонх (window.confirm-ийн оронд).
@@ -5023,6 +4831,12 @@ export default function App() {
               </button>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Бvтэн харах ({editChapterExistingImages.length + editChapterNewFiles.length} зураг)</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {(editChapterExistingImages.length + editChapterNewFiles.length) >= 2 && (
+                  <button disabled={editChapterStitchLoading} onClick={openEditChapterStitchEditor} title="Зэрэгцvvлэх"
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #f5a623', background: 'rgba(245,166,35,0.12)', color: '#f5a623', fontSize: 11, fontWeight: 700, cursor: editChapterStitchLoading ? 'default' : 'pointer', marginRight: 4, opacity: editChapterStitchLoading ? 0.6 : 1 }}>
+                    {editChapterStitchLoading ? 'Уншиж байна...' : '🖇 Зэрэгцvvлэх'}
+                  </button>
+                )}
                 <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
                   style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
                   −
@@ -5058,27 +4872,8 @@ export default function App() {
                     </div>
                   );
                 })}
-                {/* ЗАСВАР #164: StitchPics апп шиг — "new" (шинээр нэмсэн, upload
-                    хийгээгvй) зургийг өмнөх "new" зурагтай зэрэгцvvлж (align), гараар
-                    X/Y чирж таарaaд "Нийлvvлэх" дарж хоёр зургийг нэг болгож нийлvvлнэ. */}
                 {editChapterNewFiles.map((file, i) => {
                   const isSelected = editChapterEditTarget?.kind === 'new' && editChapterEditTarget.index === i;
-                  if (isSelected && i > 0) {
-                    return (
-                      <div key={`new${i}`} ref={editChapterStitchFrameRef} onPointerDown={startEditChapterStitchDrag}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
-                        <img ref={editChapterStitchPrevImgRef} src={editChapterNewFileUrls[i - 1]} alt="prev" draggable={false}
-                          style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * editChapterStitchZoom}%`, pointerEvents: 'none' }} />
-                        <img ref={editChapterStitchCurImgRef} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
-                          style={{ position: 'absolute', left: editChapterStitchLeft, top: editChapterStitchTop, width: `${100 * editChapterStitchZoom}%`, opacity: editChapterEditBusy ? 0.3 : 0.65, pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, borderTop: '1px dashed rgba(80,220,150,0.85)', pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: 0, right: 0, top: editChapterStitchTop, borderTop: '1px dashed #f5a623', pointerEvents: 'none' }} />
-                        <div style={{ position: 'absolute', left: '50%', top: editChapterStitchTop, transform: 'translate(-50%, -50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {editChapterStitchDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
-                        </div>
-                      </div>
-                    );
-                  }
                   if (isSelected) {
                     return (
                       <div key={`new${i}`} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
@@ -5102,15 +4897,6 @@ export default function App() {
             {/* ЗАСВАР #164: доод талд бэхлэгдсэн action bar — тусдаа цонх нээгдэхгvй. */}
             {editChapterEditTarget && (
               <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 20, background: 'rgba(10,10,10,0.95)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1e1e1e', padding: '1rem' }}>
-                {editChapterEditTarget.kind === 'new' && editChapterEditTarget.index > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
-                    <button onClick={() => changeEditChapterStitchZoom(-0.1)} title="Жижигрvvлэх"
-                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>−</button>
-                    <span style={{ fontSize: 11, color: '#aaa', minWidth: 40, textAlign: 'center' }}>{Math.round(editChapterStitchZoom * 100)}%</span>
-                    <button onClick={() => changeEditChapterStitchZoom(0.1)} title="Томруулах"
-                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+</button>
-                  </div>
-                )}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
                   {(() => {
                     const arrLen = editChapterEditTarget.kind === 'existing' ? editChapterExistingImages.length : editChapterNewFiles.length;
@@ -5138,12 +4924,6 @@ export default function App() {
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     <IconTrash />
                   </button>
-                  {editChapterEditTarget.kind === 'new' && editChapterEditTarget.index > 0 && (
-                    <button disabled={editChapterEditBusy} onClick={confirmEditChapterStitch} title="Нийлvvлэх"
-                      style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid #f5a623', background: 'rgba(245,166,35,0.12)', color: '#f5a623', fontWeight: 700, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                      <IconCheck size={14} /> Нийлvvлэх
-                    </button>
-                  )}
                   <button disabled={editChapterEditBusy} onClick={() => { setEditChapterPreviewOpen(false); closeEditChapterEditor(); }}
                     style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                     <IconCheck size={15} /> Хадгалах
@@ -5152,6 +4932,24 @@ export default function App() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ЗАСВАР #169: StitchPics шиг — одоо байгаа (existing, fetch хийж File
+            болгосон) + шинэ бvх зургийг гараар зэрэгцvvлж нэг урт зураг болгож
+            нийлvvлнэ. Экспортын дараа existing-vvд хоосорч (эцсийн Хадгалахад
+            DB-с устгагдана), нийлvvлсэн vр дvнг ганц "new" файл болгож vлдээнэ. */}
+        {editChapterStitchEditorOpen && editChapterStitchFiles && (
+          <StitchEditor
+            files={editChapterStitchFiles}
+            onCancel={() => { setEditChapterStitchEditorOpen(false); setEditChapterStitchFiles(null); }}
+            onExport={(croppedFiles) => {
+              setEditChapterExistingImages([]);
+              setEditChapterNewFiles(croppedFiles);
+              setEditChapterStitchEditorOpen(false);
+              setEditChapterStitchFiles(null);
+              closeEditChapterEditor();
+            }}
+          />
         )}
 
       </div>
