@@ -103,6 +103,9 @@ export default function App() {
   const [editChapterStitchTop, setEditChapterStitchTop] = useState(0);
   const [editChapterStitchLeft, setEditChapterStitchLeft] = useState(0);
   const [editChapterStitchZoom, setEditChapterStitchZoom] = useState(1);
+  // ЗАСВАР #167: зэрэгцvvлэх шугамын дээр харандаа/зов тэмдэг icon харуулж,
+  // яг хаанаас барьж чирэхийг тодорхой заана (чирж байх vед зов тэмдэг болно).
+  const [editChapterStitchDragging, setEditChapterStitchDragging] = useState(false);
   const [editChapterEditBusy, setEditChapterEditBusy] = useState(false);
   const editChapterStitchPrevImgRef = useRef(null);
   const editChapterStitchCurImgRef = useRef(null);
@@ -216,6 +219,7 @@ export default function App() {
     const startClientY = point.clientY;
     const startTop = editChapterStitchTop;
     const startLeft = editChapterStitchLeft;
+    setEditChapterStitchDragging(true);
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
@@ -228,6 +232,7 @@ export default function App() {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
+      setEditChapterStitchDragging(false);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -319,6 +324,9 @@ export default function App() {
   const [chapterStitchTop, setChapterStitchTop] = useState(0); // одоогийн зурагны "top" (css px, цонхны хувьд)
   const [chapterStitchLeft, setChapterStitchLeft] = useState(0); // одоогийн зурагны "left" (css px)
   const [chapterStitchZoom, setChapterStitchZoom] = useState(1); // тольж харах өсгөлт (1=100%), эцсийн чанарт нөлөөгvй
+  // ЗАСВАР #167: зэрэгцvvлэх шугамын дээр харандаа/зов тэмдэг icon харуулж,
+  // яг хаанаас барьж чирэхийг тодорхой заана (чирж байх vед зов тэмдэг болно).
+  const [chapterStitchDragging, setChapterStitchDragging] = useState(false);
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
   const chapterStitchPrevImgRef = useRef(null); // өмнөх (index-1) зураг — эталон, байрлал өөрчлөгдөхгvй
   const chapterStitchCurImgRef = useRef(null); // одоогийн зураг — чирдэг, хагас тунгалаг
@@ -368,6 +376,7 @@ export default function App() {
     const startClientY = point.clientY;
     const startTop = chapterStitchTop;
     const startLeft = chapterStitchLeft;
+    setChapterStitchDragging(true);
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
@@ -380,6 +389,7 @@ export default function App() {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
+      setChapterStitchDragging(false);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -4527,6 +4537,9 @@ export default function App() {
                           style={{ position: 'absolute', left: chapterStitchLeft, top: chapterStitchTop, width: `${100 * chapterStitchZoom}%`, opacity: chapterEditBusy ? 0.3 : 0.65, pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, borderTop: '1px dashed rgba(80,220,150,0.85)', pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, top: chapterStitchTop, borderTop: '1px dashed #f5a623', pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', left: '50%', top: chapterStitchTop, transform: 'translate(-50%, -50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {chapterStitchDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
+                        </div>
                       </div>
                     );
                   }
@@ -5060,6 +5073,9 @@ export default function App() {
                           style={{ position: 'absolute', left: editChapterStitchLeft, top: editChapterStitchTop, width: `${100 * editChapterStitchZoom}%`, opacity: editChapterEditBusy ? 0.3 : 0.65, pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, borderTop: '1px dashed rgba(80,220,150,0.85)', pointerEvents: 'none' }} />
                         <div style={{ position: 'absolute', left: 0, right: 0, top: editChapterStitchTop, borderTop: '1px dashed #f5a623', pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', left: '50%', top: editChapterStitchTop, transform: 'translate(-50%, -50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {editChapterStitchDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
+                        </div>
                       </div>
                     );
                   }
