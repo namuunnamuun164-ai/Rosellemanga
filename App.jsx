@@ -4514,7 +4514,7 @@ export default function App() {
                   if (isSelected && i > 0) {
                     return (
                       <div key={i} ref={chapterStitchFrameRef}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={chapterStitchPrevImgRef} src={chapterFileUrls[i - 1]} alt="prev" draggable={false}
                           style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * chapterStitchZoom}%` }} />
                         <img ref={chapterStitchCurImgRef} src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
@@ -4527,7 +4527,7 @@ export default function App() {
                   }
                   if (isSelected) {
                     return (
-                      <div key={i} style={{ position: 'relative', zIndex: 2, boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                      <div key={i} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img src={chapterFileUrls[i]} alt={`${i + 1}`} style={{ width: '100%', display: 'block', opacity: chapterEditBusy ? 0.4 : 1 }} />
                       </div>
                     );
@@ -5025,7 +5025,7 @@ export default function App() {
                   const isSelected = editChapterEditTarget?.kind === 'existing' && editChapterEditTarget.index === i;
                   if (isSelected) {
                     return (
-                      <div key={img.id} style={{ position: 'relative', zIndex: 2, boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                      <div key={img.id} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img src={img.image_url} alt={`${i + 1}`} style={{ width: '100%', display: 'block', opacity: editChapterEditBusy ? 0.4 : 1 }} />
                       </div>
                     );
@@ -5048,7 +5048,7 @@ export default function App() {
                   if (isSelected && i > 0) {
                     return (
                       <div key={`new${i}`} ref={editChapterStitchFrameRef}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={editChapterStitchPrevImgRef} src={editChapterNewFileUrls[i - 1]} alt="prev" draggable={false}
                           style={{ position: 'absolute', left: 0, bottom: 0, width: `${100 * editChapterStitchZoom}%` }} />
                         <img ref={editChapterStitchCurImgRef} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
@@ -5061,7 +5061,7 @@ export default function App() {
                   }
                   if (isSelected) {
                     return (
-                      <div key={`new${i}`} style={{ position: 'relative', zIndex: 2, boxShadow: 'inset 0 0 0 3px #f5a623' }}>
+                      <div key={`new${i}`} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} style={{ width: '100%', display: 'block', opacity: editChapterEditBusy ? 0.4 : 1 }} />
                       </div>
                     );
