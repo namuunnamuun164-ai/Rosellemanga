@@ -142,19 +142,37 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
   return pieces;
 };
 
-// ЗАСВАР #163: зургийг өгөгдсөн тэгш өнцөгт хэсгээр нь таслана. rect нь эх
-// зургийн БОДИТ (natural) пикселийн нэгжээр өгөгдсөн байх ёстой.
-export const cropImageFile = async (file, rect) => {
-  const bitmap = await createImageBitmap(file);
+// ЗАСВАР #164: StitchPics апп шиг — хоёр зургийг хэрэглэгчийн ГАРААР зохицуулсан
+// (X/Y) offset-оор нь нэг зураг болгож нийлvvлнэ (автомат тааруулгагvй, зөвхөн
+// хэрэглэгчийн сонгосон байрлалаар). offsetXNatural/offsetYNatural нь prevFile-ийн
+// БОДИТ (natural) пикселийн нэгжээр — curFile-ийн зvvн дээд булан prevFile-ийн
+// зvvн дээд буланг хаана байрлахыг заана (сөрөг байж болно, жишээ нь curFile
+// дээшээ давхцуулж зөөгдсөн бол offsetYNatural сөрөг байна). Хэрэв хоёр зургийн
+// өргөн ялгаатай бол curFile-ийг prevFile-ийн өргөнд proportional тааруулна.
+export const stitchImageFiles = async (prevFile, curFile, offsetXNatural, offsetYNatural) => {
+  const prevBitmap = await createImageBitmap(prevFile);
+  const curBitmap = await createImageBitmap(curFile);
+  const curScale = prevBitmap.width / curBitmap.width;
+  const curDrawWidth = curBitmap.width * curScale;
+  const curDrawHeight = curBitmap.height * curScale;
+
+  const minX = Math.min(0, offsetXNatural);
+  const maxX = Math.max(prevBitmap.width, offsetXNatural + curDrawWidth);
+  const minY = Math.min(0, offsetYNatural);
+  const maxY = Math.max(prevBitmap.height, offsetYNatural + curDrawHeight);
+
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(rect.width);
-  canvas.height = Math.round(rect.height);
+  canvas.width = Math.round(maxX - minX);
+  canvas.height = Math.round(maxY - minY);
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
-  bitmap.close?.();
-  const mimeType = file.type || 'image/jpeg';
+  ctx.drawImage(prevBitmap, -minX, -minY);
+  ctx.drawImage(curBitmap, offsetXNatural - minX, offsetYNatural - minY, curDrawWidth, curDrawHeight);
+  prevBitmap.close?.();
+  curBitmap.close?.();
+
+  const mimeType = prevFile.type || 'image/jpeg';
   const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
-  return new File([blob], file.name, { type: mimeType });
+  return new File([blob], prevFile.name, { type: mimeType });
 };
 
 // ЗАСВАР #146: "цаг:минут:секунд" (жишээ нь 12:15:28) маягийн цэвэрхэн тоон
