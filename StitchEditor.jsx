@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { IconCheck, IconChevronUp, IconChevronDown } from './icons';
+import { IconCheck, IconChevronUp, IconChevronDown, IconPencil } from './icons';
 
 // ЗАСВАР #170: StitchPics (iOS) шиг — олон зургийг ГАРААР (автомат
 // тааруулгагvй) зэрэгцvvлэн харуулж, ирмэг бvрийг нь CROP хийх editor.
@@ -263,12 +263,22 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
                     <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: cropBottomPx, background: 'rgba(245,166,35,0.35)', pointerEvents: 'none' }} />
                   )}
                   <div onPointerDown={(e) => startCropDrag(e, i, 'top')}
-                    style={{ position: 'absolute', left: 0, right: 0, top: cropTopPx - 14, height: 28, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', zIndex: 2 }}>
-                    <div style={{ background: '#f5a623', color: '#000', borderRadius: 6, padding: '2px 14px', fontSize: 12, fontWeight: 800, boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>⌄⌄</div>
+                    style={{ position: 'absolute', left: 0, right: 0, top: cropTopPx - 14, height: 28, cursor: 'ns-resize', touchAction: 'none', zIndex: 2 }}>
+                    <div style={{ position: 'absolute', left: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
+                      {dragKind === 'top' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
+                    </div>
+                    <div style={{ position: 'absolute', right: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
+                      {dragKind === 'top' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
+                    </div>
                   </div>
                   <div onPointerDown={(e) => startCropDrag(e, i, 'bottom')}
-                    style={{ position: 'absolute', left: 0, right: 0, top: boxHeightPx - cropBottomPx - 14, height: 28, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', zIndex: 2 }}>
-                    <div style={{ background: '#f5a623', color: '#000', borderRadius: 6, padding: '2px 14px', fontSize: 12, fontWeight: 800, boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>⌃⌃</div>
+                    style={{ position: 'absolute', left: 0, right: 0, top: boxHeightPx - cropBottomPx - 14, height: 28, cursor: 'ns-resize', touchAction: 'none', zIndex: 2 }}>
+                    <div style={{ position: 'absolute', left: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
+                      {dragKind === 'bottom' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
+                    </div>
+                    <div style={{ position: 'absolute', right: 8, top: 0, width: 28, height: 28, borderRadius: '50%', background: '#f5a623', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>
+                      {dragKind === 'bottom' ? <IconCheck size={14} color="#000" /> : <IconPencil size={13} color="#000" />}
+                    </div>
                   </div>
                 </div>
               );
