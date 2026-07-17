@@ -640,9 +640,41 @@ create policy "chapter_images_insert_staff" on public.chapter_images for insert
 
 -- ЗАСВАР #140 (migration_23): DELETE policy огт байгаагvй тул "БvЛЭГ ЗАСАХ"
 -- цонхноос admin/moderator тодорхой хуудсыг хассан ч мөр бодитоор устгагдаагvй байв.
+-- ЗАСВАР #163 (migration_30): editor өөрийн "pending" бvлгийн зургийг устгаж
+-- чадахгvй байсныг insert/update policy-той адилхан хамрах хvрээгээр нээв
+-- (өмнө нь editor "Бvтэн харах"-аас зураг устгасан ч, эцсийн Хадгалах vед
+-- энэ policy editor-ыг хориглосон тул DB-с бодитоор устгагдаагvй байв).
 drop policy if exists "chapter_images_delete_moderate" on public.chapter_images;
 create policy "chapter_images_delete_moderate" on public.chapter_images for delete
-  using (public.has_any_role(auth.uid(), array['admin','moderator']));
+  using (
+    public.has_any_role(auth.uid(), array['admin','moderator'])
+    or (
+      public.has_any_role(auth.uid(), array['editor'])
+      and exists (select 1 from public.chapters c where c.id = chapter_id and c.status = 'pending')
+    )
+  );
+
+-- ЗАСВАР #163 (migration_30): UPDATE policy огт байгаагvй байсан тул "Бvтэн
+-- харах" цонхны зураг СОЛИХ/ТАЙРАХ vйлдэл нь image_url-г шинэчлэхийг оролдоход
+-- RLS-ээр 0 мөр таарч, error=null буцаж, клиент талд "амжилттай" мэт
+-- харагдаад бодит DB-д хадгалагдаагvй байв. Insert policy-той ижил хамрах
+-- хvрээгээр зөвшөөрнө.
+drop policy if exists "chapter_images_update_staff" on public.chapter_images;
+create policy "chapter_images_update_staff" on public.chapter_images for update
+  using (
+    public.has_any_role(auth.uid(), array['admin','moderator'])
+    or (
+      public.has_any_role(auth.uid(), array['editor'])
+      and exists (select 1 from public.chapters c where c.id = chapter_id and c.status = 'pending')
+    )
+  )
+  with check (
+    public.has_any_role(auth.uid(), array['admin','moderator'])
+    or (
+      public.has_any_role(auth.uid(), array['editor'])
+      and exists (select 1 from public.chapters c where c.id = chapter_id and c.status = 'pending')
+    )
+  );
 
 -- ЗАСВАР #163 (код шинжилгээ): хуудасны дараалал солихдоо клиентээс 2N дараалсан
 -- HTTP update явуулдаг байсан (сөрөг дугаарт шилжvvлээд, дараа нь эцсийн

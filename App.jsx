@@ -107,11 +107,23 @@ export default function App() {
   // хvрээг тухайн зурагны БҮТЭН хэмжээгээр дахин тохируулна.
   useEffect(() => {
     if (!editChapterEditTarget) { setEditChapterCropBox(null); return; }
-    const raf = requestAnimationFrame(() => {
+    let rafId;
+    let tries = 0;
+    // ЗАСВАР #163: зураг decode хийгдэж дуусахаас өмнө clientHeight 0 байж болох тул
+    // (ялангуяа том зурган дээр) бодит өндөр гартал дараалан шалгана — эс бол box
+    // {top:0,bottom:0} болж, зураг сонгомогцоо бvхэлдээ хармаар харагдах алдаа vvснэ.
+    const tryInit = () => {
       const imgEl = editChapterEditImgRef.current;
-      if (imgEl) setEditChapterCropBox({ top: 0, bottom: imgEl.clientHeight });
-    });
-    return () => cancelAnimationFrame(raf);
+      const h = imgEl?.clientHeight || 0;
+      if (h > 0 || tries > 60) {
+        if (imgEl) setEditChapterCropBox({ top: 0, bottom: h });
+        return;
+      }
+      tries += 1;
+      rafId = requestAnimationFrame(tryInit);
+    };
+    rafId = requestAnimationFrame(tryInit);
+    return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editChapterEditTarget, editChapterExistingImages[editChapterEditTarget?.index]?.image_url, editChapterNewFileUrls[editChapterEditTarget?.index]]);
 
@@ -224,27 +236,32 @@ export default function App() {
   };
 
   // Дээд/доод чирэх шугамыг дээшээ/доошоо чирнэ; гар тавихад шууд хэрэгжинэ
-  const startEditChapterCropDrag = (mode) => (e) => {
+  // ЗАСВАР #163: жижиг харандаа icon дээр яг таг дарах шаардлагагvй болгож,
+  // ЗУРАГ ДЭЭР ХААНАЧ ч дарж чирэхэд л ойрхон шугам (дээд/доод) хуруунд шууд
+  // дагаж очдог болгов ("зурагаараа шууд дээш доош гvйлгэж тохируулах").
+  const startEditChapterCropDrag = (e) => {
     e.preventDefault();
-    e.stopPropagation();
-    const point = e.touches ? e.touches[0] : e;
-    const startY = point.clientY;
-    const startBox = { ...editChapterCropBox };
     const imgEl = editChapterEditImgRef.current;
+    if (!imgEl) return;
+    const rect = imgEl.getBoundingClientRect();
     const boundsHeight = imgEl.clientHeight;
     const MIN = 30;
+    const point = e.touches ? e.touches[0] : e;
+    const startBox = { ...editChapterCropBox };
+    const startLocalY = point.clientY - rect.top;
+    const mode = Math.abs(startLocalY - startBox.top) <= Math.abs(startLocalY - startBox.bottom) ? 'top' : 'bottom';
     setEditChapterCropDragHandle(mode);
     let latestBox = startBox;
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
       const p = ev.touches ? ev.touches[0] : ev;
-      const dy = p.clientY - startY;
+      const localY = p.clientY - rect.top;
       let { top, bottom } = startBox;
       if (mode === 'top') {
-        top = Math.min(Math.max(startBox.top + dy, 0), startBox.bottom - MIN);
+        top = Math.min(Math.max(localY, 0), startBox.bottom - MIN);
       } else {
-        bottom = Math.min(Math.max(startBox.bottom + dy, startBox.top + MIN), boundsHeight);
+        bottom = Math.min(Math.max(localY, startBox.top + MIN), boundsHeight);
       }
       latestBox = { top, bottom };
       setEditChapterCropBox(latestBox);
@@ -329,11 +346,23 @@ export default function App() {
   // хvрээг тухайн зурагны БҮТЭН хэмжээгээр дахин тохируулна.
   useEffect(() => {
     if (chapterEditIndex === null) { setChapterCropBox(null); return; }
-    const raf = requestAnimationFrame(() => {
+    let rafId;
+    let tries = 0;
+    // ЗАСВАР #163: зураг decode хийгдэж дуусахаас өмнө clientHeight 0 байж болох тул
+    // (ялангуяа том зурган дээр) бодит өндөр гартал дараалан шалгана — эс бол box
+    // {top:0,bottom:0} болж, зураг сонгомогцоо бvхэлдээ хармаар харагдах алдаа vvснэ.
+    const tryInit = () => {
       const imgEl = chapterEditImgRef.current;
-      if (imgEl) setChapterCropBox({ top: 0, bottom: imgEl.clientHeight });
-    });
-    return () => cancelAnimationFrame(raf);
+      const h = imgEl?.clientHeight || 0;
+      if (h > 0 || tries > 60) {
+        if (imgEl) setChapterCropBox({ top: 0, bottom: h });
+        return;
+      }
+      tries += 1;
+      rafId = requestAnimationFrame(tryInit);
+    };
+    rafId = requestAnimationFrame(tryInit);
+    return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterEditIndex, chapterFileUrls[chapterEditIndex]]);
 
@@ -364,27 +393,32 @@ export default function App() {
 
   // Дээд/доод тайрах шугамыг дээшээ/доошоо чирнэ (mode: 'top' эсвэл 'bottom');
   // гар тавихад (pointerup) шууд хэрэгжинэ
-  const startChapterCropDrag = (mode) => (e) => {
+  // ЗАСВАР #163: жижиг харандаа icon дээр яг таг дарах шаардлагагvй болгож,
+  // ЗУРАГ ДЭЭР ХААНАЧ ч дарж чирэхэд л ойрхон шугам (дээд/доод) хуруунд шууд
+  // дагаж очдог болгов ("зурагаараа шууд дээш доош гvйлгэж тохируулах").
+  const startChapterCropDrag = (e) => {
     e.preventDefault();
-    e.stopPropagation();
-    const point = e.touches ? e.touches[0] : e;
-    const startY = point.clientY;
-    const startBox = { ...chapterCropBox };
     const imgEl = chapterEditImgRef.current;
+    if (!imgEl) return;
+    const rect = imgEl.getBoundingClientRect();
     const boundsHeight = imgEl.clientHeight;
     const MIN = 30;
+    const point = e.touches ? e.touches[0] : e;
+    const startBox = { ...chapterCropBox };
+    const startLocalY = point.clientY - rect.top;
+    const mode = Math.abs(startLocalY - startBox.top) <= Math.abs(startLocalY - startBox.bottom) ? 'top' : 'bottom';
     setChapterCropDragHandle(mode);
     let latestBox = startBox;
 
     const onMove = (ev) => {
       if (ev.touches) ev.preventDefault();
       const p = ev.touches ? ev.touches[0] : ev;
-      const dy = p.clientY - startY;
+      const localY = p.clientY - rect.top;
       let { top, bottom } = startBox;
       if (mode === 'top') {
-        top = Math.min(Math.max(startBox.top + dy, 0), startBox.bottom - MIN);
+        top = Math.min(Math.max(localY, 0), startBox.bottom - MIN);
       } else {
-        bottom = Math.min(Math.max(startBox.bottom + dy, startBox.top + MIN), boundsHeight);
+        bottom = Math.min(Math.max(localY, startBox.top + MIN), boundsHeight);
       }
       latestBox = { top, bottom };
       setChapterCropBox(latestBox);
@@ -4497,9 +4531,10 @@ export default function App() {
                   const isSelected = chapterEditIndex === i;
                   return (
                     <div key={i} onClick={() => { if (!isSelected) setChapterEditIndex(i); }}
-                      style={{ position: 'relative', cursor: isSelected ? 'default' : 'pointer', boxShadow: isSelected ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
+                      style={{ position: 'relative', zIndex: isSelected ? 2 : 0, cursor: isSelected ? 'default' : 'pointer', boxShadow: isSelected ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
                       <img ref={isSelected ? chapterEditImgRef : undefined} src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
-                        style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && chapterEditBusy ? 0.4 : 1 }} />
+                        onPointerDown={isSelected ? startChapterCropDrag : undefined}
+                        style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && chapterEditBusy ? 0.4 : 1, touchAction: isSelected ? 'none' : 'auto', cursor: isSelected ? 'ns-resize' : 'pointer' }} />
                       {!isSelected && (
                         <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <IconPencil size={13} color="#fff" />
@@ -4511,11 +4546,11 @@ export default function App() {
                           <div style={{ position: 'absolute', left: 0, top: chapterCropBox.bottom, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }} />
                           <div style={{ position: 'absolute', left: 0, right: 0, top: chapterCropBox.top, height: chapterCropBox.bottom - chapterCropBox.top, border: '2px dashed #f5a623', pointerEvents: 'none' }} />
                           {['top', 'bottom'].map(mode => (
-                            <div key={mode} onPointerDown={startChapterCropDrag(mode)}
+                            <div key={mode}
                               style={{
-                                position: 'absolute', left: 0, right: 0,
-                                top: (mode === 'top' ? chapterCropBox.top : chapterCropBox.bottom) - 16,
-                                height: 32, cursor: 'ns-resize', touchAction: 'none',
+                                position: 'absolute', left: 0, right: 0, pointerEvents: 'none',
+                                top: (mode === 'top' ? chapterCropBox.top : chapterCropBox.bottom) - 22,
+                                height: 44, zIndex: 3,
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                               }}>
                               <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -4564,9 +4599,13 @@ export default function App() {
           </div>
         )}
 
-        {/* ЗАСВАР #130: устгах хvсэлттэй холбоотой баталгаажуулах цонх (window.confirm-ийн оронд) */}
+        {/* ЗАСВАР #130: устгах хvсэлттэй холбоотой баталгаажуулах цонх (window.confirm-ийн оронд).
+            ЗАСВАР #163: zIndex-ийг бусад бvх fixed overlay-с (жишээ нь "Бvтэн харах" preview,
+            zIndex:1000) ДЭЭГvvР болгов — өмнө нь тэдэнтэй ижил 1000 байсан тул DOM дараалал
+            дараа ирдэг preview overlay-ийн ард нуугдаж, "Тийм" батлах товч харагдахгvй,
+            дарагдахгvй болж, устгах vйлдэл огт хэрэгжихгvй байдалд хvргэдэг байв. */}
         {confirmModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 16 }}>
             <div style={{ width: 380, maxWidth: '100%', background: '#111', border: '1px solid #222', borderRadius: 16, padding: '1.75rem', boxSizing: 'border-box' }}>
               <div style={{ fontSize: 14, color: '#eee', lineHeight: 1.5, marginBottom: '1.5rem', whiteSpace: 'pre-line' }}>{confirmModal.message}</div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -4992,9 +5031,10 @@ export default function App() {
                   const isSelected = editChapterEditTarget?.kind === 'existing' && editChapterEditTarget.index === i;
                   return (
                     <div key={img.id} onClick={() => { if (!isSelected) setEditChapterEditTarget({ kind: 'existing', index: i }); }}
-                      style={{ position: 'relative', cursor: isSelected ? 'default' : 'pointer', boxShadow: isSelected ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
+                      style={{ position: 'relative', zIndex: isSelected ? 2 : 0, cursor: isSelected ? 'default' : 'pointer', boxShadow: isSelected ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
                       <img ref={isSelected ? editChapterEditImgRef : undefined} src={img.image_url} alt={`${i + 1}`} loading="lazy" decoding="async"
-                        style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && editChapterEditBusy ? 0.4 : 1 }} />
+                        onPointerDown={isSelected ? startEditChapterCropDrag : undefined}
+                        style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && editChapterEditBusy ? 0.4 : 1, touchAction: isSelected ? 'none' : 'auto', cursor: isSelected ? 'ns-resize' : 'pointer' }} />
                       {!isSelected && (
                         <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <IconPencil size={13} color="#fff" />
@@ -5006,11 +5046,11 @@ export default function App() {
                           <div style={{ position: 'absolute', left: 0, top: editChapterCropBox.bottom, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }} />
                           <div style={{ position: 'absolute', left: 0, right: 0, top: editChapterCropBox.top, height: editChapterCropBox.bottom - editChapterCropBox.top, border: '2px dashed #f5a623', pointerEvents: 'none' }} />
                           {['top', 'bottom'].map(mode => (
-                            <div key={mode} onPointerDown={startEditChapterCropDrag(mode)}
+                            <div key={mode}
                               style={{
-                                position: 'absolute', left: 0, right: 0,
-                                top: (mode === 'top' ? editChapterCropBox.top : editChapterCropBox.bottom) - 16,
-                                height: 32, cursor: 'ns-resize', touchAction: 'none',
+                                position: 'absolute', left: 0, right: 0, pointerEvents: 'none',
+                                top: (mode === 'top' ? editChapterCropBox.top : editChapterCropBox.bottom) - 22,
+                                height: 44, zIndex: 3,
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                               }}>
                               <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -5027,9 +5067,10 @@ export default function App() {
                   const isSelected = editChapterEditTarget?.kind === 'new' && editChapterEditTarget.index === i;
                   return (
                     <div key={`new${i}`} onClick={() => { if (!isSelected) setEditChapterEditTarget({ kind: 'new', index: i }); }}
-                      style={{ position: 'relative', cursor: isSelected ? 'default' : 'pointer', boxShadow: isSelected ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
+                      style={{ position: 'relative', zIndex: isSelected ? 2 : 0, cursor: isSelected ? 'default' : 'pointer', boxShadow: isSelected ? 'inset 0 0 0 3px #f5a623' : 'none' }}>
                       <img ref={isSelected ? editChapterEditImgRef : undefined} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} loading="lazy" decoding="async"
-                        style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && editChapterEditBusy ? 0.4 : 1 }} />
+                        onPointerDown={isSelected ? startEditChapterCropDrag : undefined}
+                        style={{ width: '100%', display: 'block', verticalAlign: 'top', opacity: isSelected && editChapterEditBusy ? 0.4 : 1, touchAction: isSelected ? 'none' : 'auto', cursor: isSelected ? 'ns-resize' : 'pointer' }} />
                       {!isSelected && (
                         <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <IconPencil size={13} color="#fff" />
@@ -5041,11 +5082,11 @@ export default function App() {
                           <div style={{ position: 'absolute', left: 0, top: editChapterCropBox.bottom, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }} />
                           <div style={{ position: 'absolute', left: 0, right: 0, top: editChapterCropBox.top, height: editChapterCropBox.bottom - editChapterCropBox.top, border: '2px dashed #f5a623', pointerEvents: 'none' }} />
                           {['top', 'bottom'].map(mode => (
-                            <div key={mode} onPointerDown={startEditChapterCropDrag(mode)}
+                            <div key={mode}
                               style={{
-                                position: 'absolute', left: 0, right: 0,
-                                top: (mode === 'top' ? editChapterCropBox.top : editChapterCropBox.bottom) - 16,
-                                height: 32, cursor: 'ns-resize', touchAction: 'none',
+                                position: 'absolute', left: 0, right: 0, pointerEvents: 'none',
+                                top: (mode === 'top' ? editChapterCropBox.top : editChapterCropBox.bottom) - 22,
+                                height: 44, zIndex: 3,
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                               }}>
                               <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
