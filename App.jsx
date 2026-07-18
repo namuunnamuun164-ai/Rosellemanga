@@ -2295,7 +2295,7 @@ export default function App() {
             )}
 
             {/* Sections — ЗАСВАР #79: захиалсан дараалал: ТҮҮХ → ШИНЭ БҮЛЭГ → ШИНЭ МАНГА → САНАЛ БОЛГОХ → ДУУССАН */}
-            <div style={{ padding: '1.5rem 2rem 3rem' }}>
+            <div style={{ padding: '1.5rem 2rem 0' }}>
               {allMangas.filter(m => history.find(h => h.mangaId === m.id)).length > 0 && (
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ТҮҮХ" onClick={() => { setPreviousPage('home'); setAllCategory('history'); setPage('all'); }} />
@@ -2357,7 +2357,7 @@ export default function App() {
             {/* ЗАСВАР #178: нvvр хуудасны хамгийн доод хэсэгт "бидний тухай" маягийн
                 footer нэмэв — сайтын нэр + гол хуудсууд руу шилжих холбоос +
                 copyright. */}
-            <div style={{ marginTop: '3rem', padding: '3rem 2rem', background: '#0a0e17', textAlign: 'center' }}>
+            <div style={{ marginTop: '1rem', padding: '2rem 2rem 3rem', background: '#0a0e17', textAlign: 'center' }}>
               <div style={{ fontSize: 26, fontWeight: 800, color: '#fff' }}>Roselle Manga</div>
               <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', flexWrap: 'wrap', marginTop: '1.5rem' }}>
                 {navItems.concat([{ label: 'Миний сан', p: 'library' }, { label: 'Эрх авах', p: 'vip' }]).map(item => (
@@ -3125,10 +3125,9 @@ export default function App() {
               </div>
 
               <div style={{ textAlign: 'center', marginTop: 4, marginBottom: 28 }}>
-                <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 32, fontWeight: 700, lineHeight: 1.3, color: '#ffd9d9' }}>
+                <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 32, fontWeight: 700, lineHeight: 1.3, color: '#fff' }}>
                   ЭРХ АВАХ
                 </div>
-                <div style={{ color: '#9aa0ac', marginTop: 14, fontSize: 14 }}>Бvх контентыг нээж, хязгааргvй уншаарай!</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
