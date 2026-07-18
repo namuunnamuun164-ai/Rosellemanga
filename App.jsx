@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock, splitTallImageFile } from './helpers';
-import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash } from './icons';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile } from './helpers';
+import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop } from './icons';
 import { PasswordField } from './PasswordField';
-import StitchEditor from './StitchEditor';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -97,12 +96,15 @@ export default function App() {
   const [editChapterEditTarget, setEditChapterEditTarget] = useState(null);
   const [editChapterEditBusy, setEditChapterEditBusy] = useState(false);
   const editChapterReplaceInputRef = useRef(null);
-  // ЗАСВАР #169: олон зургийг StitchPics шиг ГАРААР зэрэгцvvлж (crop + хэвтээ
-  // шилжилт) нэг урт зураг болгох нь тусдаа StitchEditor компонентоор хийгдэнэ
-  // (editChapterStitchEditorOpen) — доор.
-  const [editChapterStitchEditorOpen, setEditChapterStitchEditorOpen] = useState(false);
-  const [editChapterStitchFiles, setEditChapterStitchFiles] = useState(null); // File[] эсвэл null (уншиж байна/хаалттай)
-  const [editChapterStitchLoading, setEditChapterStitchLoading] = useState(false);
+  // ЗАСВАР #173: "Тайрах" дарахад дэлгэцийн БvХ өндрийг эзэлсэн тусдаа цонх
+  // нээгдэж, зургаа гараараа дээшээ/доошоо чирж тогтмол цонхны цаана
+  // байрлуулна (Instagram-ий profile crop шиг). "existing" (DB/R2-д байгаа)
+  // болон "new" (upload хийгээгvй) хоёул дээр ажиллана.
+  const [editChapterCropOpen, setEditChapterCropOpen] = useState(false);
+  const [editChapterCropPanY, setEditChapterCropPanY] = useState(0);
+  const [editChapterCropZoom, setEditChapterCropZoom] = useState(1);
+  const editChapterCropFrameRef = useRef(null);
+  const editChapterCropImgRef = useRef(null);
 
   const closeEditChapterEditor = () => { setEditChapterEditTarget(null); };
 
@@ -178,26 +180,92 @@ export default function App() {
     }
   };
 
-  // ЗАСВАР #169: "Зэрэгцvvлэх" дарахад одоо байгаа БvХ зургийг (existing нь
-  // fetch→blob→File болгож, new-той хамт дараалалаар нь) StitchEditor-т
-  // дамжуулна. Экспорт хийхэд НЭГ нийлvvлсэн файл гарна — existing бvгд
-  // "хасагдсан" тул эцсийн Хадгалахад DB-с устгагдана, харин нийлvvлсэн
-  // vр дvнг ганц "new" файл болгож vлдээнэ.
-  const openEditChapterStitchEditor = async () => {
-    setEditChapterStitchLoading(true);
-    try {
-      const existingFiles = await Promise.all(editChapterExistingImages.map(async (img) => {
+  const openEditChapterCrop = () => {
+    if (!editChapterEditTarget) return;
+    setEditChapterCropOpen(true);
+    setEditChapterCropPanY(0);
+    setEditChapterCropZoom(1);
+  };
+  const closeEditChapterCrop = () => {
+    setEditChapterCropOpen(false);
+    setEditChapterCropPanY(0);
+    setEditChapterCropZoom(1);
+  };
+
+  const startEditChapterCropPanDrag = (e) => {
+    e.preventDefault();
+    const imgEl = editChapterCropImgRef.current;
+    const frameEl = editChapterCropFrameRef.current;
+    if (!imgEl || !frameEl) return;
+    const fullHeight = imgEl.clientHeight;
+    const frameHeight = frameEl.clientHeight;
+    if (fullHeight <= 0) return; // зураг decode хийгдэж дуусаагvй байна
+    const minY = Math.min(0, frameHeight - fullHeight);
+    const point = e.touches ? e.touches[0] : e;
+    const startClientY = point.clientY;
+    const startPanY = editChapterCropPanY;
+
+    const onMove = (ev) => {
+      if (ev.touches) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      setEditChapterCropPanY(Math.min(0, Math.max(minY, startPanY + (p.clientY - startClientY))));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const changeEditChapterCropZoom = (delta) => {
+    setEditChapterCropZoom(z => Math.max(0.5, Math.min(3, +(z + delta).toFixed(2))));
+    setEditChapterCropPanY(0);
+  };
+
+  // ЗАСВАР #173: "Тайрах" дарахад одоо цонхонд харагдаж буй хэсгийг л vлдээж,
+  // цонхыг хааж жагсаалт руу буцна. "existing" бол шинэ файлыг тэр даруй R2-д
+  // upload хийж DB мөрийг шинэчилнэ (applyExistingChapterImageEdit), "new" бол
+  // зөвхөн local state дотор солино.
+  const confirmEditChapterCrop = async () => {
+    const imgEl = editChapterCropImgRef.current;
+    const frameEl = editChapterCropFrameRef.current;
+    if (!imgEl || !frameEl || !editChapterEditTarget) return;
+    const fullHeight = imgEl.clientHeight;
+    const frameHeight = frameEl.clientHeight;
+    const EPS = 4;
+    if (editChapterCropPanY === 0 && fullHeight <= frameHeight + EPS) { closeEditChapterCrop(); return; }
+    const scaleY = imgEl.naturalHeight / fullHeight;
+    const rect = {
+      x: 0,
+      y: Math.round(-editChapterCropPanY * scaleY),
+      width: imgEl.naturalWidth,
+      height: Math.round(Math.min(frameHeight, fullHeight) * scaleY),
+    };
+    rect.height = Math.min(rect.height, imgEl.naturalHeight - rect.y);
+    if (editChapterEditTarget.kind === 'new') {
+      setEditChapterEditBusy(true);
+      try {
+        const newFile = await cropImageFile(editChapterNewFiles[editChapterEditTarget.index], rect);
+        setEditChapterNewFiles(prev => prev.map((f, idx) => idx === editChapterEditTarget.index ? newFile : f));
+        closeEditChapterCrop();
+      } catch (e) {
+        notify('Алдаа: ' + e.message);
+      }
+      setEditChapterEditBusy(false);
+    } else {
+      await applyExistingChapterImageEdit(async (img) => {
         const resp = await fetch(img.image_url);
         const blob = await resp.blob();
-        const ext = (img.image_url.split('.').pop() || 'jpg').split('?')[0];
-        return new File([blob], `page.${ext}`, { type: blob.type });
-      }));
-      setEditChapterStitchFiles([...existingFiles, ...editChapterNewFiles]);
-      setEditChapterStitchEditorOpen(true);
-    } catch (e) {
-      notify('Зураг татаж чадсангvй: ' + e.message);
+        const srcFile = new File([blob], `image.${(img.image_url.split('.').pop() || 'jpg').split('?')[0]}`, { type: blob.type });
+        return cropImageFile(srcFile, rect);
+      });
+      closeEditChapterCrop();
     }
-    setEditChapterStitchLoading(false);
   };
 
   // ЗАСВАР #124: хадгалахдаа анх татсан зурагнуудаас алийг нь хассаныг мэдэхийн тулд
@@ -239,13 +307,19 @@ export default function App() {
   // ЗАСВАР #163: "Бvтнээр" (өөрчлөхгvй) эсвэл "Хуваах" (4000px-ээс урт зургийг
   // тэр хэмжээгээр таслаж, олон хуудас болгох) горим сонгох.
   const [chapterSplitMode, setChapterSplitMode] = useState('full');
-  // ЗАСВАР #169: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж Солих/Устгах/Зөөх
-  // хийж болно. Олон зургийг StitchPics шиг ГАРААР зэрэгцvvлж (crop +
-  // хэвтээ шилжилт) нэг урт зураг болгох нь тусдаа StitchEditor компонентоор
-  // хийгдэнэ (chapterStitchEditorOpen) — доор.
+  // ЗАСВАР #169: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж Солих/Устгах/Зөөх хийж болно.
   const [chapterEditIndex, setChapterEditIndex] = useState(null); // chapterFiles-ийн alь index засварлаж буй
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
-  const [chapterStitchEditorOpen, setChapterStitchEditorOpen] = useState(false);
+  // ЗАСВАР #173: "Тайрах" дарахад дэлгэцийн БvХ өндрийг эзэлсэн тусдаа цонх
+  // нээгдэж, зургаа гараараа дээшээ/доошоо чирж тогтмол цонхны цаана
+  // байрлуулна (Instagram-ий profile crop шиг) — зөвхөн дээд/доод (өндрийн
+  // чиглэл) тайрна, өргөн хэвээрээ vлдэнэ.
+  const [chapterCropTarget, setChapterCropTarget] = useState(null); // chapterFiles-ийн index, эсвэл null (хаалттай)
+  const [chapterCropPanY, setChapterCropPanY] = useState(0);
+  const [chapterCropZoom, setChapterCropZoom] = useState(1);
+  const [chapterCropBusy, setChapterCropBusy] = useState(false);
+  const chapterCropFrameRef = useRef(null);
+  const chapterCropImgRef = useRef(null);
   // ЗАСВАР #118: URL.createObjectURL-ийг render болгонд шинээр үүсгэдэг байсан
   // memory leak-ийг засав — blob URL-уудыг файл өөрчлөгдөх үед л нэг удаа
   // үүсгэж, хуучныг нь revoke хийнэ.
@@ -286,6 +360,86 @@ export default function App() {
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     setChapterFiles(prev => prev.map((f, idx) => idx === chapterEditIndex ? file : f));
+  };
+
+  const openChapterCrop = () => {
+    if (chapterEditIndex === null) return;
+    setChapterCropTarget(chapterEditIndex);
+    setChapterCropPanY(0);
+    setChapterCropZoom(1);
+  };
+  const closeChapterCrop = () => {
+    setChapterCropTarget(null);
+    setChapterCropPanY(0);
+    setChapterCropZoom(1);
+  };
+
+  // ЗАСВАР #173: зургийг тогтмол (дэлгэцийн бvх өндөртэй) цонхны дотор
+  // дээшээ/доошоо чирнэ.
+  const startChapterCropPanDrag = (e) => {
+    e.preventDefault();
+    const imgEl = chapterCropImgRef.current;
+    const frameEl = chapterCropFrameRef.current;
+    if (!imgEl || !frameEl) return;
+    const fullHeight = imgEl.clientHeight;
+    const frameHeight = frameEl.clientHeight;
+    if (fullHeight <= 0) return; // зураг decode хийгдэж дуусаагvй байна
+    const minY = Math.min(0, frameHeight - fullHeight);
+    const point = e.touches ? e.touches[0] : e;
+    const startClientY = point.clientY;
+    const startPanY = chapterCropPanY;
+
+    const onMove = (ev) => {
+      if (ev.touches) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      setChapterCropPanY(Math.min(0, Math.max(minY, startPanY + (p.clientY - startClientY))));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  // ЗАСВАР #173: zoom өөрчлөгдөх бvрт (өөр хэмжээтэй болж харагдах тул өмнөх
+  // pan утга худал болдог) байрлалыг "0" (дээд ирмэгтэй тааруулсан)-руу дахин тохируулна.
+  const changeChapterCropZoom = (delta) => {
+    setChapterCropZoom(z => Math.max(0.5, Math.min(3, +(z + delta).toFixed(2))));
+    setChapterCropPanY(0);
+  };
+
+  // ЗАСВАР #173: "Тайрах" дарахад одоо цонхонд харагдаж буй хэсгийг л vлдээж,
+  // цонхыг хааж жагсаалт руу буцна.
+  const confirmChapterCrop = async () => {
+    const imgEl = chapterCropImgRef.current;
+    const frameEl = chapterCropFrameRef.current;
+    if (!imgEl || !frameEl || chapterCropTarget === null) return;
+    const fullHeight = imgEl.clientHeight;
+    const frameHeight = frameEl.clientHeight;
+    const EPS = 4;
+    if (chapterCropPanY === 0 && fullHeight <= frameHeight + EPS) { closeChapterCrop(); return; }
+    const scaleY = imgEl.naturalHeight / fullHeight;
+    const rect = {
+      x: 0,
+      y: Math.round(-chapterCropPanY * scaleY),
+      width: imgEl.naturalWidth,
+      height: Math.round(Math.min(frameHeight, fullHeight) * scaleY),
+    };
+    rect.height = Math.min(rect.height, imgEl.naturalHeight - rect.y);
+    setChapterCropBusy(true);
+    try {
+      const newFile = await cropImageFile(chapterFiles[chapterCropTarget], rect);
+      setChapterFiles(prev => prev.map((f, idx) => idx === chapterCropTarget ? newFile : f));
+      closeChapterCrop();
+    } catch (e) {
+      notify('Алдаа: ' + e.message);
+    }
+    setChapterCropBusy(false);
   };
 
   // ШИНЭ: upload хийхийн өмнө сонгосон зургуудыг бүлэг уншиж байгаа мэт бүтнээр нь харах
@@ -4331,12 +4485,6 @@ export default function App() {
                   гэж харагддаг байсан (бодит уншигчийн хуудсанд байдаг readerZoom
                   state-ийг хамт ашигладаг тул хоёр газар зэрэг тохирсон хэвээр байна). */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {chapterFiles.length >= 2 && (
-                  <button onClick={() => setChapterStitchEditorOpen(true)} title="Зэрэгцvvлэх"
-                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #f5a623', background: 'rgba(245,166,35,0.12)', color: '#f5a623', fontSize: 11, fontWeight: 700, cursor: 'pointer', marginRight: 4 }}>
-                    🖇 Зэрэгцvvлэх
-                  </button>
-                )}
                 <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
                   style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
                   −
@@ -4394,6 +4542,10 @@ export default function App() {
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     <IconTrash />
                   </button>
+                  <button disabled={chapterEditBusy} onClick={openChapterCrop} title="Тайрах"
+                    style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    <IconCrop />
+                  </button>
                   <button disabled={chapterEditBusy} onClick={() => { setChapterPreviewOpen(false); closeChapterEdit(); }}
                     style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                     <IconCheck size={15} /> Хадгалах
@@ -4401,22 +4553,38 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* ЗАСВАР #173: "Тайрах" дарахад дэлгэцийн БvХ өндрийг эзэлсэн тусдаа
+                цонх нээгдэж, зургаа гараараа дээшээ/доошоо чирж тайрна. */}
+            {chapterCropTarget !== null && (
+              <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 3000, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', flexShrink: 0 }}>
+                  <button onClick={closeChapterCrop} title="Болих"
+                    style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16 }}>
+                    ✕
+                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button onClick={() => changeChapterCropZoom(-0.1)} title="Жижигрvvлэх"
+                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>−</button>
+                    <span style={{ fontSize: 11, color: '#aaa', minWidth: 40, textAlign: 'center' }}>{Math.round(chapterCropZoom * 100)}%</span>
+                    <button onClick={() => changeChapterCropZoom(0.1)} title="Томруулах"
+                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                  </div>
+                  <button disabled={chapterCropBusy} onClick={confirmChapterCrop}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: chapterCropBusy ? 'default' : 'pointer', opacity: chapterCropBusy ? 0.6 : 1 }}>
+                    <IconCrop size={14} /> {chapterCropBusy ? 'Тайрж байна...' : 'Тайрах'}
+                  </button>
+                </div>
+                <div ref={chapterCropFrameRef} onPointerDown={startChapterCropPanDrag}
+                  style={{ flex: 1, overflow: 'hidden', position: 'relative', touchAction: 'none', cursor: 'grab' }}>
+                  <img ref={chapterCropImgRef} src={chapterFileUrls[chapterCropTarget]} alt="crop" draggable={false}
+                    style={{ position: 'absolute', left: 0, top: chapterCropPanY, width: `${100 * chapterCropZoom}%`, opacity: chapterCropBusy ? 0.4 : 1 }} />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* ЗАСВАР #169: StitchPics шиг — сонгосон БvХ зургийг гараар зэрэгцvvлж
-            (crop + хэвтээ шилжилт) нэг тасралтгvй урт зураг болгож нийлvvлнэ. */}
-        {chapterStitchEditorOpen && (
-          <StitchEditor
-            files={chapterFiles}
-            onCancel={() => setChapterStitchEditorOpen(false)}
-            onExport={(croppedFiles) => {
-              setChapterFiles(croppedFiles);
-              setChapterStitchEditorOpen(false);
-              closeChapterEdit();
-            }}
-          />
-        )}
 
         {/* ЗАСВАР #130: устгах хvсэлттэй холбоотой баталгаажуулах цонх (window.confirm-ийн оронд).
             ЗАСВАР #163: zIndex-ийг бусад бvх fixed overlay-с (жишээ нь "Бvтэн харах" preview,
@@ -4831,12 +4999,6 @@ export default function App() {
               </button>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Бvтэн харах ({editChapterExistingImages.length + editChapterNewFiles.length} зураг)</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {(editChapterExistingImages.length + editChapterNewFiles.length) >= 2 && (
-                  <button disabled={editChapterStitchLoading} onClick={openEditChapterStitchEditor} title="Зэрэгцvvлэх"
-                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #f5a623', background: 'rgba(245,166,35,0.12)', color: '#f5a623', fontSize: 11, fontWeight: 700, cursor: editChapterStitchLoading ? 'default' : 'pointer', marginRight: 4, opacity: editChapterStitchLoading ? 0.6 : 1 }}>
-                    {editChapterStitchLoading ? 'Уншиж байна...' : '🖇 Зэрэгцvvлэх'}
-                  </button>
-                )}
                 <button onClick={() => setReaderZoom(z => Math.max(50, z - 10))} title="Жижигрvvлэх"
                   style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
                   −
@@ -4924,6 +5086,10 @@ export default function App() {
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     <IconTrash />
                   </button>
+                  <button disabled={editChapterEditBusy} onClick={openEditChapterCrop} title="Тайрах"
+                    style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    <IconCrop />
+                  </button>
                   <button disabled={editChapterEditBusy} onClick={() => { setEditChapterPreviewOpen(false); closeEditChapterEditor(); }}
                     style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                     <IconCheck size={15} /> Хадгалах
@@ -4931,26 +5097,38 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* ЗАСВАР #173: "Тайрах" дарахад дэлгэцийн БvХ өндрийг эзэлсэн тусдаа
+                цонх нээгдэж, зургаа гараараа дээшээ/доошоо чирж тайрна. */}
+            {editChapterCropOpen && editChapterEditTarget && (
+              <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 3000, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', flexShrink: 0 }}>
+                  <button onClick={closeEditChapterCrop} title="Болих"
+                    style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16 }}>
+                    ✕
+                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button onClick={() => changeEditChapterCropZoom(-0.1)} title="Жижигрvvлэх"
+                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>−</button>
+                    <span style={{ fontSize: 11, color: '#aaa', minWidth: 40, textAlign: 'center' }}>{Math.round(editChapterCropZoom * 100)}%</span>
+                    <button onClick={() => changeEditChapterCropZoom(0.1)} title="Томруулах"
+                      style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                  </div>
+                  <button disabled={editChapterEditBusy} onClick={confirmEditChapterCrop}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#8B0000', color: '#fff', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: editChapterEditBusy ? 'default' : 'pointer', opacity: editChapterEditBusy ? 0.6 : 1 }}>
+                    <IconCrop size={14} /> {editChapterEditBusy ? 'Тайрж байна...' : 'Тайрах'}
+                  </button>
+                </div>
+                <div ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
+                  style={{ flex: 1, overflow: 'hidden', position: 'relative', touchAction: 'none', cursor: 'grab' }}>
+                  <img ref={editChapterCropImgRef} src={editChapterEditUrl} alt="crop" draggable={false}
+                    style={{ position: 'absolute', left: 0, top: editChapterCropPanY, width: `${100 * editChapterCropZoom}%`, opacity: editChapterEditBusy ? 0.4 : 1 }} />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* ЗАСВАР #169: StitchPics шиг — одоо байгаа (existing, fetch хийж File
-            болгосон) + шинэ бvх зургийг гараар зэрэгцvvлж нэг урт зураг болгож
-            нийлvvлнэ. Экспортын дараа existing-vvд хоосорч (эцсийн Хадгалахад
-            DB-с устгагдана), нийлvvлсэн vр дvнг ганц "new" файл болгож vлдээнэ. */}
-        {editChapterStitchEditorOpen && editChapterStitchFiles && (
-          <StitchEditor
-            files={editChapterStitchFiles}
-            onCancel={() => { setEditChapterStitchEditorOpen(false); setEditChapterStitchFiles(null); }}
-            onExport={(croppedFiles) => {
-              setEditChapterExistingImages([]);
-              setEditChapterNewFiles(croppedFiles);
-              setEditChapterStitchEditorOpen(false);
-              setEditChapterStitchFiles(null);
-              closeEditChapterEditor();
-            }}
-          />
-        )}
 
       </div>
     </div>

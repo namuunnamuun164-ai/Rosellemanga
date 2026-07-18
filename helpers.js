@@ -142,6 +142,21 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
   return pieces;
 };
 
+// ЗАСВАР #173: зургийг өгөгдсөн тэгш өнцөгт хэсгээр нь таслана. rect нь эх
+// зургийн БОДИТ (natural) пикселийн нэгжээр өгөгдсөн байх ёстой.
+export const cropImageFile = async (file, rect) => {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(rect.width);
+  canvas.height = Math.round(rect.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const mimeType = file.type || 'image/jpeg';
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
+  return new File([blob], file.name, { type: mimeType });
+};
+
 // ЗАСВАР #146: "цаг:минут:секунд" (жишээ нь 12:15:28) маягийн цэвэрхэн тоон
 // countdown формат — хуваарийн хуудсанд секунд тутам шинэчлэгдэж харагдана
 export const formatCountdownClock = (ms) => {
