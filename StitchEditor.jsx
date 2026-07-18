@@ -64,13 +64,18 @@ export default function StitchEditor({ files, onCancel, onExport, exportType = '
     return () => { cancelled = true; };
   }, [files]);
 
-  // Контейнерийн (дэлгэцийн) өргөнийг хэмжинэ
+  // ЗАСВАР #172: Контейнерийн (дэлгэцийн) өргөнийг хэмжинэ. "Ачаалж байна..."
+  // vеийн early-return-ий улмаас эхний mount-д containerRef.current vнэндээ
+  // null байдаг (энэ ref-тэй div хараахан render хийгдээгvй) — naturalDims
+  // ирж, жинхэнэ дэлгэц render хийгдэх vед дахин хэмжихийн тулд naturalDims-ыг
+  // dependency-д нэмэв. Эс бол containerWidth мөнхөд 0 хэвээр vлдэж,
+  // displayScale ч 0 болж, зурагнууд ЕР vзэгдэхгvй байх алдаа vvсдэг байв.
   useEffect(() => {
     const measure = () => setContainerWidth(containerRef.current?.clientWidth || 0);
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, []);
+  }, [naturalDims]);
 
   if (files.length < 2) {
     return (
