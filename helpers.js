@@ -100,9 +100,22 @@ export const formatRemaining = (ms) => {
 // НЭГ НЭГЭЭР нь (Promise.all биш) дараалуулж дуудахыг зөвлөнө — эс бол олон
 // том зургийг зэрэг декодлож санах ойн ачаалал vvсгэнэ (өмнөх ЗАСВАР #163-ийн
 // urt зургийн crash-тай адил асуудал).
+// ЗАСВАР #193 (код шинжилгээ): маш урт (өндөр нягтралтай) зураг оруулахад
+// browser tab бvхэлдээ "унаад" (crash/freeze) байсан гомдол ирсэн — үvний
+// шалтгаан нь createImageBitmap(file) нь эх зургийг ПИКСЕЛИЙН хэмжээгээр нь
+// (файлын MB биш) бvхэлд нь санах ойд decode хийдэгт байна: жишээ нь
+// 4000x60000 пиксел зураг ойролцоогоор 1GB+ санах ой шаардана. Үvнийг бvрэн
+// арилгах боломжгvй (canvas ашиглахын тулд заавал decode хийх ёстой) тул,
+// хамгийн багадаа browser-ийг найдваргvй байдалд оруулахын оронд ойлгомжтой
+// алдаа vзvvлж, эх зургийг жижигрvvлж дахин оруулахыг санал болгоно.
+const MAX_SAFE_PIXELS = 120_000_000; // ~120 megapixel — ердийн урт вэбтvн (webtoon) стрипэд хvрэлцээтэй
 export const splitTallImageFile = async (file, maxHeight = 4000) => {
   const bitmap = await createImageBitmap(file);
   const { width, height } = bitmap;
+  if (width * height > MAX_SAFE_PIXELS) {
+    bitmap.close?.();
+    throw new Error(`Зураг хэт өндөр нягтралтай (${width}x${height}px) тул browser найдвартай боловсруулж чадахгvй байж магадгvй — эх зургийг жижигрvvлж (жишээ нь хэд хэдэн хэсэгт гараар хуваагаад) дахин оруулна уу.`);
+  }
   if (height <= maxHeight) {
     bitmap.close?.();
     return [file];
@@ -141,6 +154,13 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
 // зургийн БОДИТ (natural) пикселийн нэгжээр өгөгдсөн байх ёстой.
 export const cropImageFile = async (file, rect) => {
   const bitmap = await createImageBitmap(file);
+  // ЗАСВАР #193: splitTallImageFile-тэй адил шалтгаанаар (эх зургийг бvхэлд нь
+  // decode хийхэд browser tab унах эрсдэлтэй) хэт өндөр нягтралтай эх зургийг
+  // тайрахаас өмнө шалгана.
+  if (bitmap.width * bitmap.height > MAX_SAFE_PIXELS) {
+    bitmap.close?.();
+    throw new Error(`Зураг хэт өндөр нягтралтай (${bitmap.width}x${bitmap.height}px) тул browser найдвартай боловсруулж чадахгvй байж магадгvй — эх зургийг жижигрvvлж дахин оруулна уу.`);
+  }
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(rect.width);
   canvas.height = Math.round(rect.height);

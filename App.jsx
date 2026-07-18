@@ -165,7 +165,9 @@ export default function App() {
     try {
       const newFile = await produceNewFileFrom(img);
       const ext = (img.image_url.split('.').pop() || 'jpg').split('?')[0];
-      const newUrl = await uploadToR2(newFile, `chapters/${editChapter.id}/${Date.now()}-edited.${ext}`);
+      // ЗАСВАР #194 (код шинжилгээ): Date.now() бол дараалсан/таамаглаж болохуйц
+      // тул crypto.randomUUID() болгов — доорх бусад chapters/ upload-той адил шалтгаан.
+      const newUrl = await uploadToR2(newFile, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
       const { error } = await supabase.from('chapter_images').update({ image_url: newUrl }).eq('id', img.id);
       if (error) { notify('Алдаа: ' + error.message); setEditChapterEditBusy(false); return; }
       setEditChapterExistingImages(prev => prev.map((it, idx) => idx === editChapterEditTarget.index ? { ...it, image_url: newUrl } : it));
@@ -1695,14 +1697,24 @@ export default function App() {
     const threeDaysAhead = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     // ЗАСВАР #151: is_hidden-г ч сонгоно — эс тэгвэл нуугдсан манганы бvлэг
     // guest хэрэглэгчид "нэргvй" (ch.mangas null болж) харагдах эрсдэлтэй
-    supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(title, poster_url, is_hidden)')
+    // ЗАСВАР #195 (код шинжилгээ): энэ query нь status/is_hidden/pending_delete-ээр
+    // шvvдэггvй байсан тул editor-ийн "pending" (батлагдаагvй), staff-ийн
+    // зориудаар нуусан, "rejected", устгах хvсэлт явуулсан бvлгvvд ЧУГД
+    // Хуваарь хуудсанд зочдод (нэр/cover/гарах цагийн хамт) ил гардаг байв —
+    // render дээрх шvvлт (line ~2520) зөвхөн МАНГЫН is_hidden-ийг шалгадаг,
+    // БvЛГИЙН өөрийнх нь төлөвийг vл тооцдог байсан тул.
+    (isStaff
+      ? supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(title, poster_url, is_hidden)')
+      : supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(title, poster_url, is_hidden)')
+          .eq('status', 'published').eq('pending_delete', false).or('is_hidden.is.null,is_hidden.eq.false')
+    )
       .not('publish_at', 'is', null)
       .gte('publish_at', threeDaysAgo)
       .lte('publish_at', threeDaysAhead)
       .order('publish_at')
       .then(({ data }) => { if (!cancelled) setScheduledChapters(data || []); });
     return () => { cancelled = true; };
-  }, [page]);
+  }, [page, isStaff]);
 
   // ЗАСВАР #44: нүүр хуудсанд харуулах хамгийн сүүлд нийтлэгдсэн бүлгүүд
   // (нэг манга дараалан хэдэн бүлэг гаргасан ч бүгд тусдаа карт болно)
@@ -1743,6 +1755,18 @@ export default function App() {
 
   // ШИНЭ: "Бүх гаргалт" хуудсанд хамгийн их үзэлттэй мангаагаас нь харуулах эрэмбэ
   const sortedFiltered = allSort === 'views' ? [...filtered].sort((a, b) => (b.views || 0) - (a.views || 0)) : filtered;
+
+  // ЗАСВАР #197 (код шинжилгээ): дэлгэц дvvрэн хайлтын цонх (searchOpen) нь
+  // дээрх `filtered`-ийг ашигладаг байсан ч тэр нь "Бvх гаргалт" хуудасны
+  // АНГИЛЛААР (allCategory, жишээ нь "ДУУССАН" гэж сумаар нэг орохоор persist
+  // хэвээр vлддэг) хязгаарлагддаг байв — vvнээс vvдэж хэрэглэгч нэг удаа
+  // ангиллын сумаар орсны дараа дараагийн БvХ хайлт зөвхөн тэр ангилалд
+  // хязгаарлагдаж vлддэг байсан ("хайлт ажиллахгvй байна" мэт мэдрэгддэг байв).
+  // Дэлгэц дvvрэн хайлт БvХ мангаас (ангилал vл харгалзан) хайх ёстой тул тусад нь тооцно.
+  const globalSearchResults = allMangas.filter(m => {
+    const q = search.toLowerCase();
+    return m.title.toLowerCase().includes(q) || (m.desc || '').toLowerCase().includes(q);
+  });
 
   // Бүлэг нээхэд түүхэнд бүртгэнэ (нэг мангад хамгийн сүүлийн бүлгийг л хадгална)
   const openReader = (manga, chapter) => {
@@ -2085,8 +2109,8 @@ export default function App() {
           </div>
           {search && (
             <div style={{ width: '60%', marginTop: 24 }}>
-              <div style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>ХАЙЛТЫН ИЛЭРЦ ({filtered.length})</div>
-              {filtered.map(m => (
+              <div style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>ХАЙЛТЫН ИЛЭРЦ ({globalSearchResults.length})</div>
+              {globalSearchResults.map(m => (
                 <div key={m.id} onClick={() => { goToDetail(m); setSearchOpen(false); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', borderRadius: 8, cursor: 'pointer', background: '#111', marginBottom: 8 }}>
                   <img src={m.poster} alt={m.title} style={{ width: 48, height: 64, objectFit: 'cover', borderRadius: 6 }} />
@@ -3840,7 +3864,15 @@ export default function App() {
                     // ШИНЭ: тусдаа cover зураг оруулсан бол эхэлж upload хийнэ
                     if (chapterCover) {
                       const cExt = chapterCover.name.split('.').pop();
-                      const cName = `chapters/${chapterData.id}/cover.${cExt}`;
+                      // ЗАСВАР #194 (код шинжилгээ): "chapters/{id}/cover.ext",
+                      // "chapters/{id}/1.jpg", "2.jpg"... маягийн ДАРААЛСАН,
+                      // ТААМАГЛАЖ БОЛОХУЙЦ нэрнvvд байсан тул R2 нь public storage
+                      // байхад VIP/цаг товлогдоогvй бvлгийн зургийг chapter_images
+                      // хvснэгтийн RLS-ийг тойрч, URL-ыг шууд таагаад vзэх боломжтой
+                      // байв (chapter_id мэдэгдэж байгаа бол 1.jpg, 2.jpg... гэж
+                      // дараалуулаад л шалгаж vзэх л хангалттай). crypto.randomUUID()
+                      // ашигласнаар path-ыг таамаглах боломжгvй болно.
+                      const cName = `chapters/${chapterData.id}/${crypto.randomUUID()}-cover.${cExt}`;
                       try {
                         thumbnailUrl = await uploadToR2(chapterCover, cName);
                       } catch (cErr) { notify('Cover upload алдаа: ' + cErr.message); uploadFailed = true; }
@@ -3850,7 +3882,10 @@ export default function App() {
                     for (let i = 0; i < filesToUpload.length; i++) {
                       const file = filesToUpload[i];
                       const fileExt = file.name.split('.').pop();
-                      const fileName = `chapters/${chapterData.id}/${i + 1}.${fileExt}`;
+                      // ЗАСВАР #194: дарааллыг DB-ийн page_number баганаас (доор
+                      // insert хийгдэнэ) уншина, файлын нэрэнд дугаар шаардлагагvй —
+                      // random нэр ашигласнаар path таамаглагдахгvй.
+                      const fileName = `chapters/${chapterData.id}/${crypto.randomUUID()}.${fileExt}`;
 
                       let publicUrl;
                       try {
@@ -5015,8 +5050,16 @@ export default function App() {
                 setEditChapterSaving(true);
 
                 // ЗАСВАР #145: гарах цагийг өөрчилсөн эсэхийг анхны утгатай нь харьцуулна
+                // ЗАСВАР #196 (код шинжилгээ): STRING-ээр (!==) харьцуулдаг байсан тул
+                // DB-ээс ирсэн (Postgres, "+00:00" төгсгөлтэй) болон энд шинээр
+                // vvсгэсэн (JS Date.toISOString(), "Z" төгсгөлтэй) хэлбэрvvд ЯГ НЭГ
+                // мөчийг илэрхийлсэн ч текстээрээ өөр байдаг тул юу ч өөрчлөхгvй
+                // хадгалахад ч publishAtChanged=true болж, бvлэг "ШИНЭ БvЛЭГ" мөрөнд
+                // дахин гардаг байв. Одоо ЦАГИЙН УТГААР (getTime()) харьцуулна.
                 const newPublishAtIso = editChapterForm.publish_at ? new Date(editChapterForm.publish_at).toISOString() : null;
-                const publishAtChanged = newPublishAtIso !== editChapterInitialPublishAt.current;
+                const oldPublishAtTime = editChapterInitialPublishAt.current ? new Date(editChapterInitialPublishAt.current).getTime() : null;
+                const newPublishAtTime = newPublishAtIso ? new Date(newPublishAtIso).getTime() : null;
+                const publishAtChanged = oldPublishAtTime !== newPublishAtTime;
                 const updates = {
                   chapter_number: Number(editChapterForm.chapter_number),
                   title: editChapterForm.title.trim() || `Бvлэг ${editChapterForm.chapter_number}`,
@@ -5040,7 +5083,8 @@ export default function App() {
                   const ext = editChapterCoverFile.name.split('.').pop();
                   const oldThumbnailUrl = editChapter.thumbnail_url;
                   try {
-                    updates.thumbnail_url = await uploadToR2(editChapterCoverFile, `chapters/${editChapter.id}/cover-${Date.now()}.${ext}`);
+                    // ЗАСВАР #194: Date.now() таамаглаж болохуйц тул crypto.randomUUID()
+                    updates.thumbnail_url = await uploadToR2(editChapterCoverFile, `chapters/${editChapter.id}/${crypto.randomUUID()}-cover.${ext}`);
                   } catch (e) { notify('Cover upload алдаа: ' + e.message); setEditChapterSaving(false); return; }
                   // ЗАСВАР #163: cover солиход хуучин файл R2-д мөнхөд орхигддог байсныг засав
                   if (oldThumbnailUrl) { try { await deleteFromR2([oldThumbnailUrl]); } catch { /* хор хөнөөлгvй, orphan хэвээр vлдэнэ */ } }
@@ -5076,7 +5120,8 @@ export default function App() {
                 for (const file of editChapterNewFiles) {
                   const ext = file.name.split('.').pop();
                   try {
-                    const url = await uploadToR2(file, `chapters/${editChapter.id}/${Date.now()}-${nextPage}.${ext}`);
+                    // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
+                    const url = await uploadToR2(file, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
                     await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage });
                     nextPage++;
                   } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
