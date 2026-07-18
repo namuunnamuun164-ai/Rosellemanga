@@ -16,6 +16,14 @@ export default function App() {
   const [mangaNoteDraft, setMangaNoteDraft] = useState('');
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [showPopup, setShowPopup] = useState(false);
+  // ЗАСВАР #176: "ЭРХ АВАХ" хуудсанд орох бvрт (хэрэв өмнө нь сонгоогvй бол)
+  // "САНАЛ БОЛГОХ" (recommended) багцыг өмнөөс нь сонгосон байдлаар харуулна —
+  // хэрэглэгчийн өгсөн жишээ загварт дундах багц урьдчилан сонгогдсон байдагтай адил.
+  useEffect(() => {
+    if (page !== 'vip' || selectedPlan) return;
+    const rec = PLANS.find(p => p.recommended);
+    if (rec) setSelectedPlan(rec.key);
+  }, [page]);
   // ЗАСВАР #91: "Төлбөр төлсөн" хүсэлт admin-д очиж, admin шалгаад батлах/цуцлах
   const [paymentRequestSending, setPaymentRequestSending] = useState(false);
   const [paymentRequests, setPaymentRequests] = useState([]);
@@ -2345,6 +2353,24 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* ЗАСВАР #178: нvvр хуудасны хамгийн доод хэсэгт "бидний тухай" маягийн
+                footer нэмэв — сайтын нэр + гол хуудсууд руу шилжих холбоос +
+                copyright. */}
+            <div style={{ marginTop: '3rem', padding: '3rem 2rem', background: '#0a0e17', textAlign: 'center' }}>
+              <div style={{ fontSize: 26, fontWeight: 800, color: '#fff' }}>Roselle Manga</div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', flexWrap: 'wrap', marginTop: '1.5rem' }}>
+                {navItems.concat([{ label: 'Миний сан', p: 'library' }, { label: 'Эрх авах', p: 'vip' }]).map(item => (
+                  <span key={item.p} onClick={() => { setPreviousPage('home'); setPage(item.p); if (item.p === 'all') setAllCategory(null); }}
+                    style={{ color: '#8a92a6', fontSize: 14, cursor: 'pointer' }}>
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+              <div style={{ marginTop: '2rem', color: '#4a5164', fontSize: 12 }}>
+                © {new Date().getFullYear()} Roselle Manga
+              </div>
+            </div>
           </div>
         )}
 
@@ -3084,63 +3110,111 @@ export default function App() {
           </div>
         )}
 
-        {/* VIP PAGE — үнийг PLANS-аас уншина (ЗАСВАР #3) */}
+        {/* VIP PAGE — үнийг PLANS-аас уншина (ЗАСВАР #3). ЗАСВАР #176: хэрэглэгчийн
+            өгсөн жишээ загвар (тод гарчиг + босоо жагссан радио-картууд +
+            давуу тал жагсаалт + нэг "Vргэлжлvvлэх" товч)-ыг сайтын улаан
+            (#8B0000) өнгийг ашиглаж дахин зохион байгуулав. */}
         {page === 'vip' && (
-          <div style={{ padding: '3rem 2rem', minHeight: '100vh', background: '#050505', color: '#fff' }}>
-            {/* ЗАСВАР #97: буцах товч нэмэв */}
-            <button onClick={() => setPage(previousPage)} title="Буцах"
-              style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', marginBottom: '1.5rem' }}>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-              <div style={{ fontSize: 42, fontWeight: 900 }}>ЭРХ АВАХ</div>
-              <div style={{ color: '#777', marginTop: 10 }}>Өөрт тохирох багцаа сонгоно уу</div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 24, flexWrap: 'wrap' }}>
-              {PLANS.map(plan => {
-                // ЗАСВАР #163: тухайн багц түр зуурын хямдралтай, хугацаа нь
-                // дуусаагvй бол хямдарсан vнийг vзvvлнэ (хугацаа дуусмагц
-                // автоматаар анхны vнэ рvv буцна, код дахин засах шаардлагагvй).
-                const salePrice = SALE.prices[plan.key];
-                const onSale = !!salePrice && nowTs < new Date(SALE.endsAt).getTime();
-                const toNum = s => Number(String(s).replace(/[^0-9]/g, ''));
-                const percentOff = onSale ? Math.round((1 - toNum(salePrice) / toNum(plan.price)) * 100) : 0;
-                const remainingMs = new Date(SALE.endsAt).getTime() - nowTs;
-                return (
-                <div key={plan.key}
-                  style={{ width: 300, background: '#111', padding: 30, borderRadius: 20, border: onSale ? '1px solid #7c3aed' : '2px solid #8B0000', transition: '0.3s', cursor: 'pointer', position: 'relative', boxShadow: plan.recommended ? '0 0 30px #8B0000' : 'none' }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.boxShadow = '0 0 30px rgba(139,0,0,0.5)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = plan.recommended ? '0 0 30px #8B0000' : 'none'; }}>
-                  {plan.recommended && !onSale && (
-                    <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', background: '#8B0000', padding: '4px 16px', borderRadius: 20, fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>САНАЛ БОЛГОХ</div>
-                  )}
-                  {onSale && (
-                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: '#7c3aed', color: '#fff', padding: '3px 14px', borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>-{percentOff}%</div>
-                  )}
-                  <h2 style={{ textAlign: 'center', color: '#fff', marginBottom: 8 }}>{plan.label}</h2>
-                  {onSale ? (
-                    <div style={{ textAlign: 'center', margin: '20px 0' }}>
-                      <div>
-                        <span style={{ fontSize: 16, color: '#666', textDecoration: 'line-through', marginRight: 10 }}>{plan.price}</span>
-                        <span style={{ fontSize: 40, fontWeight: 900, color: '#c4b5fd' }}>{salePrice}</span>
-                      </div>
-                      {remainingMs > 0 && (
-                        <div style={{ fontSize: 11, color: '#9d7fe0', marginTop: 6 }}>{formatRemaining(remainingMs) || '1 мин'} vлдсэн</div>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ textAlign: 'center', fontSize: 40, fontWeight: 900, margin: '20px 0', color: '#fff' }}>{plan.price}</div>
-                  )}
-                  <div style={{ lineHeight: 2, color: '#aaa', marginBottom: 8 }}>
-                    {plan.features.map((f, i) => <div key={i}>✓ {f}</div>)}
-                  </div>
-                  <button onClick={() => { setSelectedPlan(plan.key); setShowPopup(true); }}
-                    style={{ width: '100%', marginTop: 24, padding: 14, border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', background: selectedPlan === plan.key ? '#8B0000' : '#222', color: '#fff' }}>
-                    {selectedPlan === plan.key ? 'СОНГОГДСОН' : 'СОНГОХ'}
-                  </button>
+          <div style={{ minHeight: '100vh', background: '#050505', color: '#fff', padding: '2rem 1.25rem 3rem', boxSizing: 'border-box' }}>
+            <div style={{ maxWidth: 480, margin: '0 auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => setPage(previousPage)} title="Хаах"
+                  style={{ width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 18 }}>
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ textAlign: 'center', marginTop: 4, marginBottom: 28 }}>
+                <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 32, fontWeight: 700, lineHeight: 1.3, color: '#ffd9d9' }}>
+                  ЭРХ АВАХ
                 </div>
-                );
-              })}
+                <div style={{ color: '#9aa0ac', marginTop: 14, fontSize: 14 }}>Бvх контентыг нээж, хязгааргvй уншаарай!</div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {PLANS.map(plan => {
+                  // ЗАСВАР #163: тухайн багц түр зуурын хямдралтай, хугацаа нь
+                  // дуусаагvй бол хямдарсан vнийг vзvvлнэ (хугацаа дуусмагц
+                  // автоматаар анхны vнэ рvv буцна, код дахин засах шаардлагагvй).
+                  const salePrice = SALE.prices[plan.key];
+                  const onSale = !!salePrice && nowTs < new Date(SALE.endsAt).getTime();
+                  const toNum = s => Number(String(s).replace(/[^0-9]/g, ''));
+                  const percentOff = onSale ? Math.round((1 - toNum(salePrice) / toNum(plan.price)) * 100) : 0;
+                  const remainingMs = new Date(SALE.endsAt).getTime() - nowTs;
+                  const days = PLAN_DAYS[plan.key] || 30;
+                  const perDay = Math.round(toNum(plan.price) / days);
+                  const perDaySale = onSale ? Math.round(toNum(salePrice) / days) : null;
+                  const isSelected = selectedPlan === plan.key;
+                  // ЗАСВАР #177: 3/6 сарын багцыг сар тутам (1 сарын багцын vнээр) тусад
+                  // нь авахтай харьцуулж хэдэн хувиар хямдардгийг vзvvлнэ (SALE-той
+                  // хамааралгvй, зөвхөн багцын өөрийн бvтэцийн хэмнэлт).
+                  const months = Math.round(days / 30);
+                  const naiveMonthlyTotal = toNum(PLANS[0].price) * months;
+                  const bundleSavingsPercent = months > 1 ? Math.round((1 - toNum(plan.price) / naiveMonthlyTotal) * 100) : 0;
+                  return (
+                    <div key={plan.key} onClick={() => setSelectedPlan(plan.key)}
+                      style={{ position: 'relative', border: isSelected ? '2px solid #8B0000' : '1px solid #2a2a2a', background: isSelected ? 'rgba(139,0,0,0.12)' : 'transparent', borderRadius: 16, padding: '18px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, cursor: 'pointer' }}>
+                      {onSale && remainingMs > 0 && plan.key === PLANS[0].key && (
+                        <div style={{ position: 'absolute', top: -13, left: 16, background: '#8B0000', color: '#fff', fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 20, fontVariantNumeric: 'tabular-nums' }}>
+                          {formatCountdownClock(remainingMs)}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                        <div style={{ width: 24, height: 24, borderRadius: '50%', border: isSelected ? 'none' : '2px solid #555', background: isSelected ? '#8B0000' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          {isSelected && <IconCheck size={14} color="#fff" />}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {plan.label}
+                            {plan.recommended && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="#8B0000" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                            Өдрийн · ₮{(onSale ? perDaySale : perDay).toLocaleString()}
+                            {onSale && <> / <span style={{ textDecoration: 'line-through' }}>₮{perDay.toLocaleString()}</span></>}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        {onSale && <div style={{ color: '#ff6b6b', fontSize: 12, fontWeight: 800 }}>{percentOff}% OFF</div>}
+                        {!onSale && bundleSavingsPercent > 0 && <div style={{ color: '#ff6b6b', fontSize: 12, fontWeight: 800 }}>{bundleSavingsPercent}% хэмнэнэ</div>}
+                        <div style={{ fontWeight: 800, fontSize: 16, marginTop: (onSale || bundleSavingsPercent > 0) ? 4 : 0 }}>{onSale ? salePrice : plan.price}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ marginTop: 32, display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {[
+                  {
+                    icon: (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8B0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>),
+                    title: 'Хязгааргvй унших', desc: 'Бvх манга, манхвыг чөлөөтэй уншина',
+                  },
+                  {
+                    icon: (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8B0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>),
+                    title: 'Чанартай орчуулга', desc: 'Мэргэжлийн, ойлгомжтой орчуулгатай унших',
+                  },
+                  {
+                    icon: (<svg width="20" height="20" viewBox="0 0 24 24" fill="#8B0000" stroke="none"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2z"/></svg>),
+                    title: 'HD чанартай зураг', desc: 'Тод, өндөр нягтралтай хуудсаар унших',
+                  },
+                ].map((f, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ lineHeight: 1, flexShrink: 0 }}>{f.icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{f.title}</div>
+                      <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{f.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button disabled={!selectedPlan} onClick={() => selectedPlan && setShowPopup(true)}
+                style={{ width: '100%', marginTop: 32, padding: 16, border: 'none', borderRadius: 30, background: selectedPlan ? '#8B0000' : '#333', color: '#fff', fontWeight: 800, fontSize: 15, cursor: selectedPlan ? 'pointer' : 'not-allowed' }}>
+                Vргэлжлvvлэх
+              </button>
             </div>
           </div>
         )}
