@@ -36,5 +36,8 @@ export const SALE = {
   endsAt: '2026-07-13T23:59:59+08:00',
   prices: { '1sar': '3,500₮', '3sar': '9,000₮', '6sar': '15,000₮' },
 };
+// ЗАСВАР #188 (код шинжилгээ): new Date(SALE.endsAt) нь string parse хийдэг тул
+// render бvр дахин тооцохын оронд НЭГ удаа module ачаалахад тооцож хадгална.
+export const SALE_ENDS_AT_MS = new Date(SALE.endsAt).getTime();
 
 export const DAYS = ['Ням', 'Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба'];

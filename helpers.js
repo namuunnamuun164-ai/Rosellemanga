@@ -7,9 +7,14 @@ import { supabase } from './supabase';
 // зөвлөмж тул хэрэглэгч ямар ч файл сонгож upload хийж болдог байсан).
 // ЗАСВАР #17: хэмжээний (8MB) хязгаарлалтыг хассан — жинхэнэ hosting (Supabase
 // Storage) холбогдсон тул бүлгийн өндөр чанартай том зургийг хориглох шаардлагагүй.
+// ЗАСВАР #181 (код шинжилгээ): "image/*" бvгдийг зөвшөөрдөг байсан тул
+// image/svg+xml ч нэвтэрдэг байв — SVG дотор <script> байж болох тул (R2-ийн
+// public URL-ыг шууд нээхэд ажиллана) stored XSS эрсдэлтэй. Зөвшөөрөгдсөн
+// төрлийг сервер (upload-to-r2 edge function) талын allowlist-той адилхан болгов.
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 export const validateImageFile = (file) => {
   if (!file) return 'Файл сонгогдоогүй байна.';
-  if (!file.type.startsWith('image/')) return 'Зөвхөн зургийн файл (jpg, png, webp г.м.) оруулна уу.';
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) return 'Зөвхөн зургийн файл (jpg, png, webp, gif) оруулна уу.';
   return null;
 };
 
@@ -58,20 +63,6 @@ export const formatNumericDate = (dateStr) => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}.${mm}.${dd}`;
-};
-
-// ЗАСВАР #129: Gmail нь local part дахь цэг (.) болон "+alias"-ыг vл тооцдог
-// (жишээ нь "u.ser+work@gmail.com" == "user@gmail.com" яг ижил хайрцаг руу очно).
-// Admin/moderator/editor эрх олгохоос өмнө нэг хvн ижил Gmail хайрцгаараа олон
-// бvртгэл vvсгэж давхар staff болохоос сэргийлэхийн тулд харьцуулалтад ашиглана.
-export const normalizeGmailEmail = (email) => {
-  if (!email) return '';
-  const [local, domain] = email.trim().toLowerCase().split('@');
-  if (!domain) return email.trim().toLowerCase();
-  if (domain === 'gmail.com' || domain === 'googlemail.com') {
-    return local.split('+')[0].replace(/\./g, '') + '@gmail.com';
-  }
-  return `${local}@${domain}`;
 };
 
 // ЗАСВАР #139: манганы vзэлт (views) хиймлээр өсгөхөөс сэргийлэх зорилгоор
@@ -134,6 +125,10 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
     ctx.drawImage(bitmap, 0, y, width, pieceHeight, 0, 0, width, pieceHeight);
     // eslint-disable-next-line no-await-in-loop
     const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
+    // ЗАСВАР #191 (код шинжилгээ): маш том canvas дээр browser toBlob-оор null
+    // буцааж болно (жишээ нь санах ой хvрэлцэхгvй vед) — шалгахгvй бол
+    // new File([null], ...) гэсэн эвдэрсэн (0 байттай) файл vvсгэдэг байв.
+    if (!blob) throw new Error('Зургийг хэсэглэхэд алдаа гарлаа (санах ой хvрэлцэхгvй байж магадгvй).');
     pieces.push(new File([blob], `${baseName}-p${partIndex}.${ext}`, { type: mimeType }));
     y += pieceHeight;
     partIndex += 1;
@@ -154,6 +149,8 @@ export const cropImageFile = async (file, rect) => {
   bitmap.close?.();
   const mimeType = file.type || 'image/jpeg';
   const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
+  // ЗАСВАР #191 (код шинжилгээ): доорх splitTallImageFile-тэй адил шалтгаанаар
+  if (!blob) throw new Error('Зургийг тайрахад алдаа гарлаа (санах ой хvрэлцэхгvй байж магадгvй).');
   return new File([blob], file.name, { type: mimeType });
 };
 

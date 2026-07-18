@@ -243,8 +243,14 @@ create index if not exists manga_view_events_viewed_at_idx
 -- (1) RLS-д хамаарч staff биш энгийн уншигчийн vзэлт бодитоор нэмэгддэггvй,
 -- (2) хэн ч давтан дуудаж vзэлтийг хиймлээр өсгөж чаддаг байсан.
 drop function if exists public.increment_manga_views(bigint);
+-- ЗАСВАР #190 (код шинжилгээ): өмнө нь void буцаадаг байсан тул клиент тал
+-- (App.jsx) сервер бодитоор шинэ vзэлт тоолсон эсэхийг мэдэхгvйгээр vргэлж
+-- optimistic +1 нэмдэг байв — нэг хэрэглэгч 30 минутын дотор хуудсыг 5 удаа
+-- нээхэд дэлгэц дээр +5 харагдана (DB-д зөвхөн +1). Одоо boolean буцааж,
+-- клиент зөвхөн ЖИНХЭНЭ шинэ тооллого vед л (true vед) +1 нэмнэ.
+drop function if exists public.increment_manga_views(bigint, text);
 create or replace function public.increment_manga_views(input_id bigint, viewer_key text default null)
-returns void
+returns boolean
 language plpgsql
 security definer
 set search_path = public
@@ -257,7 +263,7 @@ begin
   -- хvснэгт/индексийг бөглөхөөс сэргийлж 64 тэмдэгтээр таслав.
   effective_key := coalesce(auth.uid()::text, left(nullif(trim(viewer_key), ''), 64));
   if effective_key is null then
-    return;
+    return false;
   end if;
 
   select count(*) into recent_count
@@ -267,11 +273,12 @@ begin
     and e.viewed_at > now() - interval '30 minutes';
 
   if recent_count > 0 then
-    return;
+    return false;
   end if;
 
   update public.mangas set views = views + 1 where id = input_id;
   insert into public.manga_view_events (manga_id, viewer_key) values (input_id, effective_key);
+  return true;
 end;
 $$;
 
@@ -473,6 +480,75 @@ $$;
 
 grant execute on function public.admin_lookup_user_by_email(text) to authenticated;
 
+-- ЗАСВАР #187 (код шинжилгээ): Gmail-ийн давхцлын шалгалтыг бvхэлд нь сервер
+-- рvv (admin_grant_roles доор ашиглана) шилжvvлсэн тул энэ логикийг энд SQL-ээр
+-- бичив (клиент талын helpers.js-ийн ижил зорилготой хуучин функц устгагдсан) —
+-- Gmail нь local part дахь цэг болон "+alias"-ыг vл тооцдог.
+create or replace function public.normalize_gmail_email(raw_email text)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  local_part text;
+  domain_part text;
+  norm text;
+begin
+  if raw_email is null then return ''; end if;
+  norm := lower(trim(raw_email));
+  local_part := split_part(norm, '@', 1);
+  domain_part := split_part(norm, '@', 2);
+  if domain_part = '' then return norm; end if;
+  if domain_part in ('gmail.com', 'googlemail.com') then
+    return replace(split_part(local_part, '+', 1), '.', '') || '@gmail.com';
+  end if;
+  return local_part || '@' || domain_part;
+end;
+$$;
+
+-- ЗАСВАР #187: "ЭРХ ОЛГОХ" дэх Gmail давхцлын шалгалт клиент талын (async
+-- ирдэг) staffUsers жагсаалт дээр vндэслэдэг байсан тул admin хуудас нээгээд
+-- шууд (staffUsers хоосон vед) ЭРХ ОЛГОХ дарвал шалгалт алгасагдах race
+-- condition-той байв. Одоо шалгалт болон эрх олгох (update) хоёуланг нь
+-- НЭГ security definer RPC дотор (auth.users-ийн жинхэнэ баталгаажсан
+-- имэйлээр) хийнэ.
+create or replace function public.admin_grant_roles(target_user_id uuid, new_roles text[])
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_norm text;
+  clash_email text;
+begin
+  if not public.has_any_role(auth.uid(), array['admin']) then
+    raise exception 'Зөвхөн admin энэ vйлдлийг хийж болно.';
+  end if;
+
+  if coalesce(array_length(new_roles, 1), 0) > 0 then
+    select public.normalize_gmail_email(au.email::text) into target_norm
+    from auth.users au where au.id = target_user_id;
+
+    select au.email::text into clash_email
+    from public.users u
+    join auth.users au on au.id = u.id
+    where u.id <> target_user_id
+      and coalesce(array_length(u.roles, 1), 0) > 0
+      and public.normalize_gmail_email(au.email::text) = target_norm
+    limit 1;
+
+    if clash_email is not null then
+      raise exception 'gmail_clash:%', clash_email;
+    end if;
+  end if;
+
+  update public.users set roles = new_roles where id = target_user_id;
+end;
+$$;
+
+grant execute on function public.admin_grant_roles(uuid, text[]) to authenticated;
+
 -- ============================================================
 -- 10) RLS идэвхжүүлэх + policy-үүд
 -- ============================================================
@@ -525,6 +601,36 @@ drop policy if exists "users_update_by_admin" on public.users;
 create policy "users_update_by_admin" on public.users for update
   using (public.has_any_role(auth.uid(), array['admin']))
   with check (true);
+
+-- ЗАСВАР #180 (код шинжилгээ): "users_update_own" нь МӨРИЙН түвшинд
+-- (auth.uid()=id) л шалгадаг тул БАГАНЫГ хязгаарлахгvй — халдагч энгийн
+-- хэрэглэгчээр { roles: ['admin'], is_vip: true } гэж өөрийн мөрөө шинэчилж,
+-- өөрийгөө admin/VIP болгож чадах цоорхой байв. Бvх authenticated хэрэглэгч
+-- Postgres талд НЭГ л role ("authenticated") ашигладаг тул баганы GRANT/REVOKE-ээр
+-- admin эсэхийг ялгаж чадахгvй — BEFORE UPDATE trigger-ээр app-талын
+-- has_any_role шалгалт хийж хамгаална.
+create or replace function public.prevent_self_privilege_escalation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.has_any_role(auth.uid(), array['admin']) then
+    if (new.roles is distinct from old.roles)
+       or (new.is_vip is distinct from old.is_vip)
+       or (new.vip_expires_at is distinct from old.vip_expires_at) then
+      raise exception 'Зөвхөн admin эрх/VIP төлөвийг өөрчилж болно.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_prevent_self_privilege_escalation on public.users;
+create trigger trg_prevent_self_privilege_escalation
+  before update on public.users
+  for each row execute function public.prevent_self_privilege_escalation();
 
 -- mangas
 drop policy if exists "mangas_select" on public.mangas;
@@ -725,14 +831,36 @@ alter table public.comments
 
 drop policy if exists "comments_insert_own" on public.comments;
 create policy "comments_insert_own" on public.comments for insert
-  with check (
-    auth.uid() = user_id
-    and not exists (
-      select 1 from public.comments c
-      where c.user_id = auth.uid()
-        and c.created_at > now() - interval '5 seconds'
-    )
-  );
+  with check (auth.uid() = user_id);
+
+-- ЗАСВАР #185 (код шинжилгээ): 5 секундийн rate-limit-ийг өмнө нь RLS policy-ийн
+-- WITH CHECK дотор шалгадаг байсан тул зөрчигдвол RLS-ийн ерөнхий "new row violates
+-- row-level security policy" алдаа буцдаг байв — клиент код ЯМАР Ч ийм алдааг (жинхэнэ
+-- эрхийн зөрчил ч гэсэн) автоматаар "хэт хурдан байна" гэж буруу тайлбарладаг байсан.
+-- Одоо rate-limit-ийг тусад нь trigger-ээр шалгаж, ялгаатай ('rate_limited') алдаа
+-- буцаана — RLS зөрчил бол жинхэнэ (өөр шалтгаантай) алдаа хэвээр vлдэнэ.
+create or replace function public.enforce_comment_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (
+    select 1 from public.comments c
+    where c.user_id = new.user_id
+      and c.created_at > now() - interval '5 seconds'
+  ) then
+    raise exception 'rate_limited';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_comment_rate_limit on public.comments;
+create trigger trg_enforce_comment_rate_limit
+  before insert on public.comments
+  for each row execute function public.enforce_comment_rate_limit();
 
 drop policy if exists "comments_delete_own_or_mod" on public.comments;
 create policy "comments_delete_own_or_mod" on public.comments for delete
@@ -918,6 +1046,14 @@ drop policy if exists "manga_site_staff_upload" on storage.objects;
 --     зохих индексvvд. Postgres нь FK (foreign key)-д АВТОМАТААР индекс vvсгэдэггvй.
 -- ============================================================
 create index if not exists chapters_manga_idx on public.chapters (manga_id);
+-- ЗАСВАР #183 (код шинжилгээ): (manga_id, chapter_number) хосол давхардахгvй байх
+-- unique хязгаарлалт байгаагvй тул .maybeSingle() ашигладаг унших route ижил
+-- дугаартай 2 бvлэг vvсвэл алдаа шиднэ (олон мөр буцаана). Хэрэв энэ мөр
+-- "duplicate key" алдаагаар унавал, эхлээд давхардсан бvлгvvдийг олж (доорх
+-- query-г SQL Editor-т ажиллуулж vзнэ vv) цэвэрлэсний дараа дахин ажиллуулна:
+--   select manga_id, chapter_number, count(*) from public.chapters
+--   group by manga_id, chapter_number having count(*) > 1;
+create unique index if not exists chapters_manga_chapter_unique_idx on public.chapters (manga_id, chapter_number);
 create index if not exists chapter_images_chapter_idx on public.chapter_images (chapter_id, page_number);
 create index if not exists comments_chapter_idx on public.comments (chapter_id, created_at desc);
 create index if not exists comments_manga_idx on public.comments (manga_id, created_at desc);

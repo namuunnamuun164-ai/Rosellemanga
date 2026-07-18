@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
-import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, normalizeGmailEmail, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile } from './helpers';
+import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop } from './icons';
 import { PasswordField } from './PasswordField';
+import { Avatar, MangaCard, SectionHeader } from './components';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -690,7 +691,10 @@ export default function App() {
   };
 
   // Товлосон цаг нь болоогүй бүлэг эсэх
-  const chapterLocked = (ch) => ch.publish_at && new Date(ch.publish_at).getTime() > nowTs;
+  // ЗАСВАР #189 (код шинжилгээ): useCallback-гvй бол render бvр шинэ функц
+  // vvсч, vvнийг dependency болгож ашигладаг restoreFromPath ч render бvр
+  // дахин vvсэж, popstate listener render бvр дахин бvртгэгддэг байв.
+  const chapterLocked = useCallback((ch) => ch.publish_at && new Date(ch.publish_at).getTime() > nowTs, [nowTs]);
 
   // ЗАСВАР #146: admin "ГАРАХ ХУВААРЬ" хуудаснаас тодорхой бvлгийн товлолтыг
   // (эсвэл манганы 7 хоног бvрийн давтагдах хуваарийг) гараар устгаж болно —
@@ -811,13 +815,16 @@ export default function App() {
   // мэдэгдлийн карт (toast). Мессежид "Алдаа" гэсэн үг байвал улаан, эс бол
   // ногоон хүрээтэй харагдана — ингэснээр 75 notify() дуудлагыг нэг нэгээр нь
   // төрөл ялгаж бичихийн оронд зүгээр л alert-ийг notify-гаар сольсон.
-  const notify = (rawMessage) => {
+  // ЗАСВАР #189 (код шинжилгээ): useCallback-гvй бол render бvр шинэ функц
+  // vvсч, vvнийг dependency болгож ашигладаг restoreFromPath ч render бvр
+  // дахин vvсэж, popstate listener render бvр дахин бvртгэгддэг байв.
+  const notify = useCallback((rawMessage) => {
     const message = translateErrorText(rawMessage);
     const type = /алдаа/i.test(message) ? 'error' : 'success';
     const id = `${Date.now()}-${Math.random()}`;
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
-  };
+  }, []);
 
   // Supabase-ээс манга татах — админ шинээр нэмсний дараа дахин дуудаж болохоор
   // тусдаа функц болгосон (ЗАСВАР: өмнө нь нэмсний дараа refresh хийх шаардлагатай байсан).
@@ -920,8 +927,11 @@ export default function App() {
   const heroManga = recommendedMangas[heroIndex] || recommendedMangas[0];
 
   // Хэрэглэгчийн role, нэр, avatar-ыг нэг дор татна
+  // ЗАСВАР #182 (код шинжилгээ): анхны deep-link сэргээлт (restoreFromPath)
+  // profile ирэхийг хvлээхийн тулд энэ дуудлагын promise-ыг буцаах шаардлагатай
+  // болсон (доор authReady-той хамт ашиглана) — өмнө нь юу ч буцаадаггvй байв.
   const fetchProfile = useCallback((userId) => {
-    supabase.from('users').select('roles, name, avatar_url, is_vip, vip_expires_at, sticker_1, sticker_2, sticker_3, sticker_4, sticker_5, sticker_6').eq('id', userId).single()
+    return supabase.from('users').select('roles, name, avatar_url, is_vip, vip_expires_at, sticker_1, sticker_2, sticker_3, sticker_4, sticker_5, sticker_6').eq('id', userId).single()
       .then(({ data }) => {
         if (data) {
           setUserRoles(data.roles || []);
@@ -978,6 +988,14 @@ export default function App() {
     setAuthPage('login');
   };
 
+  // ЗАСВАР #182 (код шинжилгээ): анхны deep-link сэргээлт (доор, dbMangas
+  // ирэнгvvт ажилладаг байсан) fetchProfile дуусахыг хvлээхгvйгээр isVip/isStaff-ыг
+  // шалгадаг байсан тул VIP/staff хэрэглэгч шинээр (refresh/deep-link) орж
+  // ирэхэд профайл хараахан ирээгvй байх vед "VIP биш" гэж буруу тодорхойлогдож
+  // /vip рvv шидэгддэг race condition байв. authReady нь анхны session+profile
+  // (аль аль нь байгаа тохиолдолд) шалгалт бvрэн дуусахыг илэрхийлнэ.
+  const [authReady, setAuthReady] = useState(false);
+
   useEffect(() => {
     // ЗАСВАР #55: имэйл баталгаажуулах холбоос дээр дараад сайт руу буцаж ирэхэд
     // (URL дээр code/access_token/type=signup гэх мэт үлдэгдэл байвал) хоосон/JSON
@@ -989,8 +1007,13 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setCurrentUser(session.user);
-        fetchProfile(session.user.id);
+        // ЗАСВАР #182: анхны authReady-г зөвхөн profile татагдаж дуусахад тавина
+        // (fetchProfile одоо promise буцаадаг болсон) — эс бол isVip/isStaff
+        // хараахан шинэчлэгдээгvй vед deep-link сэргээлт хийгдэх эрсдэлтэй.
+        fetchProfile(session.user.id).then(() => setAuthReady(true)).catch(() => setAuthReady(true));
         if (isAuthCallback) notify('Имэйл баталгаажлаа! Тавтай морилно уу 🎉');
+      } else {
+        setAuthReady(true);
       }
       if (isAuthCallback) window.history.replaceState(null, '', window.location.pathname);
     });
@@ -1066,8 +1089,11 @@ export default function App() {
   }, [dbMangas, isVip, isStaff, nowTs, chapterLocked, notify]);
 
   // Анх ачаалахад (эсвэл dbMangas ирэхэд) одоогийн URL-аас хуудсыг сэргээнэ
+  // ЗАСВАР #182 (код шинжилгээ): authReady хvртэл хvлээнэ — эс бол VIP/staff
+  // хэрэглэгчийн профайл (isVip/isStaff) хараахан ирээгvй vед deep-link
+  // сэргээлт буруу (эрхгvй мэт) шийдэгдэх race condition vvсдэг байв.
   useEffect(() => {
-    if (didInitialRestore.current || dbMangas.length === 0) return;
+    if (didInitialRestore.current || dbMangas.length === 0 || !authReady) return;
     didInitialRestore.current = true;
     const pathname = window.location.pathname;
     if (pathname && pathname !== '/') {
@@ -1075,7 +1101,7 @@ export default function App() {
       restoreFromPath(pathname);
     }
     setRouteReady(true);
-  }, [dbMangas, restoreFromPath]);
+  }, [dbMangas, restoreFromPath, authReady]);
 
   // Browser-ийн буцах/урагшаа товч дарахад URL-аас дахин state сэргээнэ
   useEffect(() => {
@@ -1153,10 +1179,17 @@ export default function App() {
     // харин client талд л түр (session доторх) нэмэгдсэн мэт харагддаг байв.
     // ЗАСВАР #139: зочин (нэвтрээгvй) хэрэглэгчийг ялгах key дамжуулж, ижил
     // vзэгч давтан үзэхэд vзэлтийг дахин тоолохгvй байхаар server талд шvvнэ.
+    // ЗАСВАР #190 (код шинжилгээ): RPC одоо ЖИНХЭНЭ шинэ тооллого хийсэн эсэхийг
+    // (boolean) буцаадаг болсон тул зөвхөн тэр vед л client талын +1-ийг хийнэ —
+    // өмнө нь vргэлж +1 хийдэг байсан тул нэг хэрэглэгч давтан орж ирэхэд
+    // дэлгэц дээрх тоо DB-ийнхээс хэтэрдэг (давхар тоологддог) байв.
     supabase.rpc('increment_manga_views', { input_id: selected.id, viewer_key: getAnonViewerKey() })
-      .then(({ error }) => { if (error) console.error('Vзэлт нэмэгдvvлэх алдаа:', error); });
-    setDbMangas(prev => prev.map(m => m.id === selected.id ? { ...m, views: (m.views || 0) + 1 } : m));
-    setSelected(prev => prev && prev.id === selected.id ? { ...prev, views: (prev.views || 0) + 1 } : prev);
+      .then(({ data: wasCounted, error }) => {
+        if (error) { console.error('Vзэлт нэмэгдvvлэх алдаа:', error); return; }
+        if (!wasCounted) return;
+        setDbMangas(prev => prev.map(m => m.id === selected.id ? { ...m, views: (m.views || 0) + 1 } : m));
+        setSelected(prev => prev && prev.id === selected.id ? { ...prev, views: (prev.views || 0) + 1 } : prev);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, selected?.id]);
 
@@ -1298,10 +1331,11 @@ export default function App() {
     });
     setCommentSending(false);
     if (error) {
-      // ЗАСВАР #163: RLS-ийн 5 секундийн rate-limit (migration_21) энд "эрх байхгvй"
-      // гэсэн ерөнхий орчуулгатай ижил алдаа (violates row-level security) буцаадаг
-      // тул хэрэглэгчид тодорхой (яагаад блоклогдсоноо ойлгомжтой) мессеж vзvvлнэ.
-      if (/row-level security|permission denied/i.test(error.message)) {
+      // ЗАСВАР #185 (код шинжилгээ): сервер тал одоо rate-limit-ийг тусдаа
+      // ('rate_limited') алдаагаар ялгаж буцаадаг болсон тул зөвхөн тэр
+      // тохиолдолд л "хэт хурдан" гэж харуулна — бусад RLS/permission алдааг
+      // (жишээ нь бусад шалтгаанаар блоклогдсон) буруу тайлбарлахгvй.
+      if (/rate_limited/i.test(error.message)) {
         notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
       } else {
         notify('Алдаа: ' + error.message);
@@ -1371,7 +1405,10 @@ export default function App() {
     });
     setMangaCommentSending(false);
     if (error) {
-      if (/row-level security|permission denied/i.test(error.message)) {
+      // ЗАСВАР #185: postComment-той адил — зөвхөн серверийн тусгай
+      // 'rate_limited' алдааг л "хэт хурдан" гэж vзнэ, бусад RLS/permission
+      // алдааг буруу тайлбарлахгvй.
+      if (/rate_limited/i.test(error.message)) {
         notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
       } else {
         notify('Алдаа: ' + error.message);
@@ -1534,15 +1571,10 @@ export default function App() {
   };
 
   // Хэрэглэгчийн жижиг avatar (сэтгэгдэл, topbar-т ашиглана)
-  const Avatar = ({ url, letter, size = 34 }) => (
-    url ? (
-      <img src={url} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
-    ) : (
-      <div style={{ width: size, height: size, borderRadius: '50%', background: '#8B0000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: size * 0.42, color: '#fff', flexShrink: 0 }}>
-        {(letter || '?').toUpperCase()}
-      </div>
-    )
-  );
+  // ЗАСВАР #179: Avatar/MangaCard/SectionHeader-ийг ./components.jsx-рvv
+  // module түвшинд гаргав (доор import хийсэн) — App() дотор дахин
+  // тодорхойлогдвол render бvр component identity өөрчлөгдөж, бvх subtree
+  // (жишээ нь nowTs шинэчлэгдэх бvр MangaCard-ууд) unmount→remount болдог байв.
 
   // ШИНЭ: батлах хүлээгдэж буй бүлгүүд (moderator/admin)
   const fetchPending = useCallback(() => {
@@ -1677,7 +1709,10 @@ export default function App() {
   useEffect(() => {
     if (page !== 'home') return;
     let cancelled = false;
-    supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title, poster_url, is_hidden)')
+    // ЗАСВАР #186 (код шинжилгээ): genres-ийг ч сонгоно — эс бол доорх
+    // openReader-ийн fallback объект genres-гvй vлдэж, Smut 18+ анхааруулга
+    // (selected.genres.includes('Smut')) чимээгvй алгасагддаг байв.
+    supabase.from('chapters').select('id, manga_id, chapter_number, title, label, status, is_vip, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title, poster_url, genres, is_hidden)')
       .eq('status', 'published')
       .order('created_at', { ascending: false })
       .limit(20)
@@ -1698,10 +1733,13 @@ export default function App() {
 
   // ЗАСВАР #1: Хайлт/жанрын шүүлт одоо DB-гийн мангаг ч хамруулдаг болсон
   // (өмнө нь зөвхөн хатуу бичсэн `mangas` массивыг шүүдэг байсан).
-  const filtered = allCategoryBase.filter(m =>
-    (activeGenre === 'Бүгд' || (m.genres || []).includes(activeGenre)) &&
-    m.title.toLowerCase().includes(search.toLowerCase())
-  );
+  // ЗАСВАР #192 (код шинжилгээ): зөвхөн гарчгаар хайдаг байсныг тайлбар (desc)
+  // талбарыг ч хамруулж өргөтгөв — олдоц сайжирна.
+  const filtered = allCategoryBase.filter(m => {
+    const q = search.toLowerCase();
+    return (activeGenre === 'Бүгд' || (m.genres || []).includes(activeGenre)) &&
+      (m.title.toLowerCase().includes(q) || (m.desc || '').toLowerCase().includes(q));
+  });
 
   // ШИНЭ: "Бүх гаргалт" хуудсанд хамгийн их үзэлттэй мангаагаас нь харуулах эрэмбэ
   const sortedFiltered = allSort === 'views' ? [...filtered].sort((a, b) => (b.views || 0) - (a.views || 0)) : filtered;
@@ -1781,43 +1819,6 @@ export default function App() {
     { label: 'Хуваарь', p: 'schedule', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
   ];
 
-  const MangaCard = ({ m, showChapter }) => (
-    <div onClick={() => goToDetail(m)} style={{ cursor: 'pointer', position: 'relative' }}>
-      <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
-        <img src={m.poster} alt={m.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        {showChapter && history.find(h => h.mangaId === m.id) && (
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.8)', padding: '6px 8px', fontSize: 11, color: '#aaa' }}>
-            Бүлэг {history.find(h => h.mangaId === m.id).chapter}
-          </div>
-        )}
-        {!showChapter && !m.is_hidden && (STATUS_META[m.status] || DEFAULT_STATUS_META).badge && (
-          <div style={{ position: 'absolute', top: 5, left: 5, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 8, fontWeight: 700, padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase' }}>{(STATUS_META[m.status] || DEFAULT_STATUS_META).badge}</div>
-        )}
-        {m.is_hidden && (
-          <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.8)', color: '#f5a623', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>🥀 НУУГДСАН</div>
-        )}
-      </div>
-      <div style={{ padding: '6px 2px' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{m.title}</div>
-        <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{(m.genres || []).join(' / ').toUpperCase()}</div>
-      </div>
-    </div>
-  );
-
-  // ЗАСВАР #43: "БҮГДИЙГ ҮЗЭХ" гэсэн үг хэрэггүй, зөвхөн хажуу тийш харсан сум үлдэнэ
-  const SectionHeader = ({ title, onClick }) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 4, height: 20, background: '#8B0000', borderRadius: 2 }} />
-        <span style={{ fontWeight: 800, fontSize: 16 }}>{title}</span>
-      </div>
-      <span onClick={onClick} title="Бүгдийг үзэх"
-        style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', cursor: 'pointer', border: '1px solid #2a2a2a', background: '#141414' }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </span>
-    </div>
-  );
-
   // ШИНЭ: нүүр хэсгийн ангилал тус бүрийн манга картын хэмжээ
   const scrollCardStyle = { width: 130, flexShrink: 0 };
 
@@ -1855,13 +1856,17 @@ export default function App() {
         </div>
 
         <div style={{ fontSize: 11, color: '#444', letterSpacing: 1, marginBottom: '0.5rem', paddingLeft: 8 }}>ҮНДСЭН</div>
-        {navItems.map(item => (
-          <div key={item.p} onClick={() => { setPreviousPage(page); setPage(item.p); if (item.p === 'all') setAllCategory(null); }}
-            style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === item.p ? '#fff' : '#888', background: page === item.p ? '#1a1a1a' : 'transparent', fontWeight: page === item.p ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
-            {item.icon}
-            {item.label}
-          </div>
-        ))}
+        {navItems.map(item => {
+          const go = () => { setPreviousPage(page); setPage(item.p); if (item.p === 'all') setAllCategory(null); };
+          return (
+            <div key={item.p} onClick={go} role="button" tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }}
+              style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === item.p ? '#fff' : '#888', background: page === item.p ? '#1a1a1a' : 'transparent', fontWeight: page === item.p ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
+              {item.icon}
+              {item.label}
+            </div>
+          );
+        })}
         {/* ЗАСВАР #114: "Эрх авах" (VIP)-ийг эндvv зөөв, "Юу унших вэ?"-тэй байрлал сольсон */}
         <div onClick={() => { setPreviousPage(page); setPage('vip'); }}
           style={{ padding: '10px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', fontSize: 14, color: page === 'vip' ? '#8B0000' : '#888', background: page === 'vip' ? '#1a1a1a' : 'transparent', fontWeight: page === 'vip' ? 600 : 400, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2300,7 +2305,7 @@ export default function App() {
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ТҮҮХ" onClick={() => { setPreviousPage('home'); setAllCategory('history'); setPage('all'); }} />
                   <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                    {allMangas.filter(m => history.find(h => h.mangaId === m.id)).map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={true} /></div>)}
+                    {allMangas.filter(m => history.find(h => h.mangaId === m.id)).map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={true} history={history} onOpen={goToDetail} /></div>)}
                   </div>
                 </div>
               )}
@@ -2312,7 +2317,7 @@ export default function App() {
                     .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
-                        onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
+                        onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url, genres: ch.mangas.genres || [] }, ch)}
                         style={{ ...scrollCardStyle, cursor: 'pointer' }}>
                         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
                           <img src={ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -2331,7 +2336,7 @@ export default function App() {
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ШИНЭ МАНГА" onClick={() => { setPreviousPage('home'); setAllCategory('new'); setPage('all'); }} />
                   <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                    {newMangas.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
+                    {newMangas.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} /></div>)}
                   </div>
                 </div>
               )}
@@ -2341,7 +2346,7 @@ export default function App() {
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="САНАЛ БОЛГОХ" onClick={() => { setPreviousPage('home'); setAllCategory('recommended'); setPage('all'); }} />
                   <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                    {curatedRecommended.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
+                    {curatedRecommended.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} /></div>)}
                   </div>
                 </div>
               )}
@@ -2349,7 +2354,7 @@ export default function App() {
               <div style={{ marginBottom: '2.5rem' }}>
                 <SectionHeader title="ДУУССАН" onClick={() => { setPreviousPage('home'); setAllCategory('finished'); setPage('all'); }} />
                 <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                  {allMangas.filter(m => m.status === 'Дууссан').map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} /></div>)}
+                  {allMangas.filter(m => m.status === 'Дууссан').map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} /></div>)}
                 </div>
               </div>
             </div>
@@ -2440,7 +2445,7 @@ export default function App() {
                     .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
                     .map(ch => (
                       <div key={ch.id}
-                        onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url }, ch)}
+                        onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url, genres: ch.mangas.genres || [] }, ch)}
                         style={{ cursor: 'pointer' }}>
                         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
                           <img src={ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -2459,7 +2464,7 @@ export default function App() {
             ) : (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
-                  {sortedFiltered.map(m => <MangaCard key={m.id} m={m} showChapter={false} />)}
+                  {sortedFiltered.map(m => <MangaCard key={m.id} m={m} showChapter={false} history={history} onOpen={goToDetail} />)}
                 </div>
                 {filtered.length === 0 && <div style={{ color: '#555', textAlign: 'center', marginTop: '4rem' }}>Илэрц олдсонгүй</div>}
               </>
@@ -2676,7 +2681,7 @@ export default function App() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
               {allMangas.filter(m => library.includes(m.id)).map(m => (
                 <div key={m.id} style={{ position: 'relative' }}>
-                  <MangaCard m={m} showChapter={false} />
+                  <MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} />
                   <button onClick={() => toggleLibrary(m.id)}
                     style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.7)', border: 'none', color: '#f5a623', fontSize: 16, cursor: 'pointer', borderRadius: 4, padding: '2px 6px' }}>★</button>
                 </div>
@@ -3136,10 +3141,10 @@ export default function App() {
                   // дуусаагvй бол хямдарсан vнийг vзvvлнэ (хугацаа дуусмагц
                   // автоматаар анхны vнэ рvv буцна, код дахин засах шаардлагагvй).
                   const salePrice = SALE.prices[plan.key];
-                  const onSale = !!salePrice && nowTs < new Date(SALE.endsAt).getTime();
+                  const onSale = !!salePrice && nowTs < SALE_ENDS_AT_MS;
                   const toNum = s => Number(String(s).replace(/[^0-9]/g, ''));
                   const percentOff = onSale ? Math.round((1 - toNum(salePrice) / toNum(plan.price)) * 100) : 0;
-                  const remainingMs = new Date(SALE.endsAt).getTime() - nowTs;
+                  const remainingMs = SALE_ENDS_AT_MS - nowTs;
                   const days = PLAN_DAYS[plan.key] || 30;
                   const perDay = Math.round(toNum(plan.price) / days);
                   const perDaySale = onSale ? Math.round(toNum(salePrice) / days) : null;
@@ -3770,10 +3775,19 @@ export default function App() {
                     let filesToUpload = chapterFiles;
                     if (chapterSplitMode === 'split') {
                       const expanded = [];
-                      for (const f of chapterFiles) {
-                        // eslint-disable-next-line no-await-in-loop
-                        const parts = await splitTallImageFile(f, 4000);
-                        expanded.push(...parts);
+                      try {
+                        for (const f of chapterFiles) {
+                          // eslint-disable-next-line no-await-in-loop
+                          const parts = await splitTallImageFile(f, 4000);
+                          expanded.push(...parts);
+                        }
+                      } catch (e) {
+                        // ЗАСВАР #191 (код шинжилгээ): toBlob null буцаах эрсдэлээс vvдэн
+                        // splitTallImageFile throw хийж болох болсон тул энд шалгахгvй бол
+                        // chapterUploading vнэн хэвээр (товч мөнхөд идэвхгvй) vлдэнэ.
+                        notify('Алдаа: ' + e.message);
+                        setChapterUploading(false);
+                        return;
                       }
                       filesToUpload = expanded;
                     }
@@ -4029,20 +4043,22 @@ export default function App() {
                   // ЗАСВАР: алдааг эхэлж шалгадаг болгосон (өмнө нь дараалал буруу байсан)
                   if (userError) { notify('Алдаа: ' + userError.message); return; }
                   if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгүй! Хэрэглэгч эхлээд сайтад бүртгүүлсэн байх ёстой. ' + adminWorkerEmail); return; }
-                  // ЗАСВАР #129: staff эрх (admin/moderator/editor) олгохоос өмнө ижил Gmail
-                  // хайрцгийн өөр бичлэгээр (цэг/+alias) өөр хэрэглэгч аль хэдийн staff
-                  // эрхтэй эсэхийг шалгана — нэг хvн олон бvртгэлээр давхар staff болохоос сэргийлнэ.
-                  if (adminWorkerRoles.length > 0) {
-                    const targetNorm = normalizeGmailEmail(userData.email);
-                    const clash = staffUsers.find(su => su.id !== userData.id && normalizeGmailEmail(su.email) === targetNorm);
-                    if (clash) { notify(`Алдаа: энэ Gmail хаяг (өөр бичлэгээр: ${clash.email}) аль хэдийн staff эрхтэй байна.`); return; }
-                  }
-                  const { error } = await supabase
-                    .from('users')
-                    .update({ roles: adminWorkerRoles })
-                    .eq('id', userData.id);
-                  if (error) notify('Алдаа: ' + error.message);
-                  else {
+                  // ЗАСВАР #187 (код шинжилгээ): Gmail давхцлын шалгалт (цэг/+alias)
+                  // болон эрх олгох update-ыг НЭГ security definer RPC-ээр (сервер
+                  // талд) хийнэ — өмнө нь клиентийн async staffUsers state дээр
+                  // vндэслэдэг байсан тул хуудас нээгээд шууд ЭРХ ОЛГОХ дарвал
+                  // staffUsers хараахан ирээгvй (хоосон) vед шалгалт алгасагддаг байв.
+                  const { error } = await supabase.rpc('admin_grant_roles', {
+                    target_user_id: userData.id,
+                    new_roles: adminWorkerRoles,
+                  });
+                  if (error) {
+                    if (error.message.startsWith('gmail_clash:')) {
+                      notify(`Алдаа: энэ Gmail хаяг (өөр бичлэгээр: ${error.message.slice('gmail_clash:'.length)}) аль хэдийн staff эрхтэй байна.`);
+                    } else {
+                      notify('Алдаа: ' + error.message);
+                    }
+                  } else {
                     const label = adminWorkerRoles.length > 0 ? adminWorkerRoles.map(r => ROLE_LABELS[r]).join(' + ') : 'Хэрэглэгч (эрхгүй)';
                     notify(`${label} эрх амжилттай олгогдлоо! 🎉`);
                     setAdminWorkerEmail('');
@@ -4478,7 +4494,7 @@ export default function App() {
                     if (!p) return '';
                     // ЗАСВАР #163: түр зуурын хямдралтай vед popup дээр ч хямдарсан vнийг харуулна
                     const salePrice = SALE.prices[p.key];
-                    const onSale = !!salePrice && Date.now() < new Date(SALE.endsAt).getTime();
+                    const onSale = !!salePrice && Date.now() < SALE_ENDS_AT_MS;
                     return `${p.label} — ${onSale ? salePrice : p.price}`;
                   })()}
                 </div>
@@ -4538,7 +4554,7 @@ export default function App() {
                 // хvлээж байсныг хадгална (хямдрал дуусаад ч тvvхэнд мэдэгдэхээр)
                 const planForPrice = PLANS.find(p => p.key === selectedPlan);
                 const salePriceForReq = SALE.prices[selectedPlan];
-                const paidPrice = (!!salePriceForReq && Date.now() < new Date(SALE.endsAt).getTime())
+                const paidPrice = (!!salePriceForReq && Date.now() < SALE_ENDS_AT_MS)
                   ? salePriceForReq
                   : planForPrice?.price;
                 const { error } = await supabase.from('payment_requests').insert({ user_id: currentUser.id, plan_key: selectedPlan, paid_price: paidPrice });
@@ -5011,6 +5027,15 @@ export default function App() {
                 // Гарах цагийг зориудаар өөрчилсөн бол бvлгийг шинэ мэт "ШИНЭ БvЛЭГ" мөрөнд
                 // дахин гаргахын тулд created_at-ыг "одоо" болгоно.
                 if (publishAtChanged) updates.created_at = new Date().toISOString();
+                // ЗАСВАР #184 (код шинжилгээ): "ШИНЭ БvЛЭГ" нэмэх урсгал шинэ зураг бvгд
+                // амжилттай орох хvртэл is_hidden:true болгодог байсан ч, БvЛЭГ ЗАСАХ
+                // (энд) шинэ зураг upload хийхдээ бvлэг ил хэвээр vлдэж, хагас (дутуу)
+                // хуудастай харагддаг цоорхой байв. Шинэ файл нэмж байгаа vед л
+                // түр нуугаад, upload бvгд амжилттай болсны дараа анхны төлөвт нь
+                // (staff зориудаар нуусан бол нуугдмал хэвээр) буцаана.
+                const originalIsHidden = editChapter.is_hidden || false;
+                const isAddingNewFiles = editChapterNewFiles.length > 0;
+                if (isAddingNewFiles) updates.is_hidden = true;
                 if (editChapterCoverFile) {
                   const ext = editChapterCoverFile.name.split('.').pop();
                   const oldThumbnailUrl = editChapter.thumbnail_url;
@@ -5047,19 +5072,32 @@ export default function App() {
                 }
                 // Шинэ зургуудыг upload хийж, vлдсэн зургуудын араас дараалуулж нэмнэ
                 let nextPage = editChapterExistingImages.length + 1;
+                let uploadFailed = false;
                 for (const file of editChapterNewFiles) {
                   const ext = file.name.split('.').pop();
                   try {
                     const url = await uploadToR2(file, `chapters/${editChapter.id}/${Date.now()}-${nextPage}.${ext}`);
                     await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage });
                     nextPage++;
-                  } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); }
+                  } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
+                }
+
+                // ЗАСВАР #184: шинэ зураг нэмсэн бол л (эсрэг тохиолдолд is_hidden
+                // хөндөөгvй тул шаардлагагvй) эцсийн is_hidden төлөвийг тогтооно —
+                // бvгд амжилттай бол анхны төлөвт буцаана, аль нэг нь амжилтгvй
+                // бол (дутуу хуудастайгаар ил гарахаас сэргийлж) нуугдмал vлдээнэ.
+                if (isAddingNewFiles) {
+                  const finalIsHidden = uploadFailed ? true : originalIsHidden;
+                  await supabase.from('chapters').update({ is_hidden: finalIsHidden }).eq('id', editChapter.id);
+                  updates.is_hidden = finalIsHidden;
                 }
 
                 setEditChapterSaving(false);
                 setDbChapters(prev => prev.map(x => x.id === editChapter.id ? { ...x, ...updates } : x));
                 setEditChapter(null);
-                notify('Бvлэг шинэчлэгдлээ! 🎉');
+                notify(uploadFailed
+                  ? '⚠️ Зарим зураг амжилтгvй боллоо — бvлгийг "нуугдсан" төлөвтэй vлдээлээ, дутуу хуудсаа дахин ЗАСАХ-аар нөхнө vv'
+                  : 'Бvлэг шинэчлэгдлээ! 🎉');
               }} style={{ width: '100%', background: editChapterSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editChapterSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
                 {editChapterSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
               </button>
