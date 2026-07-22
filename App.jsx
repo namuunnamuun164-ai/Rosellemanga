@@ -4,7 +4,7 @@ import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_D
 import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
 import { PasswordField } from './PasswordField';
-import { Avatar, MangaCard, SectionHeader, LiveCountdown } from './components';
+import { Avatar, MangaCard, SectionHeader, LiveCountdown, SearchOverlay } from './components';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -33,7 +33,6 @@ export default function App() {
   // ЗАСВАР #163: admin-ий статистик таб — цагаар идэвхжил + сvvлийн 1 сарын топ манга
   const [viewsByHour, setViewsByHour] = useState([]);
   const [topMangaMonth, setTopMangaMonth] = useState([]);
-  const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeGenre, setActiveGenre] = useState('Бүгд');
   // ЗАСВАР #95: library/history/readChapters-г localStorage-с Supabase руу
@@ -179,7 +178,7 @@ export default function App() {
       const newUrl = await uploadToR2(newFile, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
       const { error } = await supabase.from('chapter_images').update({ image_url: newUrl, width: newWidth, height: newHeight }).eq('id', img.id);
       if (error) { notify('Алдаа: ' + error.message); setEditChapterEditBusy(false); return; }
-      setEditChapterExistingImages(prev => prev.map((it, idx) => idx === editChapterEditTarget.index ? { ...it, image_url: newUrl } : it));
+      setEditChapterExistingImages(prev => prev.map((it, idx) => idx === editChapterEditTarget.index ? { ...it, image_url: newUrl, width: newWidth, height: newHeight } : it));
       try { await deleteFromR2([img.image_url]); } catch { /* хор хөнөөлгvй */ }
     } catch (e) {
       notify('Алдаа: ' + e.message);
@@ -1053,9 +1052,28 @@ export default function App() {
 
   // ЗАСВАР #225 (код шинжилгээ): Нэвтрэх/Бvртгvvлэх гэх мэт модал цонх нээлттэй
   // vед Escape дарахад хаагдах болгов (өмнө нь зөвхөн ✕ дээр дарж л хаагддаг байсан).
+  // ЗАСВАР #231 (код шинжилгээ): focus trap нэмэв — Tab дарахад модалын гадна
+  // (жишээ нь арын sidebar/карт) руу фокус гарахгvй, зөвхөн модал дотор эргэнэ.
+  const authDialogRef = useRef(null);
   useEffect(() => {
     if (!authPage) return;
-    const onKey = e => { if (e.key === 'Escape') setAuthPage(null); };
+    const onKey = e => {
+      if (e.key === 'Escape') { setAuthPage(null); return; }
+      if (e.key !== 'Tab' || !authDialogRef.current) return;
+      const focusables = Array.from(
+        authDialogRef.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+      ).filter(el => !el.disabled && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [authPage]);
@@ -2060,11 +2078,11 @@ export default function App() {
   // (өмнө нь зөвхөн хатуу бичсэн `mangas` массивыг шүүдэг байсан).
   // ЗАСВАР #192 (код шинжилгээ): зөвхөн гарчгаар хайдаг байсныг тайлбар (desc)
   // талбарыг ч хамруулж өргөтгөв — олдоц сайжирна.
-  const filtered = allCategoryBase.filter(m => {
-    const q = search.toLowerCase();
-    return (activeGenre === 'Бүгд' || (m.genres || []).includes(activeGenre)) &&
-      (m.title.toLowerCase().includes(q) || (m.desc || '').toLowerCase().includes(q));
-  });
+  // ЗАСВАР #232 (код шинжилгээ): энд өмнө нь толгой хэсгийн хайлтын цонхны
+  // "search" state-ийг ч давхар шvvлтvvрлэдэг байсан (харагдах хайлтын талбар
+  // байхгvй атлаа "Бvх гаргалт" grid чимээгvй шvvгддэг гэнэтийн зан төлөв vvсгэж
+  // байсан) — хайлтыг бvрэн тусгаарласан тул энд зөвхөн жанраар шvvнэ.
+  const filtered = allCategoryBase.filter(m => activeGenre === 'Бүгд' || (m.genres || []).includes(activeGenre));
 
   // ШИНЭ: "Бүх гаргалт" хуудсанд хамгийн их үзэлттэй мангаагаас нь харуулах эрэмбэ
   const sortedFiltered = allSort === 'views' ? [...filtered].sort((a, b) => (b.views || 0) - (a.views || 0)) : filtered;
@@ -2076,11 +2094,6 @@ export default function App() {
   // ангиллын сумаар орсны дараа дараагийн БvХ хайлт зөвхөн тэр ангилалд
   // хязгаарлагдаж vлддэг байсан ("хайлт ажиллахгvй байна" мэт мэдрэгддэг байв).
   // Дэлгэц дvvрэн хайлт БvХ мангаас (ангилал vл харгалзан) хайх ёстой тул тусад нь тооцно.
-  const globalSearchResults = allMangas.filter(m => {
-    const q = search.toLowerCase();
-    return m.title.toLowerCase().includes(q) || (m.desc || '').toLowerCase().includes(q);
-  });
-
   // Бүлэг нээхэд түүхэнд бүртгэнэ (нэг мангад хамгийн сүүлийн бүлгийг л хадгална)
   const openReader = (manga, chapter) => {
     // ШИНЭ: VIP бүлгийг зөвхөн VIP/staff уншина
@@ -2257,7 +2270,7 @@ export default function App() {
       {/* AUTH OVERLAY */}
       {authPage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div role="dialog" aria-modal="true" aria-label={
+          <div ref={authDialogRef} role="dialog" aria-modal="true" aria-label={
               authPage === 'login' ? 'Нэвтрэх' : authPage === 'register' ? 'Бvртгvvлэх' : authPage === 'forgot' ? 'Нууц vг сэргээх' : 'Код баталгаажуулах'
             } style={{ background: '#111', borderRadius: 16, padding: '2.5rem', width: 400, maxWidth: '100%', border: '1px solid #222', position: 'relative', boxSizing: 'border-box' }}>
             <button type="button" onClick={() => setAuthPage(null)} aria-label="Хаах"
@@ -2295,8 +2308,12 @@ export default function App() {
                     if (error) notify('Алдаа: ' + error.message);
                     else if (data.session) {
                       setAuthPage(null);
+                      // ЗАСВАР #230 (код шинжилгээ): амжилттай орсны дараа нууц vг
+                      // React state-д vлдэхгvйгээр цэвэрлэнэ.
+                      setAuthForm({ email: '', password: '', name: '' });
                       notify('Бүртгэл амжилттай! Тавтай морил 🎉');
                     } else {
+                      setAuthForm(f => ({ ...f, password: '' }));
                       notify('Бүртгэл амжилттай! Имэйлээ шалгана уу 📧');
                     }
                   } else {
@@ -2307,6 +2324,7 @@ export default function App() {
                     if (error) notify('Алдаа: Нэвтрэх имэйл эсвэл нууц үг буруу байна');
                     else {
                       setAuthPage(null);
+                      setAuthForm({ email: '', password: '', name: '' });
                       notify('Амжилттай нэвтэрлээ! 🎉');
                     }
                   }
@@ -2338,6 +2356,7 @@ export default function App() {
                   <label htmlFor="auth-password" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>НУУЦ ҮГ</label>
                   <PasswordField id="auth-password" name="password"
                     autoComplete={authPage === 'register' ? 'new-password' : 'current-password'} required
+                    minLength={authPage === 'register' ? 6 : undefined}
                     value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})}
                     placeholder="••••••••" />
                 </div>
@@ -2355,9 +2374,9 @@ export default function App() {
                 </button>
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
                   {authPage === 'login' ? (
-                    <span>Бүртгэл байхгүй юу? <button type="button" onClick={() => setAuthPage('register')} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Бүртгүүлэх</button></span>
+                    <span>Бүртгэл байхгүй юу? <button type="button" onClick={() => { setAuthForm(f => ({ ...f, password: '' })); setAuthPage('register'); }} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Бүртгүүлэх</button></span>
                   ) : (
-                    <span>Бүртгэл байна уу? <button type="button" onClick={() => setAuthPage('login')} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх</button></span>
+                    <span>Бүртгэл байна уу? <button type="button" onClick={() => { setAuthForm(f => ({ ...f, password: '' })); setAuthPage('login'); }} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх</button></span>
                   )}
                 </div>
               </form>
@@ -2428,36 +2447,7 @@ export default function App() {
 
       {/* Search overlay */}
       {searchOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '10rem' }}>
-          {/* ЗАСВАР #46: хайлт хэсэгт ✕-ээс гадна энгийн "← Буцах" товч нэмсэн */}
-          <button onClick={() => { setSearchOpen(false); setSearch(''); }} title="Буцах"
-            style={{ position: 'absolute', top: 24, left: 24, width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <div style={{ width: '60%', display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #333', paddingBottom: 16 }}>
-            <span style={{ color: '#8B0000' }}><IconSearch /></span>
-            <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Манга хайх..."
-              style={{ background: 'none', border: 'none', outline: 'none', color: '#fff', fontSize: 28, fontWeight: 700, flex: 1 }} />
-            <span onClick={() => { setSearchOpen(false); setSearch(''); }} style={{ cursor: 'pointer', fontSize: 24, color: '#aaa' }}>✕</span>
-          </div>
-          {search && (
-            <div style={{ width: '60%', marginTop: 24 }}>
-              <div style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>ХАЙЛТЫН ИЛЭРЦ ({globalSearchResults.length})</div>
-              {globalSearchResults.map(m => (
-                <div key={m.id} onClick={() => { goToDetail(m); setSearchOpen(false); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', borderRadius: 8, cursor: 'pointer', background: '#111', marginBottom: 8 }}>
-                  <img src={m.poster} alt={m.title} style={{ width: 48, height: 64, objectFit: 'cover', borderRadius: 6 }} />
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{m.title}</div>
-                    <div style={{ fontSize: 12, color: '#8B0000', marginTop: 4, border: '1px solid #8B0000', display: 'inline-block', padding: '2px 8px', borderRadius: 4 }}>{(m.genres || []).join(' / ').toUpperCase()}</div>
-                  </div>
-                  <span style={{ marginLeft: 'auto', color: '#555' }}>›</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <SearchOverlay allMangas={allMangas} onOpen={goToDetail} onClose={() => setSearchOpen(false)} />
       )}
 
       {/* Main */}
@@ -2971,7 +2961,7 @@ export default function App() {
                                     ЗАСВАР #226: LiveCountdown өөрөө секунд тутам сэргэж,
                                     дууссан vед null буцаана (App() дахин render хийхгvй). */}
                                 {m.schedule_time && next && (
-                                  <LiveCountdown target={next.getTime()}>
+                                  <LiveCountdown target={next.getTime()} onExpire={() => setNowTs(Date.now())}>
                                     {remainingMs => (
                                       <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -3016,7 +3006,7 @@ export default function App() {
                                     тоологддог countdown-г шууд ЭНД харуулна
                                     ЗАСВАР #161: нэгэнт гарсан (өнгөрсөн) бол цаг огт харуулахгvй
                                     ЗАСВАР #226: LiveCountdown өөрөө секунд тутам сэргэнэ. */}
-                                <LiveCountdown target={new Date(ch.publish_at).getTime()}>
+                                <LiveCountdown target={new Date(ch.publish_at).getTime()} onExpire={() => setNowTs(Date.now())}>
                                   {remainingMs => (
                                     <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
                                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -3325,7 +3315,7 @@ export default function App() {
                               </div>
                               <div style={{ fontSize: 12, color: locked ? '#fff' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
                                 {locked ? (
-                                  <LiveCountdown target={new Date(ch.publish_at).getTime()}>
+                                  <LiveCountdown target={new Date(ch.publish_at).getTime()} onExpire={() => setNowTs(Date.now())}>
                                     {remainingMs => <span style={{ fontVariantNumeric: 'tabular-nums' }}>⏳ {formatCountdownClock(remainingMs)}</span>}
                                   </LiveCountdown>
                                 ) : (

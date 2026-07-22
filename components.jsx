@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { STATUS_META, DEFAULT_STATUS_META } from './constants';
+import { IconSearch } from './icons';
 
 // ЗАСВАР #179 (код шинжилгээ): Эдгээр 3 компонентыг App() функцийн БИЕИЙН
 // дотор const-ээр тодорхойлдог байсан тул render бvр дээр ШИНЭ функц
@@ -15,7 +16,7 @@ import { STATUS_META, DEFAULT_STATUS_META } from './constants';
 // тусад нь module-level компонент болгож тусгаарлав: зөвхөн ЭНЭ жижиг
 // компонент секунд тутам өөрийгөө сэргээнэ, App() эцэг компонентод нөлөөлөхгvй.
 // remainingMs <= 0 болмогц өөрийгөө зогсооно (interval мөнхөд ажиллахгvй).
-export const LiveCountdown = ({ target, children }) => {
+export const LiveCountdown = ({ target, onExpire, children }) => {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     setNow(Date.now());
@@ -27,8 +28,63 @@ export const LiveCountdown = ({ target, children }) => {
     return () => clearInterval(t);
   }, [target]);
   const remainingMs = target - now;
+  // ЗАСВАР #228 (код шинжилгээ): дуусмагц null буцаадаг тул дуудагч тал
+  // (жишээ нь дараагийн долоо хоногийн хуваарь, эсвэл chapterLocked) 30 сек
+  // тутмын nowTs тик хvлээгээгvйгээр шууд шинэчлэгдэж чадахын тулд мэдэгдэнэ.
+  useEffect(() => {
+    if (remainingMs <= 0) onExpire?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remainingMs <= 0]);
   if (remainingMs <= 0) return null;
   return children(remainingMs);
+};
+
+// ЗАСВАР #232 (код шинжилгээ): "search" state өмнө нь App() дотор байсан бөгөөд
+// "Бvх гаргалт" хуудасны grid-ийг ЧИМЭЭГvй давхар шvvдэг байв (харагдах хайлтын
+// талбар байхгvй атлаа) — үvнээс гадна vсэг бvр дарах бvр App() бvхэлдээ (5800+
+// мөр, 812 inline style) дахин render хийгддэг байсан. Одоо энэ хайлт бvрэн
+// тусгаарлагдсан: зөвхөн ЭНЭ overlay-д хамаарна, өөрийн state-тэй, зөвхөн
+// ӨӨРИЙГӨӨ дахин render хийнэ.
+export const SearchOverlay = ({ allMangas, onOpen, onClose }) => {
+  const [search, setSearch] = useState('');
+  const results = useMemo(() => {
+    const q = search.toLowerCase();
+    if (!q) return [];
+    return allMangas.filter(m => m.title.toLowerCase().includes(q) || (m.desc || '').toLowerCase().includes(q));
+  }, [search, allMangas]);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '10rem' }}>
+      {/* ЗАСВАР #46: хайлт хэсэгт ✕-ээс гадна энгийн "← Буцах" товч нэмсэн */}
+      <button onClick={onClose} title="Буцах"
+        style={{ position: 'absolute', top: 24, left: 24, width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div style={{ width: '60%', display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #333', paddingBottom: 16 }}>
+        <span style={{ color: '#8B0000' }}><IconSearch /></span>
+        <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Манга хайх..."
+          style={{ background: 'none', border: 'none', outline: 'none', color: '#fff', fontSize: 28, fontWeight: 700, flex: 1 }} />
+        <span onClick={onClose} style={{ cursor: 'pointer', fontSize: 24, color: '#aaa' }}>✕</span>
+      </div>
+      {search && (
+        <div style={{ width: '60%', marginTop: 24 }}>
+          <div style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>ХАЙЛТЫН ИЛЭРЦ ({results.length})</div>
+          {results.map(m => (
+            <div key={m.id} onClick={() => { onOpen(m); onClose(); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', borderRadius: 8, cursor: 'pointer', background: '#111', marginBottom: 8 }}>
+              <img src={m.poster} alt={m.title} style={{ width: 48, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+              <div>
+                <div style={{ fontWeight: 600 }}>{m.title}</div>
+                <div style={{ fontSize: 12, color: '#8B0000', marginTop: 4, border: '1px solid #8B0000', display: 'inline-block', padding: '2px 8px', borderRadius: 4 }}>{(m.genres || []).join(' / ').toUpperCase()}</div>
+              </div>
+              <span style={{ marginLeft: 'auto', color: '#555' }}>›</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const Avatar = ({ url, letter, size = 34 }) => (

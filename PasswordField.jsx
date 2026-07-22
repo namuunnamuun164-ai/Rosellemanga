@@ -1,12 +1,12 @@
 import { useState } from 'react';
 
 // ШИНЭ: нууц үг оруулах талбар — нvд дарж харуулах/нуух товчтой
-export const PasswordField = ({ value, onChange, placeholder, onKeyDown, id, name, autoComplete, required }) => {
+export const PasswordField = ({ value, onChange, placeholder, onKeyDown, id, name, autoComplete, required, minLength }) => {
   const [show, setShow] = useState(false);
   return (
     <div style={{ position: 'relative' }}>
       <input type={show ? 'text' : 'password'} value={value} onChange={onChange} onKeyDown={onKeyDown}
-        placeholder={placeholder} id={id} name={name} autoComplete={autoComplete} required={required}
+        placeholder={placeholder} id={id} name={name} autoComplete={autoComplete} required={required} minLength={minLength}
         style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 44px 10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
       <span onClick={() => setShow(s => !s)} title={show ? 'Нууц үг нуух' : 'Нууц үг харуулах'}
         style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: '#888', fontSize: 15, userSelect: 'none' }}>
