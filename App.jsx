@@ -128,6 +128,9 @@ export default function App() {
   // (Safari-д position:absolute зурган элементийн өндрийг зөвхөн width %-аар нь
   // зөв тооцоолохгvй асуудал) эх зургийн бодит хэмжээг onLoad-оор нь авна.
   const [editChapterCropImgSize, setEditChapterCropImgSize] = useState({ w: 0, h: 0 });
+  // ЗАСВАР #210 (код шинжилгээ): доорх chapterCropFrameWidth-тэй адил шалтгаанаар
+  // browser-ийн автомат хэмжээ тооцоонд vл найдаж, px-ээр өөрсдөө тооцно.
+  const [editChapterCropFrameWidth, setEditChapterCropFrameWidth] = useState(0);
 
   const closeEditChapterEditor = () => { setEditChapterEditTarget(null); setEditChapterCropOpen(false); setEditChapterCropPanY(0); setEditChapterCropZoom(1); };
 
@@ -213,6 +216,7 @@ export default function App() {
     setEditChapterCropPanY(0);
     setEditChapterCropZoom(1);
     setEditChapterCropImgSize({ w: 0, h: 0 });
+    setEditChapterCropFrameWidth(0);
   };
   const closeEditChapterCrop = () => {
     setEditChapterCropOpen(false);
@@ -225,17 +229,27 @@ export default function App() {
   useEffect(() => {
     if (!editChapterCropOpen) return;
     const imgEl = editChapterCropImgRef.current;
+    const frameEl = editChapterCropFrameRef.current;
+    if (frameEl) setEditChapterCropFrameWidth(frameEl.clientWidth);
     if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
       setEditChapterCropImgSize({ w: imgEl.naturalWidth, h: imgEl.naturalHeight });
     }
   }, [editChapterCropOpen, editChapterEditTarget]);
+
+  // ЗАСВАР #210 (код шинжилгээ): imgEl.clientHeight-д vл найдаж, frame-ийн px
+  // өргөн + эх зургийн харьцаагаар өөрсдөө өндрийг тооцно.
+  const getEditChapterCropFullHeight = () => (
+    editChapterCropFrameWidth && editChapterCropImgSize.w && editChapterCropImgSize.h
+      ? editChapterCropFrameWidth * editChapterCropZoom * (editChapterCropImgSize.h / editChapterCropImgSize.w)
+      : (editChapterCropImgRef.current?.clientHeight || 0)
+  );
 
   const startEditChapterCropPanDrag = (e) => {
     e.preventDefault();
     const imgEl = editChapterCropImgRef.current;
     const frameEl = editChapterCropFrameRef.current;
     if (!imgEl || !frameEl) return;
-    const fullHeight = imgEl.clientHeight;
+    const fullHeight = getEditChapterCropFullHeight();
     const frameHeight = frameEl.clientHeight;
     if (fullHeight <= 0) return; // зураг decode хийгдэж дуусаагvй байна
     const minY = Math.min(0, frameHeight - fullHeight);
@@ -275,7 +289,7 @@ export default function App() {
     const imgEl = editChapterCropImgRef.current;
     const frameEl = editChapterCropFrameRef.current;
     if (!imgEl || !frameEl || !editChapterEditTarget) return;
-    const fullHeight = imgEl.clientHeight;
+    const fullHeight = getEditChapterCropFullHeight();
     const frameHeight = frameEl.clientHeight;
     const EPS = 4;
     if (editChapterCropPanY === 0 && fullHeight <= frameHeight + EPS) { closeEditChapterCrop(); return; }
@@ -362,6 +376,13 @@ export default function App() {
   // Эх зургийн бодит хэмжээг (naturalWidth/Height) онлоод, тэрhvvгээр нь
   // aspect-ratio CSS-ийг ЭКСПЛИЦИТ тавьж, хэмжээг тодорхой болгоно.
   const [chapterCropImgSize, setChapterCropImgSize] = useState({ w: 0, h: 0 });
+  // ЗАСВАР #210 (код шинжилгээ): CSS aspect-ratio/width % vндэслэсэн автомат
+  // өндрийн тооцоо (өмнөх 2 засвар) нь зарим төхөөрөмж/browser хослолд яагаад
+  // нэг л биш байгааг бид баталгаатай нотолж чадахгvй байгаа тул (browser-т
+  // итгэхийн оронд) БvХ хэмжээг (өргөн, өндөр) ӨӨРСДӨӨ px-ээр тооцож,
+  // img элементэд ШУУД тавьдаг (browser-ийн автомат тооцоонд огт vл найдах)
+  // болгов — ингэснээр яг ямар browser дээр ч ижил, тодорхой ажиллана.
+  const [chapterCropFrameWidth, setChapterCropFrameWidth] = useState(0);
   const [chapterCropBusy, setChapterCropBusy] = useState(false);
   // ЗАСВАР #175: цонхны дээд/доод ирмэгт харандаа/зов тэмдэг sticker харуулж,
   // чирж байх vед зов тэмдэг болно (StitchPics-ийн визуал заавар шиг).
@@ -419,6 +440,7 @@ export default function App() {
     setChapterCropPanY(0);
     setChapterCropZoom(1);
     setChapterCropImgSize({ w: 0, h: 0 });
+    setChapterCropFrameWidth(0);
   };
   const closeChapterCrop = () => {
     setChapterCropActive(false);
@@ -439,10 +461,23 @@ export default function App() {
   useEffect(() => {
     if (!chapterCropActive) return;
     const imgEl = chapterCropImgRef.current;
+    const frameEl = chapterCropFrameRef.current;
+    // ЗАСВАР #210: frame-ийн өргөн нь зурагнаас vл хамааран (зөвхөн эцэг
+    // элементийн CSS-ээс) тодорхойлогддог тул шууд, найдвартай хэмжиж болно.
+    if (frameEl) setChapterCropFrameWidth(frameEl.clientWidth);
     if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
       setChapterCropImgSize({ w: imgEl.naturalWidth, h: imgEl.naturalHeight });
     }
   }, [chapterCropActive, chapterEditIndex]);
+
+  // ЗАСВАР #210 (код шинжилгээ): imgEl.clientHeight (browser-ийн автомат width%→
+  // aspect-ratio тооцоо) зарим төхөөрөмж дээр найдваргvй байсан тул frame-ийн
+  // px өргөн + эх зургийн харьцаагаар өөрсдөө тооцоолсон өндрийг ашиглана.
+  const getChapterCropFullHeight = () => (
+    chapterCropFrameWidth && chapterCropImgSize.w && chapterCropImgSize.h
+      ? chapterCropFrameWidth * chapterCropZoom * (chapterCropImgSize.h / chapterCropImgSize.w)
+      : (chapterCropImgRef.current?.clientHeight || 0)
+  );
 
   // ЗАСВАР #173: зургийг тогтмол (дэлгэцийн бvх өндөртэй) цонхны дотор
   // дээшээ/доошоо чирнэ.
@@ -451,7 +486,7 @@ export default function App() {
     const imgEl = chapterCropImgRef.current;
     const frameEl = chapterCropFrameRef.current;
     if (!imgEl || !frameEl) return;
-    const fullHeight = imgEl.clientHeight;
+    const fullHeight = getChapterCropFullHeight();
     const frameHeight = frameEl.clientHeight;
     if (fullHeight <= 0) return; // зураг decode хийгдэж дуусаагvй байна
     const minY = Math.min(0, frameHeight - fullHeight);
@@ -491,7 +526,7 @@ export default function App() {
     const imgEl = chapterCropImgRef.current;
     const frameEl = chapterCropFrameRef.current;
     if (!imgEl || !frameEl || chapterEditIndex === null) return;
-    const fullHeight = imgEl.clientHeight;
+    const fullHeight = getChapterCropFullHeight();
     const frameHeight = frameEl.clientHeight;
     const EPS = 4;
     if (chapterCropPanY === 0 && fullHeight <= frameHeight + EPS) { closeChapterCrop(); return; }
@@ -5035,8 +5070,21 @@ export default function App() {
                       <div key={i} ref={chapterCropFrameRef} onPointerDown={startChapterCropPanDrag}
                         style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={chapterCropImgRef} src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
-                          onLoad={e => setChapterCropImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
-                          style={{ position: 'absolute', left: 0, top: chapterCropPanY, width: `${100 * chapterCropZoom}%`, opacity: chapterCropBusy ? 0.4 : 1, ...(chapterCropImgSize.w && chapterCropImgSize.h ? { aspectRatio: `${chapterCropImgSize.w} / ${chapterCropImgSize.h}`, height: 'auto' } : {}) }} />
+                          onLoad={e => {
+                            setChapterCropImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight });
+                            if (chapterCropFrameRef.current) setChapterCropFrameWidth(chapterCropFrameRef.current.clientWidth);
+                          }}
+                          style={{
+                            position: 'absolute', left: 0, top: chapterCropPanY, opacity: chapterCropBusy ? 0.4 : 1,
+                            // ЗАСВАР #210 (код шинжилгээ): browser-ийн автомат width%→aspect-ratio
+                            // тооцоонд vл найдаж, өргөн/өндрийг ӨӨРСДӨӨ px-ээр шууд тооцно —
+                            // frame-ийн бодит өргөнийг (chapterCropFrameWidth) эх зургийн
+                            // харьцаатай vржvvлж, зэрэглэлийн ямар ч хазайлтгvйгээр тодорхойлно.
+                            ...(chapterCropFrameWidth && chapterCropImgSize.w && chapterCropImgSize.h ? {
+                              width: `${chapterCropFrameWidth * chapterCropZoom}px`,
+                              height: `${chapterCropFrameWidth * chapterCropZoom * (chapterCropImgSize.h / chapterCropImgSize.w)}px`,
+                            } : { width: `${100 * chapterCropZoom}%` }),
+                          }} />
                         <div style={{ position: 'absolute', left: '50%', top: 10, transform: 'translateX(-50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           {chapterCropDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
                         </div>
@@ -5594,8 +5642,17 @@ export default function App() {
                       <div key={img.id} ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
                         style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={editChapterCropImgRef} src={img.image_url} alt={`${i + 1}`} draggable={false}
-                          onLoad={e => setEditChapterCropImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
-                          style={{ position: 'absolute', left: 0, top: editChapterCropPanY, width: `${100 * editChapterCropZoom}%`, opacity: editChapterEditBusy ? 0.4 : 1, ...(editChapterCropImgSize.w && editChapterCropImgSize.h ? { aspectRatio: `${editChapterCropImgSize.w} / ${editChapterCropImgSize.h}`, height: 'auto' } : {}) }} />
+                          onLoad={e => {
+                            setEditChapterCropImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight });
+                            if (editChapterCropFrameRef.current) setEditChapterCropFrameWidth(editChapterCropFrameRef.current.clientWidth);
+                          }}
+                          style={{
+                            position: 'absolute', left: 0, top: editChapterCropPanY, opacity: editChapterEditBusy ? 0.4 : 1,
+                            ...(editChapterCropFrameWidth && editChapterCropImgSize.w && editChapterCropImgSize.h ? {
+                              width: `${editChapterCropFrameWidth * editChapterCropZoom}px`,
+                              height: `${editChapterCropFrameWidth * editChapterCropZoom * (editChapterCropImgSize.h / editChapterCropImgSize.w)}px`,
+                            } : { width: `${100 * editChapterCropZoom}%` }),
+                          }} />
                         <div style={{ position: 'absolute', left: '50%', top: 10, transform: 'translateX(-50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           {editChapterCropDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
                         </div>
@@ -5629,8 +5686,17 @@ export default function App() {
                       <div key={`new${i}`} ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
                         style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img ref={editChapterCropImgRef} src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
-                          onLoad={e => setEditChapterCropImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
-                          style={{ position: 'absolute', left: 0, top: editChapterCropPanY, width: `${100 * editChapterCropZoom}%`, opacity: editChapterEditBusy ? 0.4 : 1, ...(editChapterCropImgSize.w && editChapterCropImgSize.h ? { aspectRatio: `${editChapterCropImgSize.w} / ${editChapterCropImgSize.h}`, height: 'auto' } : {}) }} />
+                          onLoad={e => {
+                            setEditChapterCropImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight });
+                            if (editChapterCropFrameRef.current) setEditChapterCropFrameWidth(editChapterCropFrameRef.current.clientWidth);
+                          }}
+                          style={{
+                            position: 'absolute', left: 0, top: editChapterCropPanY, opacity: editChapterEditBusy ? 0.4 : 1,
+                            ...(editChapterCropFrameWidth && editChapterCropImgSize.w && editChapterCropImgSize.h ? {
+                              width: `${editChapterCropFrameWidth * editChapterCropZoom}px`,
+                              height: `${editChapterCropFrameWidth * editChapterCropZoom * (editChapterCropImgSize.h / editChapterCropImgSize.w)}px`,
+                            } : { width: `${100 * editChapterCropZoom}%` }),
+                          }} />
                         <div style={{ position: 'absolute', left: '50%', top: 10, transform: 'translateX(-50%)', pointerEvents: 'none', width: 32, height: 32, borderRadius: '50%', background: '#f5a623', boxShadow: '0 1px 6px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           {editChapterCropDragging ? <IconCheck size={16} color="#000" /> : <IconPencil size={14} color="#000" />}
                         </div>
