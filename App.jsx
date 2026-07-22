@@ -112,7 +112,15 @@ export default function App() {
   const [editChapterEditTarget, setEditChapterEditTarget] = useState(null);
   const [editChapterEditBusy, setEditChapterEditBusy] = useState(false);
   const editChapterReplaceInputRef = useRef(null);
-  const closeEditChapterEditor = () => { setEditChapterEditTarget(null); };
+  // ЗАСВАР #214 (хэрэглэгчийн хvсэлт): доорх chapterCrop-той адил шалтгаанаар
+  // интерактив (чирдэг, zoom-гvй) тайрах хэрэгслийг дахин нэмэв.
+  const [editChapterCropActive, setEditChapterCropActive] = useState(false);
+  const [editChapterCropPanY, setEditChapterCropPanY] = useState(0);
+  const [editChapterCropImgSize, setEditChapterCropImgSize] = useState({ w: 0, h: 0 });
+  const [editChapterCropFrameWidth, setEditChapterCropFrameWidth] = useState(0);
+  const editChapterCropFrameRef = useRef(null);
+
+  const closeEditChapterEditor = () => { setEditChapterEditTarget(null); setEditChapterCropActive(false); setEditChapterCropPanY(0); };
 
   const deleteEditChapterEditImage = () => {
     if (!editChapterEditTarget) return;
@@ -142,6 +150,8 @@ export default function App() {
       return arr;
     });
     setEditChapterEditTarget({ kind, index: newIndex });
+    setEditChapterCropActive(false);
+    setEditChapterCropPanY(0);
   };
 
   // ЗАСВАР #163: аль хэдийн R2-д байгаа зургийг crop/replace хийхэд шинэ файлыг
@@ -187,44 +197,98 @@ export default function App() {
     }
   };
 
-  // ЗАСВАР #213 (хэрэглэгчийн хvсэлт): чирэх/zoom-той интерактив тайрах хэрэгслийг
-  // (chapterCrop-той адил шалтгаанаар) бvрэн хассан — "Тайрах" дарахад ЯГ ОДОО
-  // ХАРАГДАЖ БУЙ хvрээгээр (60vh-тай тэнцvv харьцаагаар) шууд, дан ганц дарахад
-  // л тайрч, vлдсэн доод хэсгийг хаяна. "existing" бол шинэ файлыг тэр даруй
+  // ЗАСВАР #214 (хэрэглэгчийн хvсэлт): доорх chapterCrop-той адил интерактив
+  // (чирдэг, zoom-гvй) тайрах хэрэгсэл. "existing" бол шинэ файлыг тэр даруй
   // R2-д upload хийж DB мөрийг шинэчилнэ (applyExistingChapterImageEdit), "new"
   // бол зөвхөн local state дотор солино.
   const editChapterPreviewListRef = useRef(null);
-  const applyEditChapterCrop = async () => {
-    if (!editChapterEditTarget || editChapterEditBusy) return;
+  const openEditChapterCrop = () => {
+    if (!editChapterEditTarget) return;
     const { kind, index } = editChapterEditTarget;
     const url = kind === 'existing' ? editChapterExistingImages[index]?.image_url : editChapterNewFileUrls[index];
     if (!url) return;
-    let naturalWidth, naturalHeight;
-    try {
-      const probe = new Image();
-      probe.src = url;
-      await probe.decode();
-      naturalWidth = probe.naturalWidth;
-      naturalHeight = probe.naturalHeight;
-    } catch (e) {
-      notify('Алдаа: зургийг унших vед алдаа гарлаа.');
-      return;
-    }
-    const containerWidth = editChapterPreviewListRef.current?.clientWidth || naturalWidth;
-    const scaleY = naturalWidth / containerWidth;
-    const frameHeightPx = window.innerHeight * 0.6;
-    const cropHeight = Math.min(naturalHeight, Math.round(frameHeightPx * scaleY));
-    if (cropHeight >= naturalHeight) {
-      notify('Энэ зураг аль хэдийн хvрээндээ багтдаг тул тайрах шаардлагагvй.');
-      return;
-    }
-    const rect = { x: 0, y: 0, width: naturalWidth, height: cropHeight };
-    if (kind === 'new') {
+    setEditChapterCropActive(true);
+    setEditChapterCropPanY(0);
+    setEditChapterCropImgSize({ w: 0, h: 0 });
+    setEditChapterCropFrameWidth(0);
+    const probe = new Image();
+    probe.src = url;
+    probe.decode().then(() => {
+      setEditChapterCropImgSize({ w: probe.naturalWidth, h: probe.naturalHeight });
+    }).catch(() => {
+      notify('Зургийг унших vед алдаа гарлаа.');
+      setEditChapterCropActive(false);
+    });
+  };
+  const closeEditChapterCrop = () => {
+    setEditChapterCropActive(false);
+    setEditChapterCropPanY(0);
+  };
+
+  useEffect(() => {
+    if (!editChapterCropActive) return;
+    const frameEl = editChapterCropFrameRef.current;
+    if (frameEl) setEditChapterCropFrameWidth(frameEl.clientWidth);
+  }, [editChapterCropActive, editChapterEditTarget]);
+
+  const getEditChapterCropFullHeight = () => (
+    editChapterCropFrameWidth && editChapterCropImgSize.w && editChapterCropImgSize.h
+      ? editChapterCropFrameWidth * (editChapterCropImgSize.h / editChapterCropImgSize.w)
+      : 0
+  );
+
+  const startEditChapterCropPanDrag = (e) => {
+    e.preventDefault();
+    const frameEl = editChapterCropFrameRef.current;
+    if (!frameEl) return;
+    const fullHeight = getEditChapterCropFullHeight();
+    const frameHeight = frameEl.clientHeight;
+    if (fullHeight <= 0) return;
+    const minY = Math.min(0, frameHeight - fullHeight);
+    const point = e.touches ? e.touches[0] : e;
+    const startClientY = point.clientY;
+    const startPanY = editChapterCropPanY;
+
+    const onMove = (ev) => {
+      if (ev.touches) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      setEditChapterCropPanY(Math.min(0, Math.max(minY, startPanY + (p.clientY - startClientY))));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const confirmEditChapterCrop = async () => {
+    if (!editChapterEditTarget || editChapterEditBusy) return;
+    const frameEl = editChapterCropFrameRef.current;
+    if (!frameEl) return;
+    const fullHeight = getEditChapterCropFullHeight();
+    const frameHeight = frameEl.clientHeight;
+    if (fullHeight <= 0) { closeEditChapterCrop(); return; }
+    const scaleY = editChapterCropImgSize.h / fullHeight;
+    const rect = {
+      x: 0,
+      y: Math.round(-editChapterCropPanY * scaleY),
+      width: editChapterCropImgSize.w,
+      height: Math.round(Math.min(frameHeight, fullHeight) * scaleY),
+    };
+    rect.height = Math.min(rect.height, editChapterCropImgSize.h - rect.y);
+    if (editChapterEditTarget.kind === 'new') {
+      const idx = editChapterEditTarget.index;
       setEditChapterEditBusy(true);
       try {
-        const newFile = await cropImageFile(editChapterNewFiles[index], rect);
-        setEditChapterNewFiles(prev => prev.map((f, idx) => idx === index ? newFile : f));
+        const newFile = await cropImageFile(editChapterNewFiles[idx], rect);
+        setEditChapterNewFiles(prev => prev.map((f, i) => i === idx ? newFile : f));
         notify('Зураг тайрагдлаа ✂️');
+        closeEditChapterCrop();
       } catch (e) {
         notify('Алдаа: ' + e.message);
       }
@@ -236,6 +300,7 @@ export default function App() {
         const srcFile = new File([blob], `image.${(img.image_url.split('.').pop() || 'jpg').split('?')[0]}`, { type: blob.type });
         return cropImageFile(srcFile, rect);
       });
+      closeEditChapterCrop();
     }
   };
 
@@ -279,6 +344,19 @@ export default function App() {
   const [chapterEditIndex, setChapterEditIndex] = useState(null); // chapterFiles-ийн alь index засварлаж буй
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
   const [chapterCropBusy, setChapterCropBusy] = useState(false);
+  // ЗАСВАР #214 (хэрэглэгчийн хvсэлт): интерактив (чирдэг) тайрах хэрэгслийг
+  // дахин нэмэв — гэхдээ энгийн болгож: zoom vгvй (vргэлж 100%, бvтэн өргөн),
+  // зөвхөн дээшээ/доошоо чирж хvрээндээ харагдах хэсгээ сонгоно. Баталгаажуулах
+  // (crop-ыг хадгалах) нь дээд/доод захын том тэмдгvvд биш, ЗvvН ДЭЭД буланд
+  // байрлах НЭГ жижиг тэмдэг — vvн дээр дарахад л тэр зургийн crop хадгалагдана.
+  const [chapterCropActive, setChapterCropActive] = useState(false);
+  const [chapterCropPanY, setChapterCropPanY] = useState(0);
+  // Эх зургийн бодит хэмжээг (img.decode()-ээр найдвартай авсан) + frame-ийн
+  // бодит px өргөнийг ашиглаж, browser-ийн автомат тооцоонд vл найдаж өөрсдөө
+  // тооцоолно (өмнөх код шинжилгээгээр батлагдсан найдвартай арга).
+  const [chapterCropImgSize, setChapterCropImgSize] = useState({ w: 0, h: 0 });
+  const [chapterCropFrameWidth, setChapterCropFrameWidth] = useState(0);
+  const chapterCropFrameRef = useRef(null);
   // ЗАСВАР #118: URL.createObjectURL-ийг render болгонд шинээр үүсгэдэг байсан
   // memory leak-ийг засав — blob URL-уудыг файл өөрчлөгдөх үед л нэг удаа
   // үүсгэж, хуучныг нь revoke хийнэ.
@@ -290,7 +368,7 @@ export default function App() {
   }, [chapterFiles]);
 
   // ЗАСВАР #164: "БvТНЭЭР ХАРАХ" preview-с дарж нээгдэх per-image edit vйлдлvvд
-  const closeChapterEdit = () => { setChapterEditIndex(null); };
+  const closeChapterEdit = () => { setChapterEditIndex(null); setChapterCropActive(false); setChapterCropPanY(0); };
 
   const deleteChapterEditImage = () => {
     if (chapterEditIndex === null) return;
@@ -309,6 +387,10 @@ export default function App() {
       return arr;
     });
     setChapterEditIndex(newIndex);
+    // ЗАСВАР #211 (код шинжилгээ): зураг солиход crop горим ӨМНӨх зурган дээрээ
+    // идэвхтэй хэвээр vлдэж, шинэ зурган дээр буруу төлөвтэй харагддаг байсан.
+    setChapterCropActive(false);
+    setChapterCropPanY(0);
   };
 
   const chapterReplaceInputRef = useRef(null);
@@ -321,37 +403,100 @@ export default function App() {
     setChapterFiles(prev => prev.map((f, idx) => idx === chapterEditIndex ? file : f));
   };
 
-  // ЗАСВАР #213 (хэрэглэгчийн хvсэлт): чирэх/zoom-той интерактив тайрах хэрэгслийг
-  // (олон удаагийн шалгалтад тогтвортой ажиллуулж чадаагvй тул) бvрэн хассан —
-  // оронд нь "Тайрах" дарахад ЯГ ОДОО ХАРАГДАЖ БУЙ (жагсаалтын) хvрээгээр
-  // (60vh-тай тэнцvv харьцаагаар) шууд, дан ганц дарахад л тайрч, vлдсэн доод
-  // хэсгийг хаяна — нээх/чирэх/баталгаажуулах гэсэн дунд шат бvрэн vгvй.
-  const chapterPreviewListRef = useRef(null);
-  const applyChapterCrop = async () => {
-    if (chapterEditIndex === null || chapterCropBusy) return;
+  const openChapterCrop = () => {
+    if (chapterEditIndex === null) return;
     const idx = chapterEditIndex;
     const url = chapterFileUrls[idx];
     if (!url) return;
+    setChapterCropActive(true);
+    setChapterCropPanY(0);
+    setChapterCropImgSize({ w: 0, h: 0 });
+    setChapterCropFrameWidth(0);
+    // ЗАСВАР #212 (код шинжилгээ): харагдах <img>-ийн onLoad/complete-д vл
+    // найдаж, декодчлол баталгаатай дуусахыг ЗАДГАЙ хvлээдэг img.decode()
+    // ашиглан эх зургийн бодит хэмжээг тусад нь, найдвартай авна.
+    const probe = new Image();
+    probe.src = url;
+    probe.decode().then(() => {
+      setChapterCropImgSize({ w: probe.naturalWidth, h: probe.naturalHeight });
+    }).catch(() => {
+      notify('Зургийг унших vед алдаа гарлаа.');
+      setChapterCropActive(false);
+    });
+  };
+  const closeChapterCrop = () => {
+    setChapterCropActive(false);
+    setChapterCropPanY(0);
+  };
+
+  // Frame-ийн бодит px өргөнийг хэмжинэ (зурагнаас vл хамааран, зөвхөн эцэг
+  // элементийн CSS-ээс тодорхойлогддог тул шууд, найдвартай хэмжиж болно).
+  useEffect(() => {
+    if (!chapterCropActive) return;
+    const frameEl = chapterCropFrameRef.current;
+    if (frameEl) setChapterCropFrameWidth(frameEl.clientWidth);
+  }, [chapterCropActive, chapterEditIndex]);
+
+  const getChapterCropFullHeight = () => (
+    chapterCropFrameWidth && chapterCropImgSize.w && chapterCropImgSize.h
+      ? chapterCropFrameWidth * (chapterCropImgSize.h / chapterCropImgSize.w)
+      : 0
+  );
+
+  // Зургийг тогтмол (60vh) өндөртэй цонхны дотор дээшээ/доошоо чирнэ.
+  const startChapterCropPanDrag = (e) => {
+    e.preventDefault();
+    const frameEl = chapterCropFrameRef.current;
+    if (!frameEl) return;
+    const fullHeight = getChapterCropFullHeight();
+    const frameHeight = frameEl.clientHeight;
+    if (fullHeight <= 0) return; // зураг decode хийгдэж дуусаагvй байна
+    const minY = Math.min(0, frameHeight - fullHeight);
+    const point = e.touches ? e.touches[0] : e;
+    const startClientY = point.clientY;
+    const startPanY = chapterCropPanY;
+
+    const onMove = (ev) => {
+      if (ev.touches) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      setChapterCropPanY(Math.min(0, Math.max(minY, startPanY + (p.clientY - startClientY))));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  // ЗvvН ДЭЭД буланд байрлах жижиг тэмдэг дээр дарахад л тухайн зурагны crop
+  // хадгалагдана.
+  const confirmChapterCrop = async () => {
+    if (chapterEditIndex === null || chapterCropBusy) return;
+    const frameEl = chapterCropFrameRef.current;
+    if (!frameEl) return;
+    const fullHeight = getChapterCropFullHeight();
+    const frameHeight = frameEl.clientHeight;
+    if (fullHeight <= 0) { closeChapterCrop(); return; }
+    const scaleY = chapterCropImgSize.h / fullHeight;
+    const rect = {
+      x: 0,
+      y: Math.round(-chapterCropPanY * scaleY),
+      width: chapterCropImgSize.w,
+      height: Math.round(Math.min(frameHeight, fullHeight) * scaleY),
+    };
+    rect.height = Math.min(rect.height, chapterCropImgSize.h - rect.y);
+    const targetIndex = chapterEditIndex;
     setChapterCropBusy(true);
     try {
-      const probe = new Image();
-      probe.src = url;
-      await probe.decode();
-      const naturalWidth = probe.naturalWidth;
-      const naturalHeight = probe.naturalHeight;
-      const containerWidth = chapterPreviewListRef.current?.clientWidth || naturalWidth;
-      const scaleY = naturalWidth / containerWidth;
-      const frameHeightPx = window.innerHeight * 0.6;
-      const cropHeight = Math.min(naturalHeight, Math.round(frameHeightPx * scaleY));
-      if (cropHeight >= naturalHeight) {
-        notify('Энэ зураг аль хэдийн хvрээндээ багтдаг тул тайрах шаардлагагvй.');
-        setChapterCropBusy(false);
-        return;
-      }
-      const rect = { x: 0, y: 0, width: naturalWidth, height: cropHeight };
-      const newFile = await cropImageFile(chapterFiles[idx], rect);
-      setChapterFiles(prev => prev.map((f, i) => i === idx ? newFile : f));
+      const newFile = await cropImageFile(chapterFiles[targetIndex], rect);
+      setChapterFiles(prev => prev.map((f, idx) => idx === targetIndex ? newFile : f));
       notify('Зураг тайрагдлаа ✂️');
+      closeChapterCrop();
     } catch (e) {
       notify('Алдаа: ' + e.message);
     }
@@ -2297,7 +2442,16 @@ export default function App() {
                 {notifOpen && (
                   <>
                     <div onClick={() => setNotifOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 290 }} />
-                    <div style={{ position: 'absolute', top: '130%', right: 0, width: 320, maxWidth: '90vw', maxHeight: 420, overflowY: 'auto', background: '#141414', border: '1px solid #2a2a2a', borderRadius: 12, zIndex: 291, boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
+                    {/* ЗАСВАР #215 (хэрэглэгчийн хvсэлт): утасны (ялангуяа staff-ийн
+                        "АДМИН/УДИРДЛАГА" товчтой хамт шахагдсан) нарийн дэлгэцэнд хонхны
+                        байрлалаас vндэслэсэн (position:absolute, right:0) цонх дэлгэцний
+                        ирмэгээс гарч, "талан л" харагддаг байсан тул утсанд дэлгэцийн
+                        голд (position:fixed) бvтнээр нь харагдахаар тусад нь байрлуулав. */}
+                    <div style={isMobile ? {
+                      position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', width: '92vw', maxWidth: 380, maxHeight: '70vh', overflowY: 'auto', background: '#141414', border: '1px solid #2a2a2a', borderRadius: 12, zIndex: 291, boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                    } : {
+                      position: 'absolute', top: '130%', right: 0, width: 320, maxWidth: '90vw', maxHeight: 420, overflowY: 'auto', background: '#141414', border: '1px solid #2a2a2a', borderRadius: 12, zIndex: 291, boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                    }}>
                       <div style={{ padding: '12px 14px', borderBottom: '1px solid #222', fontWeight: 700, fontSize: 13 }}>
                         {isStaff ? 'ШИНЭ СЭТГЭГДЭЛ' : 'МИНИЙ МЭДЭГДЭЛ'}
                       </div>
@@ -4873,6 +5027,28 @@ export default function App() {
               <div ref={chapterPreviewListRef} style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
                 {chapterFiles.map((file, i) => {
                   const isSelected = chapterEditIndex === i;
+                  if (isSelected && chapterCropActive) {
+                    return (
+                      <div key={i} ref={chapterCropFrameRef} onPointerDown={startChapterCropPanDrag}
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                        <img src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
+                          style={{
+                            position: 'absolute', left: 0, top: chapterCropPanY, opacity: chapterCropBusy ? 0.4 : 1,
+                            ...(chapterCropFrameWidth && chapterCropImgSize.w && chapterCropImgSize.h ? {
+                              width: `${chapterCropFrameWidth}px`,
+                              height: `${chapterCropFrameWidth * (chapterCropImgSize.h / chapterCropImgSize.w)}px`,
+                            } : { width: '100%' }),
+                          }} />
+                        {/* ЗvvН ДЭЭД буланд байрлах жижиг тэмдэг — vvн дээр дарахад л ЭНЭ
+                            зурагны тайралт хадгалагдана (хэрэглэгчийн хvсэлтээр дээд/доод
+                            захын том тэмдгvvдийг зvvн дээд буланд байрлах ганц тэмдгээр сольсон). */}
+                        <span onClick={confirmChapterCrop} title="Энэ тайралтыг хадгалах"
+                          style={{ position: 'absolute', left: 8, top: 8, zIndex: 3, background: '#f5a623', color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+                          <IconCheck size={16} color="#000" />
+                        </span>
+                      </div>
+                    );
+                  }
                   if (isSelected) {
                     return (
                       <div key={i} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
@@ -4881,7 +5057,11 @@ export default function App() {
                     );
                   }
                   return (
-                    <div key={i} onClick={() => setChapterEditIndex(i)} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <div key={i} onClick={() => {
+                      setChapterEditIndex(i);
+                      setChapterCropActive(false);
+                      setChapterCropPanY(0);
+                    }} style={{ position: 'relative', cursor: 'pointer' }}>
                       <img src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -4915,8 +5095,8 @@ export default function App() {
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     <IconTrash />
                   </button>
-                  <button disabled={chapterCropBusy} onClick={applyChapterCrop} title="Тайрах (хvрээгээр)"
-                    style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: chapterCropBusy ? 'wait' : 'pointer' }}>
+                  <button disabled={chapterCropBusy} onClick={chapterCropActive ? closeChapterCrop : openChapterCrop} title={chapterCropActive ? 'Цуцлах' : 'Тайрах'}
+                    style={{ width: 38, height: 38, borderRadius: 8, border: chapterCropActive ? '1px solid #f5a623' : '1px solid #2a2a2a', background: chapterCropActive ? 'rgba(245,166,35,0.15)' : '#1a1a1a', color: chapterCropActive ? '#f5a623' : '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: chapterCropBusy ? 'wait' : 'pointer' }}>
                     <IconCrop />
                   </button>
                   <button disabled={chapterEditBusy} onClick={() => { setChapterPreviewOpen(false); closeChapterEdit(); }}
@@ -5407,6 +5587,25 @@ export default function App() {
                     2 өөр DB мөрийг нэгтгэх/дараалал өөрчлөх нэмэлт логик шаардана). */}
                 {editChapterExistingImages.map((img, i) => {
                   const isSelected = editChapterEditTarget?.kind === 'existing' && editChapterEditTarget.index === i;
+                  if (isSelected && editChapterCropActive) {
+                    return (
+                      <div key={img.id} ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                        <img src={img.image_url} alt={`${i + 1}`} draggable={false}
+                          style={{
+                            position: 'absolute', left: 0, top: editChapterCropPanY, opacity: editChapterEditBusy ? 0.4 : 1,
+                            ...(editChapterCropFrameWidth && editChapterCropImgSize.w && editChapterCropImgSize.h ? {
+                              width: `${editChapterCropFrameWidth}px`,
+                              height: `${editChapterCropFrameWidth * (editChapterCropImgSize.h / editChapterCropImgSize.w)}px`,
+                            } : { width: '100%' }),
+                          }} />
+                        <span onClick={confirmEditChapterCrop} title="Энэ тайралтыг хадгалах"
+                          style={{ position: 'absolute', left: 8, top: 8, zIndex: 3, background: '#f5a623', color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+                          <IconCheck size={16} color="#000" />
+                        </span>
+                      </div>
+                    );
+                  }
                   if (isSelected) {
                     return (
                       <div key={img.id} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
@@ -5415,7 +5614,11 @@ export default function App() {
                     );
                   }
                   return (
-                    <div key={img.id} onClick={() => setEditChapterEditTarget({ kind: 'existing', index: i })} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <div key={img.id} onClick={() => {
+                      setEditChapterEditTarget({ kind: 'existing', index: i });
+                      setEditChapterCropActive(false);
+                      setEditChapterCropPanY(0);
+                    }} style={{ position: 'relative', cursor: 'pointer' }}>
                       <img src={img.image_url} alt={`${i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -5426,6 +5629,25 @@ export default function App() {
                 })}
                 {editChapterNewFiles.map((file, i) => {
                   const isSelected = editChapterEditTarget?.kind === 'new' && editChapterEditTarget.index === i;
+                  if (isSelected && editChapterCropActive) {
+                    return (
+                      <div key={`new${i}`} ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
+                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                        <img src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
+                          style={{
+                            position: 'absolute', left: 0, top: editChapterCropPanY, opacity: editChapterEditBusy ? 0.4 : 1,
+                            ...(editChapterCropFrameWidth && editChapterCropImgSize.w && editChapterCropImgSize.h ? {
+                              width: `${editChapterCropFrameWidth}px`,
+                              height: `${editChapterCropFrameWidth * (editChapterCropImgSize.h / editChapterCropImgSize.w)}px`,
+                            } : { width: '100%' }),
+                          }} />
+                        <span onClick={confirmEditChapterCrop} title="Энэ тайралтыг хадгалах"
+                          style={{ position: 'absolute', left: 8, top: 8, zIndex: 3, background: '#f5a623', color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+                          <IconCheck size={16} color="#000" />
+                        </span>
+                      </div>
+                    );
+                  }
                   if (isSelected) {
                     return (
                       <div key={`new${i}`} style={{ position: 'relative', zIndex: 2, border: '3px solid #f5a623', boxSizing: 'border-box' }}>
@@ -5434,7 +5656,11 @@ export default function App() {
                     );
                   }
                   return (
-                    <div key={`new${i}`} onClick={() => setEditChapterEditTarget({ kind: 'new', index: i })} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <div key={`new${i}`} onClick={() => {
+                      setEditChapterEditTarget({ kind: 'new', index: i });
+                      setEditChapterCropActive(false);
+                      setEditChapterCropPanY(0);
+                    }} style={{ position: 'relative', cursor: 'pointer' }}>
                       <img src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -5476,8 +5702,8 @@ export default function App() {
                     style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #8B0000', background: 'rgba(139,0,0,0.15)', color: '#ff6b6b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                     <IconTrash />
                   </button>
-                  <button disabled={editChapterEditBusy} onClick={applyEditChapterCrop} title="Тайрах (хvрээгээр)"
-                    style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: editChapterEditBusy ? 'wait' : 'pointer' }}>
+                  <button disabled={editChapterEditBusy} onClick={editChapterCropActive ? closeEditChapterCrop : openEditChapterCrop} title={editChapterCropActive ? 'Цуцлах' : 'Тайрах'}
+                    style={{ width: 38, height: 38, borderRadius: 8, border: editChapterCropActive ? '1px solid #f5a623' : '1px solid #2a2a2a', background: editChapterCropActive ? 'rgba(245,166,35,0.15)' : '#1a1a1a', color: editChapterCropActive ? '#f5a623' : '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: editChapterEditBusy ? 'wait' : 'pointer' }}>
                     <IconCrop />
                   </button>
                   <button disabled={editChapterEditBusy} onClick={() => { setEditChapterPreviewOpen(false); closeEditChapterEditor(); }}
