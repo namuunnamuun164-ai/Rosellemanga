@@ -5041,7 +5041,7 @@ export default function App() {
                         {/* ЗvvН ДЭЭД буланд байрлах жижиг тэмдэг — vvн дээр дарахад л ЭНЭ
                             зурагны тайралт хадгалагдана (хэрэглэгчийн хvсэлтээр дээд/доод
                             захын том тэмдгvvдийг зvvн дээд буланд байрлах ганц тэмдгээр сольсон). */}
-                        <span onClick={confirmChapterCrop} title="Энэ тайралтыг хадгалах"
+                        <span onPointerDown={e => e.stopPropagation()} onClick={confirmChapterCrop} title="Энэ тайралтыг хадгалах"
                           style={{ position: 'absolute', left: 8, top: 8, zIndex: 3, background: '#f5a623', color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
                           <IconCheck size={16} color="#000" />
                         </span>
@@ -5598,7 +5598,7 @@ export default function App() {
                               height: `${editChapterCropFrameWidth * (editChapterCropImgSize.h / editChapterCropImgSize.w)}px`,
                             } : { width: '100%' }),
                           }} />
-                        <span onClick={confirmEditChapterCrop} title="Энэ тайралтыг хадгалах"
+                        <span onPointerDown={e => e.stopPropagation()} onClick={confirmEditChapterCrop} title="Энэ тайралтыг хадгалах"
                           style={{ position: 'absolute', left: 8, top: 8, zIndex: 3, background: '#f5a623', color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
                           <IconCheck size={16} color="#000" />
                         </span>
@@ -5640,7 +5640,7 @@ export default function App() {
                               height: `${editChapterCropFrameWidth * (editChapterCropImgSize.h / editChapterCropImgSize.w)}px`,
                             } : { width: '100%' }),
                           }} />
-                        <span onClick={confirmEditChapterCrop} title="Энэ тайралтыг хадгалах"
+                        <span onPointerDown={e => e.stopPropagation()} onClick={confirmEditChapterCrop} title="Энэ тайралтыг хадгалах"
                           style={{ position: 'absolute', left: 8, top: 8, zIndex: 3, background: '#f5a623', color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
                           <IconCheck size={16} color="#000" />
                         </span>
