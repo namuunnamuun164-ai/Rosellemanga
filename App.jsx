@@ -220,6 +220,16 @@ export default function App() {
     setEditChapterCropZoom(1);
   };
 
+  // ЗАСВАР #208: chapterCropImgSize-тэй адил шалтгаанаар (кэшлэгдсэн blob:
+  // зурагны onLoad race) crop горим нээгдэх бvрт img.complete-ийг шууд шалгана.
+  useEffect(() => {
+    if (!editChapterCropOpen) return;
+    const imgEl = editChapterCropImgRef.current;
+    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+      setEditChapterCropImgSize({ w: imgEl.naturalWidth, h: imgEl.naturalHeight });
+    }
+  }, [editChapterCropOpen, editChapterEditTarget]);
+
   const startEditChapterCropPanDrag = (e) => {
     e.preventDefault();
     const imgEl = editChapterCropImgRef.current;
@@ -415,6 +425,24 @@ export default function App() {
     setChapterCropPanY(0);
     setChapterCropZoom(1);
   };
+
+  // ЗАСВАР #208 (код шинжилгээ): онLoad дан ганцаараа хvрэлцэхгvй байсан —
+  // энэ зураг (blob: URL) өмнө нь (сонгоход) аль хэдийн ачаалагдаж
+  // browser-ийн кэшид байгаа тохиолдолд, "Тайрах" горимд шинэ <img> элемент
+  // vvсэхэд browser load эвентийг РЕАКТ-ийн listener бэхлэгдэхээс ӨМНӨ (эсвэл
+  // яг тэр мөчид) шидэж, onLoad callback тохиолдол алгасагддаг байв (blob:
+  // URL-ийн хувьд сvлжээгvй тул ялангуяа хурдан тохиолддог race). Vvнээс
+  // vvдэн naturalWidth/Height хэзээ ч тавигдахгvй, aspect-ratio хэрэгжихгvй
+  // vлдэж, өмнөх зассан ч гэсэн ажиллахгvй хэвээр байв. Тиймээс crop горим
+  // нээгдэх бvрт img.complete-ийг шууд шалгаж, аль хэдийн ачаалагдсан бол
+  // onLoad-ыг хvлээхгvйгээр шууд утгыг нь авна.
+  useEffect(() => {
+    if (!chapterCropActive) return;
+    const imgEl = chapterCropImgRef.current;
+    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+      setChapterCropImgSize({ w: imgEl.naturalWidth, h: imgEl.naturalHeight });
+    }
+  }, [chapterCropActive, chapterEditIndex]);
 
   // ЗАСВАР #173: зургийг тогтмол (дэлгэцийн бvх өндөртэй) цонхны дотор
   // дээшээ/доошоо чирнэ.

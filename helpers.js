@@ -177,8 +177,18 @@ export const optimizeImageFile = async (file, maxWidth = 1200, quality = 0.85) =
   bitmap.close?.();
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
   if (!blob) throw new Error('Зургийг шахахад алдаа гарлаа (санах ой хvрэлцэхгvй байж магадгvй).');
+  // ЗАСВАР #209 (код шинжилгээ): Safari (ялангуяа iOS) canvas.toBlob-д
+  // "image/webp" хvсэхэд ЖИНХЭНЭ webp гаргадаггvй — чимээгvйгээр PNG рvv
+  // "буцдаг" (fallback хийдэг) боловч бид vvнийг мэдэхгvйгээр File-ыг
+  // хvчээр type:'image/webp' гэж шошголдог байсан тул бодит байт (PNG)
+  // болон мэдvvлсэн төрөл (webp) зөрчилдөж, сервер талын magic-byte шалгалт
+  // (ЗАСВАР #181) "Файлын агуулга мэдvvлсэн төрөлтэйгээ тохирохгvй байна"
+  // гэж татгалздаг байв — зөвхөн утсан дээр (Safari) л гардаг байсны учир
+  // энэ байв. Одоо browser-ийн БОДИТООР vvсгэсэн blob.type-ыг ашиглана.
+  const actualType = blob.type || 'image/jpeg';
+  const ext = actualType === 'image/webp' ? 'webp' : actualType === 'image/png' ? 'png' : 'jpg';
   const baseName = file.name.replace(/\.[^.]+$/, '');
-  return new File([blob], `${baseName}.webp`, { type: 'image/webp' });
+  return new File([blob], `${baseName}.${ext}`, { type: actualType });
 };
 
 // ЗАСВАР #173: зургийг өгөгдсөн тэгш өнцөгт хэсгээр нь таслана. rect нь эх
