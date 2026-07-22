@@ -533,6 +533,10 @@ export default function App() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState('');
+  // ШИНЭ: мэдэгдлээс бvлэг/манга руу шилжихэд сэтгэгдлийн хэсэг рvv доош гvйлгэх (scroll)
+  const chapterCommentsRef = useRef(null);
+  const mangaCommentsRef = useRef(null);
+  const [pendingScrollToComments, setPendingScrollToComments] = useState(false);
   // ЗАСВАР #108: сэтгэгдэлд хавсаргах сонгосон стикер, upload хийж буй slot
   const [selectedSticker, setSelectedSticker] = useState(null);
   const [stickerUploading, setStickerUploading] = useState(null);
@@ -1287,7 +1291,7 @@ export default function App() {
     let cancelled = false;
     const fetchActivity = () => {
       supabase.from('comments')
-        .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, mangas(id, title)), mangas(id, title)')
+        .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title)')
         .order('created_at', { ascending: false })
         .limit(30)
         .then(async ({ data, error }) => {
@@ -1317,11 +1321,11 @@ export default function App() {
 
       const [repliesRes, likesRes] = await Promise.all([
         supabase.from('comments')
-          .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, mangas(id, title)), mangas(id, title)')
+          .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title)')
           .in('parent_id', ownIds).neq('user_id', currentUser.id)
           .order('created_at', { ascending: false }).limit(20),
         supabase.from('comment_likes')
-          .select('comment_id, user_id, created_at, comments!comment_id(content, chapter_id, manga_id, chapters(chapter_number, manga_id, mangas(id, title)), mangas(id, title))')
+          .select('comment_id, user_id, created_at, comments!comment_id(content, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title))')
           .in('comment_id', ownIds).neq('user_id', currentUser.id)
           .order('created_at', { ascending: false }).limit(20),
       ]);
@@ -1372,14 +1376,52 @@ export default function App() {
     });
   };
 
-  // Мэдэгдэл дээр дарахад тухайн сэтгэгдэл байрлах манга руу шилжvvлнэ
+  // ЗАСВАР #201 (хэрэглэгчийн хvсэлт): мэдэгдэл дээр дарахад зөвхөн манганы
+  // дэлгэрэнгvй хуудас руу орчихдог байсныг засав — одоо бvлгийн сэтгэгдэл бол
+  // ШУУД тухайн бvлгийг (унших хэсэгт) нээж, сэтгэгдлийн хэсэг рvv хvргэнэ;
+  // манганы ерөнхий сэтгэгдэл бол дэлгэрэнгvй хуудасны "vнэлгээ+сэтгэгдэл" tab-ыг
+  // шууд нээнэ.
   const goToNotification = (item) => {
     setNotifOpen(false);
-    const mangaId = item.chapter_id ? item.chapters?.manga_id : item.manga_id;
-    const manga = dbMangas.find(m => m.id === mangaId);
-    if (!manga) { notify('Манга олдсонгvй (устсан байж магадгvй).'); return; }
-    goToDetail(manga);
+    if (item.chapter_id) {
+      const mangaId = item.chapters?.manga_id;
+      const manga = dbMangas.find(m => m.id === mangaId);
+      if (!manga || !item.chapters) { notify('Бvлэг олдсонгvй (устсан байж магадгvй).'); return; }
+      openReader(manga, {
+        id: item.chapter_id,
+        manga_id: item.chapters.manga_id,
+        chapter_number: item.chapters.chapter_number,
+        is_vip: item.chapters.is_vip,
+        status: item.chapters.status,
+        is_hidden: item.chapters.is_hidden,
+        pending_delete: item.chapters.pending_delete,
+        publish_at: item.chapters.publish_at,
+        created_at: item.chapters.created_at,
+        thumbnail_url: item.chapters.thumbnail_url,
+      });
+      setPendingScrollToComments(true);
+    } else {
+      const manga = dbMangas.find(m => m.id === item.manga_id);
+      if (!manga) { notify('Манга олдсонгvй (устсан байж магадгvй).'); return; }
+      goToDetail(manga);
+      setDetailTab('rating');
+      setPendingScrollToComments(true);
+    }
   };
+
+  // ЗАСВАР #201: pendingScrollToComments идэвхжсэн vед, тухайн хуудас (reader
+  // эсвэл detail-ийн rating tab) бодитоор DOM-д харагдмагц сэтгэгдлийн хэсэг рvv
+  // гvйлгэнэ (жижиг хугацаа хойшлуулж, layout бvрэн тогтворжихыг хvлээнэ).
+  useEffect(() => {
+    if (!pendingScrollToComments) return;
+    const ref = page === 'reader' ? chapterCommentsRef : page === 'detail' ? mangaCommentsRef : null;
+    if (!ref) { setPendingScrollToComments(false); return; }
+    const t = setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setPendingScrollToComments(false);
+    }, 200);
+    return () => clearTimeout(t);
+  }, [page, selectedChapter, pendingScrollToComments]);
 
   // ШИНЭ: сэтгэгдэл татах (нэр, avatar, like-ийн тоотой хамт)
   // isCancelled — өмнөх бүлгийн хүсэлт хожуу ирвэл state дарж бичихээс сэргийлэх (заавал биш)
@@ -3186,7 +3228,7 @@ export default function App() {
                     })()}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.25rem' }}>
+                  <div ref={mangaCommentsRef} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.25rem' }}>
                     <div style={{ width: 4, height: 18, background: '#8B0000', borderRadius: 2 }} />
                     <span style={{ fontWeight: 800, fontSize: 15 }}>СЭТГЭГДЭЛ ({mangaComments.length})</span>
                   </div>
@@ -3523,7 +3565,7 @@ export default function App() {
 
             {/* ШИНЭ: СЭТГЭГДЛИЙН ХЭСЭГ — ЗАСВАР #88: гар утсан дэлгэц дээр 100%
                 өргөнд зөв багтаах хажуугийн зай + арай эмхэтгэн жижигрүүлсэн хэмжээ */}
-            <div style={{ marginTop: '2.5rem', borderTop: '1px solid #1a1a1a', padding: '1.5rem 1rem 0', boxSizing: 'border-box' }}>
+            <div ref={chapterCommentsRef} style={{ marginTop: '2.5rem', borderTop: '1px solid #1a1a1a', padding: '1.5rem 1rem 0', boxSizing: 'border-box' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
                 <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
                 <span style={{ fontWeight: 800, fontSize: 13 }}>СЭТГЭГДЭЛ ({comments.length})</span>
