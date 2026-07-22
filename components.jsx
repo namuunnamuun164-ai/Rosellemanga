@@ -25,8 +25,13 @@ export const MangaCard = ({ m, showChapter, history, onOpen }) => (
   <div onClick={() => onOpen(m)} role="button" tabIndex={0}
     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m); } }}
     style={{ cursor: 'pointer', position: 'relative' }}>
-    <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
-      <img src={m.poster} alt={m.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4', background: '#141414' }}>
+      {/* ЗАСВАР #205 (хэрэглэгчийн хvсэлт): олон poster зэрэг ачаалагдахад нэг нэгээрээ
+          "цувран" гэнэт гарч ирдэг (pop-in) нь эмх замбараагvй харагддаг байсан —
+          сааралхан placeholder дэвсгэр дээр зөөлөн opacity fade-ин хийж, илvv цэгцтэй болгов. */}
+      <img src={m.poster} alt={m.title} loading="eager" decoding="async"
+        onLoad={e => { e.currentTarget.style.opacity = 1; }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0, transition: 'opacity 0.3s ease' }} />
       {showChapter && history.find(h => h.mangaId === m.id) && (
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.8)', padding: '6px 8px', fontSize: 11, color: '#aaa' }}>
           Бүлэг {history.find(h => h.mangaId === m.id).chapter}

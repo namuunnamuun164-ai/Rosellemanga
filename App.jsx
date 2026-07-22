@@ -1058,6 +1058,31 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, [fetchProfile]);
 
+  // ЗАСВАР #206 (хэрэглэгчийн хvсэлт): утасны browser (Safari/Chrome) tab-ыг
+  // удаан хугацаагаар background-д байлгахад JS timer царцдаг тул supabase-js-ийн
+  // автомат token-refresh цагтаа ажиллахгvй vлдэж, хэрэглэгч буцаж ороход session
+  // хугацаа дууссан мэт (дахин нэвтрэх шаардлагатай мэт) харагддаг байв. Tab
+  // дахин "visible" болох бvрт session-ийг шинээр шалгаж (шаардлагатай бол
+  // supabase-js өөрөө автоматаар refresh хийдэг) currentUser/profile-г
+  // тэрхvv жинхэнэ төлөвтэй нь синк хийнэ.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          setCurrentUser(session.user);
+          fetchProfile(session.user.id);
+        } else {
+          setCurrentUser(null);
+          setUserRoles([]);
+          setUserProfile(null);
+        }
+      });
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [fetchProfile]);
+
   // ЗАСВАР #99: URL routing — хуудас бүр өөрийн URL-тэй болгож, browser-ийн
   // native буцах/урагшаа товч (мөн refresh) зөв ажилладаг болгов. Өмнө нь
   // бүх навигац зөвхөн React state-ээр (URL хэзээ ч солигдохгvй) хийгддэг
@@ -2621,8 +2646,10 @@ export default function App() {
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url, genres: ch.mangas.genres || [] }, ch)}
                         style={{ ...scrollCardStyle, cursor: 'pointer' }}>
-                        <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
-                          <img src={ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4', background: '#141414' }}>
+                          <img src={ch.mangas?.poster_url} alt="" loading="eager" decoding="async"
+                            onLoad={e => { e.currentTarget.style.opacity = 1; }}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0, transition: 'opacity 0.3s ease' }} />
                           <div style={{ position: 'absolute', top: 6, left: 6, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>Бүлэг {ch.chapter_number}</div>
                         </div>
                         <div style={{ padding: '6px 2px' }}>
@@ -2749,8 +2776,10 @@ export default function App() {
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url, genres: ch.mangas.genres || [] }, ch)}
                         style={{ cursor: 'pointer' }}>
-                        <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4' }}>
-                          <img src={ch.mangas?.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4', background: '#141414' }}>
+                          <img src={ch.mangas?.poster_url} alt="" loading="eager" decoding="async"
+                            onLoad={e => { e.currentTarget.style.opacity = 1; }}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0, transition: 'opacity 0.3s ease' }} />
                           <div style={{ position: 'absolute', top: 6, left: 6, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>Бүлэг {ch.chapter_number}</div>
                         </div>
                         <div style={{ padding: '6px 2px' }}>
