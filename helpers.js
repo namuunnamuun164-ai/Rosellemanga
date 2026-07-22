@@ -215,6 +215,18 @@ export const cropImageFile = async (file, rect) => {
   return new File([blob], file.name, { type: mimeType });
 };
 
+// ЗАСВАР #223 (код шинжилгээ): upload хийхийн ӨМНӨ (эсвэл дараа) эцсийн файлын
+// бодит width/height-ийг chapter_images-д хадгалж, уншигчийн хуудсанд aspect-ratio
+// болгож ашиглана — vvнгvй бол lazy зураг ачаалагдах бvрт доорх агуулга vсэрдэг
+// (CLS) байсан. Энд дамжуулагдах file нь аль хэдийн optimizeImageFile/
+// splitTallImageFile-ээр багасгагдсан жижиг хэсэг тул decode хямд, аюулгvй.
+export const getImageDimensions = async (file) => {
+  const bitmap = await createImageBitmap(file);
+  const dims = { width: bitmap.width, height: bitmap.height };
+  bitmap.close?.();
+  return dims;
+};
+
 // ЗАСВАР #146: "цаг:минут:секунд" (жишээ нь 12:15:28) маягийн цэвэрхэн тоон
 // countdown формат — хуваарийн хуудсанд секунд тутам шинэчлэгдэж харагдана
 export const formatCountdownClock = (ms) => {

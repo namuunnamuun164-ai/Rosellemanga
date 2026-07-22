@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, getImageDimensions } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
 import { PasswordField } from './PasswordField';
 import { Avatar, MangaCard, SectionHeader } from './components';
@@ -174,7 +174,11 @@ export default function App() {
       // ЗАСВАР #194 (код шинжилгээ): Date.now() бол дараалсан/таамаглаж болохуйц
       // тул crypto.randomUUID() болгов — доорх бусад chapters/ upload-той адил шалтгаан.
       const newUrl = await uploadToR2(newFile, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
-      const { error } = await supabase.from('chapter_images').update({ image_url: newUrl }).eq('id', img.id);
+      // ЗАСВАР #223 (код шинжилгээ): зургийг сольсны дараа хэмжээ нь өөрчлөгдсөн
+      // байж болох тул (тайрах гэх мэт) хадгалсан width/height-ыг ч шинэчилнэ.
+      let dims = null;
+      try { dims = await getImageDimensions(newFile); } catch { /* хэмжээ дутуу vлдвэл ч зураг хадгалагдана */ }
+      const { error } = await supabase.from('chapter_images').update({ image_url: newUrl, width: dims?.width || null, height: dims?.height || null }).eq('id', img.id);
       if (error) { notify('Алдаа: ' + error.message); setEditChapterEditBusy(false); return; }
       setEditChapterExistingImages(prev => prev.map((it, idx) => idx === editChapterEditTarget.index ? { ...it, image_url: newUrl } : it));
       try { await deleteFromR2([img.image_url]); } catch { /* хор хөнөөлгvй */ }
@@ -325,7 +329,7 @@ export default function App() {
     setEditChapterCoverFile(null);
     setEditChapterNewFiles([]);
     setEditChapter(ch);
-    supabase.from('chapter_images').select('id, chapter_id, image_url, page_number').eq('chapter_id', ch.id).order('page_number')
+    supabase.from('chapter_images').select('id, chapter_id, image_url, page_number, width, height').eq('chapter_id', ch.id).order('page_number')
       .then(({ data }) => {
         setEditChapterExistingImages(data || []);
         editChapterInitialImages.current = data || [];
@@ -1007,14 +1011,19 @@ export default function App() {
     if (resendCooldown > 0 || resetSending) return;
     if (!authForm.email.trim()) { notify('Имэйлээ оруулна уу!'); return; }
     setResetSending(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(authForm.email.trim());
-    setResetSending(false);
-    if (error) { notify('Алдаа: ' + error.message); return; }
-    setResetCode('');
-    setResetNewPassword('');
-    setAuthPage('reset');
-    setResendCooldown(30); // ЗАСВАР #40: дахин илгээхэд 30 секундын хүлээлт
-    notify('Танд 8 оронтой баталгаажуулах код имэйлээр илгээгдлээ 📧');
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(authForm.email.trim());
+      if (error) { notify('Алдаа: ' + error.message); return; }
+      setResetCode('');
+      setResetNewPassword('');
+      setAuthPage('reset');
+      setResendCooldown(30); // ЗАСВАР #40: дахин илгээхэд 30 секундын хүлээлт
+      notify('Танд 8 оронтой баталгаажуулах код имэйлээр илгээгдлээ 📧');
+    } catch (err) {
+      notify('Алдаа: ' + err.message);
+    } finally {
+      setResetSending(false);
+    }
   };
 
   // Дахин илгээх хүлээлтийн секундыг 1 секунд тутам бууруулна
@@ -1029,19 +1038,24 @@ export default function App() {
     if (resetCode.trim().length !== 8) { notify('8 оронтой кодоо бүрэн оруулна уу!'); return; }
     if (resetNewPassword.length < 6) { notify('Шинэ нууц үг 6-с дээш тэмдэгттэй байх ёстой!'); return; }
     setResetSending(true);
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email: authForm.email.trim(),
-      token: resetCode.trim(),
-      type: 'recovery',
-    });
-    if (verifyError) { setResetSending(false); notify('Алдаа: ' + verifyError.message); return; }
-    const { error: updateError } = await supabase.auth.updateUser({ password: resetNewPassword });
-    setResetSending(false);
-    if (updateError) { notify('Алдаа: ' + updateError.message); return; }
-    notify('Нууц үг амжилттай солигдлоо! Одоо шинэ нууц үгээрээ нэвтэрнэ үү 🎉');
-    setResetCode('');
-    setResetNewPassword('');
-    setAuthPage('login');
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: authForm.email.trim(),
+        token: resetCode.trim(),
+        type: 'recovery',
+      });
+      if (verifyError) { notify('Алдаа: ' + verifyError.message); return; }
+      const { error: updateError } = await supabase.auth.updateUser({ password: resetNewPassword });
+      if (updateError) { notify('Алдаа: ' + updateError.message); return; }
+      notify('Нууц үг амжилттай солигдлоо! Одоо шинэ нууц үгээрээ нэвтэрнэ үү 🎉');
+      setResetCode('');
+      setResetNewPassword('');
+      setAuthPage('login');
+    } catch (err) {
+      notify('Алдаа: ' + err.message);
+    } finally {
+      setResetSending(false);
+    }
   };
 
   // ЗАСВАР #182 (код шинжилгээ): анхны deep-link сэргээлт (доор, dbMangas
@@ -1329,7 +1343,7 @@ export default function App() {
     // шинэ бүлгийн дээр буухаас сэргийлнэ.
     let cancelled = false;
     setChapterImages([]); // өмнөх бүлгийн зураг түр харагдахаас сэргийлнэ
-    supabase.from('chapter_images').select('id, chapter_id, image_url, page_number').eq('chapter_id', selectedChapter.id).order('page_number')
+    supabase.from('chapter_images').select('id, chapter_id, image_url, page_number, width, height').eq('chapter_id', selectedChapter.id).order('page_number')
       .then(({ data }) => {
         if (cancelled || !data) return;
         setChapterImages(data);
@@ -1393,6 +1407,11 @@ export default function App() {
     if (!isStaff) return;
     let cancelled = false;
     const fetchActivity = () => {
+      // ЗАСВАР #222 (код шинжилгээ): таб/апп ард нуугдсан vед (visibilityState
+      // !== 'visible') 30 секунд тутам дэмий query явуулж дата/батарей
+      // зарцуулахгvй байхын тулд алгасна — дэлгэц дээр буцаж ирэхэд дараагийн
+      // 30 секундийн tick дээр л дахин татна.
+      if (document.visibilityState !== 'visible') return;
       supabase.from('comments')
         .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title)')
         .order('created_at', { ascending: false })
@@ -1415,6 +1434,9 @@ export default function App() {
     if (!currentUser || isStaff) return;
     let cancelled = false;
     const fetchPersonal = async () => {
+      // ЗАСВАР #222 (код шинжилгээ): дээрх fetchActivity-тэй адил, таб ард
+      // нуугдсан vед дэмий query явуулахгvй.
+      if (document.visibilityState !== 'visible') return;
       // 1) миний сvvлийн 50 сэтгэгдлийн id — reply/like-ийн эх (query-г хязгаарлана)
       const { data: ownComments } = await supabase.from('comments')
         .select('id').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(50);
@@ -1598,29 +1620,34 @@ export default function App() {
     const text = (textOverride !== null ? textOverride : commentText).trim();
     if (!text && !selectedSticker) return;
     setCommentSending(true);
-    const { error } = await supabase.from('comments').insert({
-      chapter_id: selectedChapter.id,
-      user_id: currentUser.id,
-      content: text,
-      parent_id: parentId,
-      sticker_url: parentId ? null : selectedSticker,
-    });
-    setCommentSending(false);
-    if (error) {
-      // ЗАСВАР #185 (код шинжилгээ): сервер тал одоо rate-limit-ийг тусдаа
-      // ('rate_limited') алдаагаар ялгаж буцаадаг болсон тул зөвхөн тэр
-      // тохиолдолд л "хэт хурдан" гэж харуулна — бусад RLS/permission алдааг
-      // (жишээ нь бусад шалтгаанаар блоклогдсон) буруу тайлбарлахгvй.
-      if (/rate_limited/i.test(error.message)) {
-        notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
-      } else {
-        notify('Алдаа: ' + error.message);
+    try {
+      const { error } = await supabase.from('comments').insert({
+        chapter_id: selectedChapter.id,
+        user_id: currentUser.id,
+        content: text,
+        parent_id: parentId,
+        sticker_url: parentId ? null : selectedSticker,
+      });
+      if (error) {
+        // ЗАСВАР #185 (код шинжилгээ): сервер тал одоо rate-limit-ийг тусдаа
+        // ('rate_limited') алдаагаар ялгаж буцаадаг болсон тул зөвхөн тэр
+        // тохиолдолд л "хэт хурдан" гэж харуулна — бусад RLS/permission алдааг
+        // (жишээ нь бусад шалтгаанаар блоклогдсон) буруу тайлбарлахгvй.
+        if (/rate_limited/i.test(error.message)) {
+          notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
+        } else {
+          notify('Алдаа: ' + error.message);
+        }
+        return;
       }
-      return;
+      if (parentId) { setReplyText(''); setReplyTo(null); }
+      else { setCommentText(''); setSelectedSticker(null); }
+      fetchComments(selectedChapter.id);
+    } catch (e) {
+      notify('Алдаа: ' + e.message);
+    } finally {
+      setCommentSending(false);
     }
-    if (parentId) { setReplyText(''); setReplyTo(null); }
-    else { setCommentText(''); setSelectedSticker(null); }
-    fetchComments(selectedChapter.id);
   };
 
   // ЗАСВАР #109: манганы ерөнхий (chapter-гvй) сэтгэгдэл — bvлгийн сэтгэгдэлтэй
@@ -1672,28 +1699,33 @@ export default function App() {
     const text = (textOverride !== null ? textOverride : mangaCommentText).trim();
     if (!text && !mangaSelectedSticker) return;
     setMangaCommentSending(true);
-    const { error } = await supabase.from('comments').insert({
-      manga_id: selected.id,
-      user_id: currentUser.id,
-      content: text,
-      parent_id: parentId,
-      sticker_url: parentId ? null : mangaSelectedSticker,
-    });
-    setMangaCommentSending(false);
-    if (error) {
-      // ЗАСВАР #185: postComment-той адил — зөвхөн серверийн тусгай
-      // 'rate_limited' алдааг л "хэт хурдан" гэж vзнэ, бусад RLS/permission
-      // алдааг буруу тайлбарлахгvй.
-      if (/rate_limited/i.test(error.message)) {
-        notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
-      } else {
-        notify('Алдаа: ' + error.message);
+    try {
+      const { error } = await supabase.from('comments').insert({
+        manga_id: selected.id,
+        user_id: currentUser.id,
+        content: text,
+        parent_id: parentId,
+        sticker_url: parentId ? null : mangaSelectedSticker,
+      });
+      if (error) {
+        // ЗАСВАР #185: postComment-той адил — зөвхөн серверийн тусгай
+        // 'rate_limited' алдааг л "хэт хурдан" гэж vзнэ, бусад RLS/permission
+        // алдааг буруу тайлбарлахгvй.
+        if (/rate_limited/i.test(error.message)) {
+          notify('⏳ Хэт хурдан байна — 5 секунд хvлээгээд дахин илгээнэ vv');
+        } else {
+          notify('Алдаа: ' + error.message);
+        }
+        return;
       }
-      return;
+      if (parentId) { setMangaReplyText(''); setMangaReplyTo(null); }
+      else { setMangaCommentText(''); setMangaSelectedSticker(null); }
+      fetchMangaComments(selected.id);
+    } catch (e) {
+      notify('Алдаа: ' + e.message);
+    } finally {
+      setMangaCommentSending(false);
     }
-    if (parentId) { setMangaReplyText(''); setMangaReplyTo(null); }
-    else { setMangaCommentText(''); setMangaSelectedSticker(null); }
-    fetchMangaComments(selected.id);
   };
 
   const deleteMangaComment = (c) => {
@@ -1729,12 +1761,17 @@ export default function App() {
   const submitMangaRating = async (score) => {
     if (!currentUser) { setAuthPage('login'); return; }
     setRatingSending(true);
-    const { error } = await supabase.from('manga_ratings')
-      .upsert({ user_id: currentUser.id, manga_id: selected.id, score, updated_at: new Date().toISOString() }, { onConflict: 'user_id,manga_id' });
-    setRatingSending(false);
-    if (error) { notify('Алдаа: ' + error.message); return; }
-    notify('Vнэлгээ хадгалагдлаа! 🎉');
-    fetchMangaRatings(selected.id);
+    try {
+      const { error } = await supabase.from('manga_ratings')
+        .upsert({ user_id: currentUser.id, manga_id: selected.id, score, updated_at: new Date().toISOString() }, { onConflict: 'user_id,manga_id' });
+      if (error) { notify('Алдаа: ' + error.message); return; }
+      notify('Vнэлгээ хадгалагдлаа! 🎉');
+      fetchMangaRatings(selected.id);
+    } catch (e) {
+      notify('Алдаа: ' + e.message);
+    } finally {
+      setRatingSending(false);
+    }
   };
 
   // ЗАСВАР #113: reel-vvдийг манга мэдээлэл + like-ийн тоотой нь татна
@@ -2232,40 +2269,13 @@ export default function App() {
 
             {/* НЭВТРЭХ / БҮРТГҮҮЛЭХ */}
             {(authPage === 'login' || authPage === 'register') && (
-              <>
-                {authPage === 'register' && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>НЭР</div>
-                    <input value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})}
-                      placeholder="Нэрээ оруулна уу"
-                      style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                  </div>
-                )}
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>ИМЭЙЛ</div>
-                  <input value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})}
-                    placeholder="example@email.com"
-                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>НУУЦ ҮГ</div>
-                  <PasswordField value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})}
-                    placeholder="••••••••" />
-                </div>
-                {authPage === 'login' && (
-                  <div style={{ textAlign: 'right', marginBottom: '1.5rem' }}>
-                    <span onClick={() => { setResetCode(''); setResetNewPassword(''); setAuthPage('forgot'); }}
-                      style={{ color: '#8B0000', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
-                      Нууц үгээ мартсан уу?
-                    </span>
-                  </div>
-                )}
-                {authPage === 'register' && <div style={{ marginBottom: '1.5rem' }} />}
-                <button disabled={authSubmitting} onClick={async () => {
-                  // ЗАСВАР #156: олон дарахад давхар хvсэлт (жишээ нь олон
-                  // бvртгvvлэх имэйл) явуулахаас сэргийлж, хамгийн эхэнд шалгана
-                  if (authSubmitting) return;
-                  setAuthSubmitting(true);
+              <form onSubmit={async e => {
+                e.preventDefault();
+                // ЗАСВАР #156: олон дарахад давхар хvсэлт (жишээ нь олон
+                // бvртгvvлэх имэйл) явуулахаас сэргийлж, хамгийн эхэнд шалгана
+                if (authSubmitting) return;
+                setAuthSubmitting(true);
+                try {
                   if (authPage === 'register') {
                     // ЗАСВАР #160: бvртгvvлэхэд имэйл баталгаажуулах шаардлагыг Supabase
                     // Dashboard-с унтраасан (spam-д ордог асуудлаас болж) — тэгэхээр
@@ -2295,8 +2305,47 @@ export default function App() {
                       notify('Амжилттай нэвтэрлээ! 🎉');
                     }
                   }
+                } catch (err) {
+                  // ЗАСВАР #221 (код шинжилгээ): сvлжээ тасрах гэх мэт vед try/finally
+                  // байхгvй бол "ХАДГАЛЖ БАЙНА..." товч vvрд гацдаг байсан
+                  notify('Алдаа: ' + err.message);
+                } finally {
                   setAuthSubmitting(false);
-                }} style={{ width: '100%', background: authSubmitting ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: authSubmitting ? 'not-allowed' : 'pointer', fontWeight: 700, marginBottom: 16 }}>
+                }
+              }}>
+                {authPage === 'register' && (
+                  <div style={{ marginBottom: 16 }}>
+                    <label htmlFor="auth-name" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>НЭР</label>
+                    <input id="auth-name" name="name" autoComplete="name" required
+                      value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})}
+                      placeholder="Нэрээ оруулна уу"
+                      style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+                  </div>
+                )}
+                <div style={{ marginBottom: 16 }}>
+                  <label htmlFor="auth-email" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>ИМЭЙЛ</label>
+                  <input id="auth-email" name="email" type="email" autoComplete="email" required
+                    value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})}
+                    placeholder="example@email.com"
+                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label htmlFor="auth-password" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>НУУЦ ҮГ</label>
+                  <PasswordField id="auth-password" name="password"
+                    autoComplete={authPage === 'register' ? 'new-password' : 'current-password'} required
+                    value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})}
+                    placeholder="••••••••" />
+                </div>
+                {authPage === 'login' && (
+                  <div style={{ textAlign: 'right', marginBottom: '1.5rem' }}>
+                    <span onClick={() => { setResetCode(''); setResetNewPassword(''); setAuthPage('forgot'); }}
+                      style={{ color: '#8B0000', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                      Нууц үгээ мартсан уу?
+                    </span>
+                  </div>
+                )}
+                {authPage === 'register' && <div style={{ marginBottom: '1.5rem' }} />}
+                <button type="submit" disabled={authSubmitting} style={{ width: '100%', background: authSubmitting ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: authSubmitting ? 'not-allowed' : 'pointer', fontWeight: 700, marginBottom: 16 }}>
                   {authSubmitting ? 'ХАДГАЛЖ БАЙНА...' : (authPage === 'login' ? 'НЭВТРЭХ' : 'БҮРТГҮҮЛЭХ')}
                 </button>
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
@@ -2306,50 +2355,53 @@ export default function App() {
                     <span>Бүртгэл байна уу? <span onClick={() => setAuthPage('login')} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх</span></span>
                   )}
                 </div>
-              </>
+              </form>
             )}
 
             {/* НУУЦ ҮГ МАРТСАН — имэйл оруулаад код авах */}
             {authPage === 'forgot' && (
-              <>
+              <form onSubmit={e => { e.preventDefault(); sendResetCode(); }}>
                 <div style={{ fontSize: 13, color: '#888', marginBottom: 16, lineHeight: 1.6 }}>
                   Бүртгэлтэй имэйлээ оруулна уу. Бид танд 8 оронтой баталгаажуулах код илгээх болно.
                 </div>
                 <div style={{ marginBottom: '1.5rem' }}>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>ИМЭЙЛ</div>
-                  <input value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})}
+                  <label htmlFor="forgot-email" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>ИМЭЙЛ</label>
+                  <input id="forgot-email" name="email" type="email" autoComplete="email" required
+                    value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})}
                     placeholder="example@email.com"
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
                 </div>
-                <button onClick={sendResetCode} disabled={resetSending || resendCooldown > 0}
+                <button type="submit" disabled={resetSending || resendCooldown > 0}
                   style={{ width: '100%', background: (resetSending || resendCooldown > 0) ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: (resetSending || resendCooldown > 0) ? 'not-allowed' : 'pointer', fontWeight: 700, marginBottom: 16 }}>
                   {resetSending ? 'ИЛГЭЭЖ БАЙНА...' : resendCooldown > 0 ? `ДАХИН ИЛГЭЭХ (${resendCooldown}с)` : 'КОД ИЛГЭЭХ'}
                 </button>
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
                   <span onClick={() => setAuthPage('login')} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>← Нэвтрэх рүү буцах</span>
                 </div>
-              </>
+              </form>
             )}
 
             {/* КОД БАТАЛГААЖУУЛАХ — код + шинэ нууц үг */}
             {authPage === 'reset' && (
-              <>
+              <form onSubmit={e => { e.preventDefault(); confirmResetCode(); }}>
                 <div style={{ fontSize: 13, color: '#888', marginBottom: 16, lineHeight: 1.6 }}>
                   <strong style={{ color: '#fff' }}>{authForm.email}</strong> хаяг руу илгээсэн 8 оронтой кодыг оруулна уу.
                 </div>
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>8 ОРОНТОЙ КОД</div>
-                  <input value={resetCode} inputMode="numeric" maxLength={8}
+                  <label htmlFor="reset-code" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>8 ОРОНТОЙ КОД</label>
+                  <input id="reset-code" name="otp" inputMode="numeric" autoComplete="one-time-code" maxLength={8} required
+                    value={resetCode}
                     onChange={e => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
                     placeholder="00000000"
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 20, letterSpacing: 8, textAlign: 'center', outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ marginBottom: '1.5rem' }}>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>ШИНЭ НУУЦ ҮГ</div>
-                  <PasswordField value={resetNewPassword} onChange={e => setResetNewPassword(e.target.value)}
+                  <label htmlFor="reset-new-password" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>ШИНЭ НУУЦ ҮГ</label>
+                  <PasswordField id="reset-new-password" name="new-password" autoComplete="new-password" required
+                    value={resetNewPassword} onChange={e => setResetNewPassword(e.target.value)}
                     placeholder="Дор хаяж 6 тэмдэгт" />
                 </div>
-                <button onClick={confirmResetCode} disabled={resetSending}
+                <button type="submit" disabled={resetSending}
                   style={{ width: '100%', background: resetSending ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: resetSending ? 'not-allowed' : 'pointer', fontWeight: 700, marginBottom: 16 }}>
                   {resetSending ? 'БАТАЛГААЖУУЛЖ БАЙНА...' : 'НУУЦ ҮГ СОЛИХ'}
                 </button>
@@ -2363,7 +2415,7 @@ export default function App() {
                   {' · '}
                   <span onClick={() => setAuthPage('login')} style={{ color: '#888', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх рүү буцах</span>
                 </div>
-              </>
+              </form>
             )}
           </div>
         </div>
@@ -2670,7 +2722,7 @@ export default function App() {
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ТҮҮХ" onClick={() => { setPreviousPage('home'); setAllCategory('history'); setPage('all'); }} />
                   <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                    {allMangas.filter(m => history.find(h => h.mangaId === m.id)).map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={true} history={history} onOpen={goToDetail} /></div>)}
+                    {allMangas.filter(m => history.find(h => h.mangaId === m.id)).map((m, i) => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={true} history={history} onOpen={goToDetail} priority={i < 4} /></div>)}
                   </div>
                 </div>
               )}
@@ -2680,12 +2732,12 @@ export default function App() {
                 <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                   {recentChapters
                     .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
-                    .map(ch => (
+                    .map((ch, i) => (
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url, genres: ch.mangas.genres || [] }, ch)}
                         style={{ ...scrollCardStyle, cursor: 'pointer' }}>
                         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4', background: '#141414' }}>
-                          <img src={ch.mangas?.poster_url} alt="" loading="eager" decoding="async"
+                          <img src={ch.mangas?.poster_url} alt="" loading={i < 4 ? 'eager' : 'lazy'} decoding="async"
                             onLoad={e => { e.currentTarget.style.opacity = 1; }}
                             style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0, transition: 'opacity 0.3s ease' }} />
                           <div style={{ position: 'absolute', top: 6, left: 6, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>Бүлэг {ch.chapter_number}</div>
@@ -2703,7 +2755,7 @@ export default function App() {
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="ШИНЭ МАНГА" onClick={() => { setPreviousPage('home'); setAllCategory('new'); setPage('all'); }} />
                   <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                    {newMangas.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} /></div>)}
+                    {newMangas.map((m, i) => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 4} /></div>)}
                   </div>
                 </div>
               )}
@@ -2713,7 +2765,7 @@ export default function App() {
                 <div style={{ marginBottom: '2.5rem' }}>
                   <SectionHeader title="САНАЛ БОЛГОХ" onClick={() => { setPreviousPage('home'); setAllCategory('recommended'); setPage('all'); }} />
                   <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                    {curatedRecommended.map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} /></div>)}
+                    {curatedRecommended.map((m, i) => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 4} /></div>)}
                   </div>
                 </div>
               )}
@@ -2721,7 +2773,7 @@ export default function App() {
               <div style={{ marginBottom: '2.5rem' }}>
                 <SectionHeader title="ДУУССАН" onClick={() => { setPreviousPage('home'); setAllCategory('finished'); setPage('all'); }} />
                 <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                  {allMangas.filter(m => m.status === 'Дууссан').map(m => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} /></div>)}
+                  {allMangas.filter(m => m.status === 'Дууссан').map((m, i) => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 4} /></div>)}
                 </div>
               </div>
             </div>
@@ -2810,12 +2862,12 @@ export default function App() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
                   {recentChapters
                     .filter(ch => (isStaff || (ch.mangas && !ch.mangas.is_hidden)) && (isStaff || !ch.is_hidden) && (isStaff || !ch.pending_delete) && (isStaff || !chapterLocked(ch)))
-                    .map(ch => (
+                    .map((ch, i) => (
                       <div key={ch.id}
                         onClick={() => ch.mangas && openReader(dbMangas.find(m => m.id === ch.mangas.id) || { id: ch.mangas.id, title: ch.mangas.title, poster: ch.mangas.poster_url, genres: ch.mangas.genres || [] }, ch)}
                         style={{ cursor: 'pointer' }}>
                         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '3/4', background: '#141414' }}>
-                          <img src={ch.mangas?.poster_url} alt="" loading="eager" decoding="async"
+                          <img src={ch.mangas?.poster_url} alt="" loading={i < 8 ? 'eager' : 'lazy'} decoding="async"
                             onLoad={e => { e.currentTarget.style.opacity = 1; }}
                             style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0, transition: 'opacity 0.3s ease' }} />
                           <div style={{ position: 'absolute', top: 6, left: 6, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>Бүлэг {ch.chapter_number}</div>
@@ -2833,7 +2885,7 @@ export default function App() {
             ) : (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
-                  {sortedFiltered.map(m => <MangaCard key={m.id} m={m} showChapter={false} history={history} onOpen={goToDetail} />)}
+                  {sortedFiltered.map((m, i) => <MangaCard key={m.id} m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 8} />)}
                 </div>
                 {filtered.length === 0 && <div style={{ color: '#555', textAlign: 'center', marginTop: '4rem' }}>Илэрц олдсонгүй</div>}
               </>
@@ -3048,9 +3100,9 @@ export default function App() {
           <div style={{ padding: '1.5rem 2rem' }}>
             <SectionHeader title="МИНИЙ САН" onClick={() => {}} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 16 }}>
-              {allMangas.filter(m => library.includes(m.id)).map(m => (
+              {allMangas.filter(m => library.includes(m.id)).map((m, i) => (
                 <div key={m.id} style={{ position: 'relative' }}>
-                  <MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} />
+                  <MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 8} />
                   <button onClick={() => toggleLibrary(m.id)}
                     style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.7)', border: 'none', color: '#f5a623', fontSize: 16, cursor: 'pointer', borderRadius: 4, padding: '2px 6px' }}>★</button>
                 </div>
@@ -3711,7 +3763,11 @@ export default function App() {
                       decoding="async"
                       onContextMenu={e => e.preventDefault()}
                       draggable={false}
-                      style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }} />
+                      // ЗАСВАР #223 (код шинжилгээ): хадгалсан width/height байвал
+                      // aspect-ratio-гоор зайг нь урьдчилан зарлаж lazy зураг
+                      // ачаалагдах vеийн "vсрэлт" (CLS)-ыг арилгана; хуучин
+                      // (хэмжээгvй) зурган дээр өмнөх адил хэвээр vлдэнэ.
+                      style={{ width: '100%', display: 'block', marginBottom: 0, verticalAlign: 'top', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', ...(img.width && img.height ? { aspectRatio: `${img.width} / ${img.height}` } : {}) }} />
                   ))}
                 </div>
               </div>
@@ -3992,40 +4048,45 @@ export default function App() {
                   const badFile = [posterFile, bannerFile].filter(Boolean).map(validateImageFile).find(Boolean);
                   if (badFile) { notify(badFile); return; }
                   setMangaSaving(true);
-                  let posterUrl = '';
-                  if (posterFile) {
-                    const fileExt = posterFile.name.split('.').pop();
-                    const fileName = `${Date.now()}.${fileExt}`;
-                    try {
-                      posterUrl = await uploadToR2(posterFile, `posters/${fileName}`);
-                    } catch (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); setMangaSaving(false); return; }
+                  try {
+                    let posterUrl = '';
+                    if (posterFile) {
+                      const fileExt = posterFile.name.split('.').pop();
+                      const fileName = `${Date.now()}.${fileExt}`;
+                      try {
+                        posterUrl = await uploadToR2(posterFile, `posters/${fileName}`);
+                      } catch (uploadError) { notify('Зураг upload алдаа: ' + uploadError.message); return; }
+                    }
+                    let bannerUrl = '';
+                    if (bannerFile) {
+                      const fileExt = bannerFile.name.split('.').pop();
+                      const fileName = `${Date.now()}-banner.${fileExt}`;
+                      try {
+                        bannerUrl = await uploadToR2(bannerFile, `banners/${fileName}`);
+                      } catch (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); return; }
+                    }
+                    const { error } = await supabase.from('mangas').insert({
+                      title: adminManga.title,
+                      description: adminManga.desc,
+                      genres: adminManga.genres,
+                      status: adminManga.status,
+                      poster_url: posterUrl,
+                      banner_url: bannerUrl || null,
+                      created_by: currentUser.id,
+                    });
+                    if (error) notify('Алдаа: ' + error.message);
+                    else {
+                      notify('Манга амжилттай нэмэгдлээ! 🎉');
+                      setAdminManga({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
+                      setPosterFile(null);
+                      setBannerFile(null);
+                      fetchMangas(); // ЗАСВАР: жагсаалтыг шууд шинэчилнэ (өмнө нь refresh хэрэгтэй байсан)
+                    }
+                  } catch (e) {
+                    notify('Алдаа: ' + e.message);
+                  } finally {
+                    setMangaSaving(false);
                   }
-                  let bannerUrl = '';
-                  if (bannerFile) {
-                    const fileExt = bannerFile.name.split('.').pop();
-                    const fileName = `${Date.now()}-banner.${fileExt}`;
-                    try {
-                      bannerUrl = await uploadToR2(bannerFile, `banners/${fileName}`);
-                    } catch (uploadError) { notify('Баннер upload алдаа: ' + uploadError.message); setMangaSaving(false); return; }
-                  }
-                  const { error } = await supabase.from('mangas').insert({
-                    title: adminManga.title,
-                    description: adminManga.desc,
-                    genres: adminManga.genres,
-                    status: adminManga.status,
-                    poster_url: posterUrl,
-                    banner_url: bannerUrl || null,
-                    created_by: currentUser.id,
-                  });
-                  if (error) notify('Алдаа: ' + error.message);
-                  else {
-                    notify('Манга амжилттай нэмэгдлээ! 🎉');
-                    setAdminManga({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
-                    setPosterFile(null);
-                    setBannerFile(null);
-                    fetchMangas(); // ЗАСВАР: жагсаалтыг шууд шинэчилнэ (өмнө нь refresh хэрэгтэй байсан)
-                  }
-                  setMangaSaving(false);
                 }} style={{ width: '100%', background: mangaSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: mangaSaving ? 'not-allowed' : 'pointer', fontSize: 14 }}>
                   {mangaSaving ? 'ХАДГАЛЖ БАЙНА...' : 'НЭМЭХ'}
                 </button>
@@ -4289,6 +4350,12 @@ export default function App() {
                       }
                       markUploadDone();
 
+                      // ЗАСВАР #223 (код шинжилгээ): уншигчийн хуудсанд aspect-ratio-гоор
+                      // зайг нь урьдчилан зарлаж, lazy зураг ачаалагдах vеийн layout
+                      // shift (CLS)-ыг арилгахын тулд бодит хэмжээг нь хадгална.
+                      let dims = null;
+                      try { dims = await getImageDimensions(file); } catch { /* хэмжээ дутуу vлдвэл ч зураг хадгалагдана */ }
+
                       // ЗАСВАР #63: эхний хуудсыг автоматаар thumbnail болгож хадгалдаг байсныг
                       // хассан — тэр нь дурын (санамсаргүй харагдах) хуудасны зургийг "cover"
                       // мэт харуулдаг байсан. Одоо зөвхөн admin ЗОРИУДАА оруулсан cover л
@@ -4297,6 +4364,8 @@ export default function App() {
                         chapter_id: chapterData.id,
                         image_url: publicUrl,
                         page_number: i + 1,
+                        width: dims?.width || null,
+                        height: dims?.height || null,
                       });
                       if (imgError) { notify(`Зураг ${i + 1} хадгалах алдаа: ` + imgError.message); uploadFailed = true; }
                     }
@@ -4555,24 +4624,29 @@ export default function App() {
                     const days = Number(vipDays);
                     if (!days || days <= 0) { notify('Хоногийн тоог зөв оруулна уу!'); return; }
                     setVipSaving(true);
-                    // ЗАСВАР #133: public.users.email биш, auth.users (жинхэнэ имэйл)-ээр хайна
-                    const { data: userData, error: userError } = await supabase
-                      .rpc('admin_lookup_user_by_email', { lookup_email: vipEmail.trim() })
-                      .maybeSingle();
-                    if (userError) { notify('Алдаа: ' + userError.message); setVipSaving(false); return; }
-                    if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгүй!'); setVipSaving(false); return; }
-                    // Идэвхтэй VIP-тэй бол одоо байгаа дуусах хугацаан дээр нь нэмнэ, эс бол өнөөдрөөс эхэлнэ
-                    const base = (userData.is_vip && userData.vip_expires_at && new Date(userData.vip_expires_at).getTime() > Date.now())
-                      ? new Date(userData.vip_expires_at)
-                      : new Date();
-                    base.setDate(base.getDate() + days);
-                    const { error } = await supabase.from('users')
-                      .update({ is_vip: true, vip_expires_at: base.toISOString() })
-                      .eq('id', userData.id);
-                    setVipSaving(false);
-                    if (error) { notify('Алдаа: ' + error.message); return; }
-                    notify(`VIP ${days} хоногоор олгогдлоо! 👑 (${formatMnDate(base.toISOString())} хүртэл)`);
-                    setVipEmail('');
+                    try {
+                      // ЗАСВАР #133: public.users.email биш, auth.users (жинхэнэ имэйл)-ээр хайна
+                      const { data: userData, error: userError } = await supabase
+                        .rpc('admin_lookup_user_by_email', { lookup_email: vipEmail.trim() })
+                        .maybeSingle();
+                      if (userError) { notify('Алдаа: ' + userError.message); return; }
+                      if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгүй!'); return; }
+                      // Идэвхтэй VIP-тэй бол одоо байгаа дуусах хугацаан дээр нь нэмнэ, эс бол өнөөдрөөс эхэлнэ
+                      const base = (userData.is_vip && userData.vip_expires_at && new Date(userData.vip_expires_at).getTime() > Date.now())
+                        ? new Date(userData.vip_expires_at)
+                        : new Date();
+                      base.setDate(base.getDate() + days);
+                      const { error } = await supabase.from('users')
+                        .update({ is_vip: true, vip_expires_at: base.toISOString() })
+                        .eq('id', userData.id);
+                      if (error) { notify('Алдаа: ' + error.message); return; }
+                      notify(`VIP ${days} хоногоор олгогдлоо! 👑 (${formatMnDate(base.toISOString())} хүртэл)`);
+                      setVipEmail('');
+                    } catch (e) {
+                      notify('Алдаа: ' + e.message);
+                    } finally {
+                      setVipSaving(false);
+                    }
                   }} style={{ flex: 1, background: vipSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, fontWeight: 700, cursor: vipSaving ? 'not-allowed' : 'pointer', fontSize: 14 }}>
                     VIP ОЛГОХ
                   </button>
@@ -4976,6 +5050,7 @@ export default function App() {
               <button disabled={paymentRequestSending} onClick={async () => {
                 if (!currentUser || !selectedPlan) { setShowPopup(false); return; }
                 setPaymentRequestSending(true);
+                try {
                 // ЗАСВАР #163: хямдралын vед хvсэлт илгээхэд хэдэн төгрөгөөр төлөхийг
                 // хvлээж байсныг хадгална (хямдрал дуусаад ч тvvхэнд мэдэгдэхээр)
                 const planForPrice = PLANS.find(p => p.key === selectedPlan);
@@ -4984,10 +5059,14 @@ export default function App() {
                   ? salePriceForReq
                   : planForPrice?.price;
                 const { error } = await supabase.from('payment_requests').insert({ user_id: currentUser.id, plan_key: selectedPlan, paid_price: paidPrice });
-                setPaymentRequestSending(false);
                 if (error) { notify('Алдаа: ' + error.message); return; }
                 notify('Хүсэлт илгээгдлээ! Admin шалгаад баталгаажуулах болно 🎉');
                 setShowPopup(false);
+                } catch (e) {
+                  notify('Алдаа: ' + e.message);
+                } finally {
+                  setPaymentRequestSending(false);
+                }
               }}
                 style={{ width: '100%', padding: 13, border: 'none', borderRadius: 12, background: paymentRequestSending ? '#555' : '#8B0000', color: '#fff', fontWeight: 700, cursor: paymentRequestSending ? 'not-allowed' : 'pointer', fontSize: 14 }}>
                 {paymentRequestSending ? 'ИЛГЭЭЖ БАЙНА...' : 'ТӨЛБӨР ТӨЛСӨН'}
@@ -5290,6 +5369,7 @@ export default function App() {
                 // "ХАДГАЛЖ БАЙНА..." дээр үүрд гацдаг байсан.
                 if (editMangaForm.genres.length === 0) { notify('Дор хаяж 1 төрөл сонгоно уу!'); return; }
                 setEditSaving(true);
+                try {
                 const updates = {
                   title: editMangaForm.title,
                   description: editMangaForm.desc,
@@ -5302,7 +5382,7 @@ export default function App() {
                   const oldPosterUrl = editManga.poster;
                   try {
                     updates.poster_url = await uploadToR2(editPosterFile, `posters/${fileName}`);
-                  } catch (upErr) { notify('Poster upload алдаа: ' + upErr.message); setEditSaving(false); return; }
+                  } catch (upErr) { notify('Poster upload алдаа: ' + upErr.message); return; }
                   // ЗАСВАР #163: poster солиход хуучин файл R2-д мөнхөд орхигддог байсныг засав
                   if (oldPosterUrl) { try { await deleteFromR2([oldPosterUrl]); } catch { /* хор хөнөөлгvй */ } }
                 }
@@ -5312,16 +5392,20 @@ export default function App() {
                   const oldBannerUrl = editManga.banner_url;
                   try {
                     updates.banner_url = await uploadToR2(editBannerFile, `banners/${fileName}`);
-                  } catch (upErr) { notify('Баннер upload алдаа: ' + upErr.message); setEditSaving(false); return; }
+                  } catch (upErr) { notify('Баннер upload алдаа: ' + upErr.message); return; }
                   if (oldBannerUrl) { try { await deleteFromR2([oldBannerUrl]); } catch { /* хор хөнөөлгvй */ } }
                 }
                 const { error } = await supabase.from('mangas').update(updates).eq('id', editManga.id);
-                setEditSaving(false);
                 if (error) { notify('Алдаа: ' + error.message); return; }
                 setSelected(prev => prev && prev.id === editManga.id ? { ...prev, ...updates, desc: updates.description, poster: updates.poster_url || prev.poster, banner_url: updates.banner_url || prev.banner_url } : prev);
                 fetchMangas();
                 setEditManga(null);
                 notify('Манга шинэчлэгдлээ! 🎉');
+                } catch (e) {
+                  notify('Алдаа: ' + e.message);
+                } finally {
+                  setEditSaving(false);
+                }
               }} style={{ width: '100%', background: editSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
                 {editSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
               </button>
@@ -5441,6 +5525,7 @@ export default function App() {
                 const badFile = [editChapterCoverFile, ...editChapterNewFiles].filter(Boolean).map(validateImageFile).find(Boolean);
                 if (badFile) { notify(badFile); return; }
                 setEditChapterSaving(true);
+                try {
 
                 // ЗАСВАР #145: гарах цагийг өөрчилсөн эсэхийг анхны утгатай нь харьцуулна
                 // ЗАСВАР #196 (код шинжилгээ): STRING-ээр (!==) харьцуулдаг байсан тул
@@ -5478,13 +5563,13 @@ export default function App() {
                   try {
                     // ЗАСВАР #194: Date.now() таамаглаж болохуйц тул crypto.randomUUID()
                     updates.thumbnail_url = await uploadToR2(editChapterCoverFile, `chapters/${editChapter.id}/${crypto.randomUUID()}-cover.${ext}`);
-                  } catch (e) { notify('Cover upload алдаа: ' + e.message); setEditChapterSaving(false); return; }
+                  } catch (e) { notify('Cover upload алдаа: ' + e.message); return; }
                   // ЗАСВАР #163: cover солиход хуучин файл R2-д мөнхөд орхигддог байсныг засав
                   if (oldThumbnailUrl) { try { await deleteFromR2([oldThumbnailUrl]); } catch { /* хор хөнөөлгvй, orphan хэвээр vлдэнэ */ } }
                 }
 
                 const { error: chError } = await supabase.from('chapters').update(updates).eq('id', editChapter.id);
-                if (chError) { notify('Алдаа: ' + chError.message); setEditChapterSaving(false); return; }
+                if (chError) { notify('Алдаа: ' + chError.message); return; }
 
                 // Устгагдсан (жагсаалтаас хассан) зургуудыг R2-с БОЛОН DB-с хасна
                 // (ЗАСВАР #163: өмнө нь зөвхөн DB мөрийг устгаад, бодит файлыг R2-д
@@ -5528,7 +5613,11 @@ export default function App() {
                     try {
                       // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
                       const url = await uploadToR2(part, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
-                      await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage });
+                      // ЗАСВАР #223 (код шинжилгээ): add-chapter урсгалтай адил, уншигчийн
+                      // хуудасны CLS-ыг арилгахын тулд бодит хэмжээг хадгална.
+                      let dims = null;
+                      try { dims = await getImageDimensions(part); } catch { /* хэмжээ дутуу vлдвэл ч зураг хадгалагдана */ }
+                      await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage, width: dims?.width || null, height: dims?.height || null });
                       nextPage++;
                     } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
                   }
@@ -5544,12 +5633,16 @@ export default function App() {
                   updates.is_hidden = finalIsHidden;
                 }
 
-                setEditChapterSaving(false);
                 setDbChapters(prev => prev.map(x => x.id === editChapter.id ? { ...x, ...updates } : x));
                 setEditChapter(null);
                 notify(uploadFailed
                   ? '⚠️ Зарим зураг амжилтгvй боллоо — бvлгийг "нуугдсан" төлөвтэй vлдээлээ, дутуу хуудсаа дахин ЗАСАХ-аар нөхнө vv'
                   : 'Бvлэг шинэчлэгдлээ! 🎉');
+                } catch (e) {
+                  notify('Алдаа: ' + e.message);
+                } finally {
+                  setEditChapterSaving(false);
+                }
               }} style={{ width: '100%', background: editChapterSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editChapterSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
                 {editChapterSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
               </button>

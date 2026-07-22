@@ -21,7 +21,7 @@ export const Avatar = ({ url, letter, size = 34 }) => (
 
 // history/onOpen нь өмнө нь App() дотроос шууд closure-оор (history state,
 // goToDetail функц) уншигддаг байсан — одоо props болгож дамжуулна.
-export const MangaCard = ({ m, showChapter, history, onOpen }) => (
+export const MangaCard = ({ m, showChapter, history, onOpen, priority = false }) => (
   <div onClick={() => onOpen(m)} role="button" tabIndex={0}
     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m); } }}
     style={{ cursor: 'pointer', position: 'relative' }}>
@@ -29,7 +29,10 @@ export const MangaCard = ({ m, showChapter, history, onOpen }) => (
       {/* ЗАСВАР #205 (хэрэглэгчийн хvсэлт): олон poster зэрэг ачаалагдахад нэг нэгээрээ
           "цувран" гэнэт гарч ирдэг (pop-in) нь эмх замбараагvй харагддаг байсан —
           сааралхан placeholder дэвсгэр дээр зөөлөн opacity fade-ин хийж, илvv цэгцтэй болгов. */}
-      <img src={m.poster} alt={m.title} loading="eager" decoding="async"
+      {/* ЗАСВАР #223 (код шинжилгээ): зөвхөн эхний (шууд харагдах) картуудыг eager
+          ачаална, vлдсэн олон posterыг lazy болгож анхны ачааллын vеийн зэрэг
+          хvсэлтийн тоог багасгав. */}
+      <img src={m.poster} alt={m.title} loading={priority ? 'eager' : 'lazy'} decoding="async"
         onLoad={e => { e.currentTarget.style.opacity = 1; }}
         style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0, transition: 'opacity 0.3s ease' }} />
       {showChapter && history.find(h => h.mangaId === m.id) && (
