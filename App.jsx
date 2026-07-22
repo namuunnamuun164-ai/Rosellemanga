@@ -5030,7 +5030,7 @@ export default function App() {
                   if (isSelected && chapterCropActive) {
                     return (
                       <div key={i} ref={chapterCropFrameRef} onPointerDown={startChapterCropPanDrag}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', aspectRatio: '1 / 1', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img src={chapterFileUrls[i]} alt={`${i + 1}`} draggable={false}
                           style={{
                             position: 'absolute', left: 0, top: chapterCropPanY, opacity: chapterCropBusy ? 0.4 : 1,
@@ -5590,7 +5590,7 @@ export default function App() {
                   if (isSelected && editChapterCropActive) {
                     return (
                       <div key={img.id} ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', aspectRatio: '1 / 1', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img src={img.image_url} alt={`${i + 1}`} draggable={false}
                           style={{
                             position: 'absolute', left: 0, top: editChapterCropPanY, opacity: editChapterEditBusy ? 0.4 : 1,
@@ -5632,7 +5632,7 @@ export default function App() {
                   if (isSelected && editChapterCropActive) {
                     return (
                       <div key={`new${i}`} ref={editChapterCropFrameRef} onPointerDown={startEditChapterCropPanDrag}
-                        style={{ position: 'relative', zIndex: 2, width: '100%', height: '60vh', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
+                        style={{ position: 'relative', zIndex: 2, width: '100%', aspectRatio: '1 / 1', overflow: 'hidden', background: '#000', touchAction: 'none', cursor: 'grab', border: '3px solid #f5a623', boxSizing: 'border-box' }}>
                         <img src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} draggable={false}
                           style={{
                             position: 'absolute', left: 0, top: editChapterCropPanY, opacity: editChapterEditBusy ? 0.4 : 1,
