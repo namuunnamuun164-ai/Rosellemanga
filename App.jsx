@@ -217,6 +217,16 @@ export default function App() {
     setEditChapterCropZoom(1);
     setEditChapterCropImgSize({ w: 0, h: 0 });
     setEditChapterCropFrameWidth(0);
+    // ЗАСВАР #212: chapterCrop-той адил шалтгаанаар img.decode()-ээр найдвартай авна.
+    const { kind, index } = editChapterEditTarget;
+    const url = kind === 'existing' ? editChapterExistingImages[index]?.image_url : editChapterNewFileUrls[index];
+    if (url) {
+      const probe = new Image();
+      probe.src = url;
+      probe.decode().then(() => {
+        setEditChapterCropImgSize({ w: probe.naturalWidth, h: probe.naturalHeight });
+      }).catch(() => { /* онLoad/complete fallback-аар vргэлжлvvлнэ */ });
+    }
   };
   const closeEditChapterCrop = () => {
     setEditChapterCropOpen(false);
@@ -436,11 +446,26 @@ export default function App() {
 
   const openChapterCrop = () => {
     if (chapterEditIndex === null) return;
+    const idx = chapterEditIndex;
     setChapterCropActive(true);
     setChapterCropPanY(0);
     setChapterCropZoom(1);
     setChapterCropImgSize({ w: 0, h: 0 });
     setChapterCropFrameWidth(0);
+    // ЗАСВАР #212 (код шинжилгээ): onLoad/img.complete хоёул render/reconciliation-ийн
+    // цагийн эмзэг байдлаас (жишээ нь <img> элемент дахин ашиглагдаж load эвент
+    // огт шинээр шидэгддэггvй) шалтгаалж заримдаа дутуу ажилладаг байсан тул,
+    // харагдах <img>-с бvрэн тусад нь, декодчлол баталгаатай дуусахыг ЗАДГАЙ
+    // хvлээдэг img.decode() API ашиглан эх зургийн хэмжээг найдвартай авна —
+    // энэ нь render/reconciliation-той огт хамааралгvй.
+    const url = chapterFileUrls[idx];
+    if (url) {
+      const probe = new Image();
+      probe.src = url;
+      probe.decode().then(() => {
+        setChapterCropImgSize({ w: probe.naturalWidth, h: probe.naturalHeight });
+      }).catch(() => { /* онLoad/complete fallback-аар vргэлжлvvлнэ */ });
+    }
   };
   const closeChapterCrop = () => {
     setChapterCropActive(false);
@@ -5102,7 +5127,17 @@ export default function App() {
                     );
                   }
                   return (
-                    <div key={i} onClick={() => setChapterEditIndex(i)} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <div key={i} onClick={() => {
+                      // ЗАСВАР #211 (код шинжилгээ): зургийг сумаар биш шууд дарж сонгоход
+                      // (жагсаалтаас өөр зураг дарахад) crop горим (chapterCropActive)
+                      // ӨМНӨх зурган дээрээ идэвхтэй хэвээр vлдэж, шинэ зурган дээр "аль
+                      // хэдийн crop идэвхтэй" мэт харагдаж, "Тайрах" дарахад нээхийн оронд
+                      // шууд confirmChapterCrop (юу ч хийхгvй) дуудагддаг байв.
+                      setChapterEditIndex(i);
+                      setChapterCropActive(false);
+                      setChapterCropPanY(0);
+                      setChapterCropZoom(1);
+                    }} style={{ position: 'relative', cursor: 'pointer' }}>
                       <img src={chapterFileUrls[i]} alt={`${i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -5670,7 +5705,16 @@ export default function App() {
                     );
                   }
                   return (
-                    <div key={img.id} onClick={() => setEditChapterEditTarget({ kind: 'existing', index: i })} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <div key={img.id} onClick={() => {
+                      // ЗАСВАР #211 (код шинжилгээ): chapterCropActive-тай адил шалтгаанаар
+                      // — зургийг шууд дарж сольход crop горим өмнөх зурган дээрээ
+                      // идэвхтэй хэвээр vлдэж, "Тайрах" дарахад нээхийн оронд шууд
+                      // (юу ч хийдэггvй) confirm дуудагддаг байв.
+                      setEditChapterEditTarget({ kind: 'existing', index: i });
+                      setEditChapterCropOpen(false);
+                      setEditChapterCropPanY(0);
+                      setEditChapterCropZoom(1);
+                    }} style={{ position: 'relative', cursor: 'pointer' }}>
                       <img src={img.image_url} alt={`${i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -5714,7 +5758,13 @@ export default function App() {
                     );
                   }
                   return (
-                    <div key={`new${i}`} onClick={() => setEditChapterEditTarget({ kind: 'new', index: i })} style={{ position: 'relative', cursor: 'pointer' }}>
+                    <div key={`new${i}`} onClick={() => {
+                      // ЗАСВАР #211: дээрхтэй адил шалтгаан.
+                      setEditChapterEditTarget({ kind: 'new', index: i });
+                      setEditChapterCropOpen(false);
+                      setEditChapterCropPanY(0);
+                      setEditChapterCropZoom(1);
+                    }} style={{ position: 'relative', cursor: 'pointer' }}>
                       <img src={editChapterNewFileUrls[i]} alt={`${editChapterExistingImages.length + i + 1}`} loading="lazy" decoding="async"
                         style={{ width: '100%', display: 'block', verticalAlign: 'top' }} />
                       <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.65)', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
