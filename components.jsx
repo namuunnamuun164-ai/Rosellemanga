@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { STATUS_META, DEFAULT_STATUS_META } from './constants';
 
 // ЗАСВАР #179 (код шинжилгээ): Эдгээр 3 компонентыг App() функцийн БИЕИЙН
@@ -8,6 +8,28 @@ import { STATUS_META, DEFAULT_STATUS_META } from './constants';
 // (жишээ нь nowTs 30 сек тутам шинэчлэгдэхэд бvх MangaCard дахин mount болно).
 // Module түвшинд (App-ийн гадна) шилжvvлснээр component identity vргэлж
 // тогтвортой байж, зөвхөн шинэ props ирэхэд л дахин render хийгдэнэ (unmount vгvй).
+
+// ЗАСВАР #226 (код шинжилгээ): өмнө нь App() дотор НЭГ л scheduleNowTs state
+// секунд тутам шинэчлэгдэж, App() бvхэлдээг (5800+ мөр, 800+ inline style)
+// дахин render хийлгэдэг байсан (detail/schedule хуудсанд байх vед) — vvнийг
+// тусад нь module-level компонент болгож тусгаарлав: зөвхөн ЭНЭ жижиг
+// компонент секунд тутам өөрийгөө сэргээнэ, App() эцэг компонентод нөлөөлөхгvй.
+// remainingMs <= 0 болмогц өөрийгөө зогсооно (interval мөнхөд ажиллахгvй).
+export const LiveCountdown = ({ target, children }) => {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => {
+      const next = Date.now();
+      setNow(next);
+      if (target - next <= 0) clearInterval(t);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [target]);
+  const remainingMs = target - now;
+  if (remainingMs <= 0) return null;
+  return children(remainingMs);
+};
 
 export const Avatar = ({ url, letter, size = 34 }) => (
   url ? (

@@ -109,6 +109,11 @@ export const formatRemaining = (ms) => {
 // хамгийн багадаа browser-ийг найдваргvй байдалд оруулахын оронд ойлгомжтой
 // алдаа vзvvлж, эх зургийг жижигрvvлж дахин оруулахыг санал болгоно.
 const MAX_SAFE_PIXELS = 120_000_000; // ~120 megapixel — ердийн урт вэбтvн (webtoon) стрипэд хvрэлцээтэй
+// ЗАСВАР #224 (код шинжилгээ): өмнө нь зөвхөн File[] буцаадаг байсан тул
+// уншигчийн CLS-засварт зориулж хэмжээ хэрэгтэй болоход дуудагч тал дахин
+// createImageBitmap хийж (upload бvрд 2-3 дахин decode) admin-ы upload-ыг
+// удаашруулж байсан — decode vеэрээ аль хэдийн мэдэгдэж байгаа width/height-ыг
+// шууд буцаана.
 export const splitTallImageFile = async (file, maxHeight = 4000) => {
   const bitmap = await createImageBitmap(file);
   const { width, height } = bitmap;
@@ -118,7 +123,7 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
   }
   if (height <= maxHeight) {
     bitmap.close?.();
-    return [file];
+    return [{ file, width, height }];
   }
 
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
@@ -142,7 +147,7 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
     // буцааж болно (жишээ нь санах ой хvрэлцэхгvй vед) — шалгахгvй бол
     // new File([null], ...) гэсэн эвдэрсэн (0 байттай) файл vvсгэдэг байв.
     if (!blob) throw new Error('Зургийг хэсэглэхэд алдаа гарлаа (санах ой хvрэлцэхгvй байж магадгvй).');
-    pieces.push(new File([blob], `${baseName}-p${partIndex}.${ext}`, { type: mimeType }));
+    pieces.push({ file: new File([blob], `${baseName}-p${partIndex}.${ext}`, { type: mimeType }), width, height: pieceHeight });
     y += pieceHeight;
     partIndex += 1;
   }
@@ -188,7 +193,9 @@ export const optimizeImageFile = async (file, maxWidth = 1200, quality = 0.85) =
   const actualType = blob.type || 'image/jpeg';
   const ext = actualType === 'image/webp' ? 'webp' : actualType === 'image/png' ? 'png' : 'jpg';
   const baseName = file.name.replace(/\.[^.]+$/, '');
-  return new File([blob], `${baseName}.${ext}`, { type: actualType });
+  // ЗАСВАР #224 (код шинжилгээ): дуудагч тал дахин decode хийхгvйгээр хэмжээг
+  // мэдэж авдаг болгохын тулд targetWidth/targetHeight-ыг File-тай хамт буцаана.
+  return { file: new File([blob], `${baseName}.${ext}`, { type: actualType }), width: targetWidth, height: targetHeight };
 };
 
 // ЗАСВАР #173: зургийг өгөгдсөн тэгш өнцөгт хэсгээр нь таслана. rect нь эх
@@ -213,18 +220,6 @@ export const cropImageFile = async (file, rect) => {
   // ЗАСВАР #191 (код шинжилгээ): доорх splitTallImageFile-тэй адил шалтгаанаар
   if (!blob) throw new Error('Зургийг тайрахад алдаа гарлаа (санах ой хvрэлцэхгvй байж магадгvй).');
   return new File([blob], file.name, { type: mimeType });
-};
-
-// ЗАСВАР #223 (код шинжилгээ): upload хийхийн ӨМНӨ (эсвэл дараа) эцсийн файлын
-// бодит width/height-ийг chapter_images-д хадгалж, уншигчийн хуудсанд aspect-ratio
-// болгож ашиглана — vvнгvй бол lazy зураг ачаалагдах бvрт доорх агуулга vсэрдэг
-// (CLS) байсан. Энд дамжуулагдах file нь аль хэдийн optimizeImageFile/
-// splitTallImageFile-ээр багасгагдсан жижиг хэсэг тул decode хямд, аюулгvй.
-export const getImageDimensions = async (file) => {
-  const bitmap = await createImageBitmap(file);
-  const dims = { width: bitmap.width, height: bitmap.height };
-  bitmap.close?.();
-  return dims;
 };
 
 // ЗАСВАР #146: "цаг:минут:секунд" (жишээ нь 12:15:28) маягийн цэвэрхэн тоон

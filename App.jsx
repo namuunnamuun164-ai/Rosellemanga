@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, getImageDimensions } from './helpers';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
 import { PasswordField } from './PasswordField';
-import { Avatar, MangaCard, SectionHeader } from './components';
+import { Avatar, MangaCard, SectionHeader, LiveCountdown } from './components';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -169,16 +169,15 @@ export default function App() {
       // солих/тайрах vед ч бусад upload зам шиг өргөнийг хязгаарлаж WebP болгоно
       // (энд олон хуудас болгож хуваахгvй — нэг зургийг НЭГ зурагтай сольж байгаа
       // тул page_number дараалал өөрчлөгдөх ёсгvй).
-      const newFile = await optimizeImageFile(producedFile, 1200);
+      // ЗАСВАР #224 (код шинжилгээ): optimizeImageFile нь decode vеэрээ мэдэгдэж
+      // байгаа width/height-ыг шууд буцаадаг болсон тул дахин decode хийх
+      // (getImageDimensions) шаардлагагvй болов.
+      const { file: newFile, width: newWidth, height: newHeight } = await optimizeImageFile(producedFile, 1200);
       const ext = 'webp';
       // ЗАСВАР #194 (код шинжилгээ): Date.now() бол дараалсан/таамаглаж болохуйц
       // тул crypto.randomUUID() болгов — доорх бусад chapters/ upload-той адил шалтгаан.
       const newUrl = await uploadToR2(newFile, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
-      // ЗАСВАР #223 (код шинжилгээ): зургийг сольсны дараа хэмжээ нь өөрчлөгдсөн
-      // байж болох тул (тайрах гэх мэт) хадгалсан width/height-ыг ч шинэчилнэ.
-      let dims = null;
-      try { dims = await getImageDimensions(newFile); } catch { /* хэмжээ дутуу vлдвэл ч зураг хадгалагдана */ }
-      const { error } = await supabase.from('chapter_images').update({ image_url: newUrl, width: dims?.width || null, height: dims?.height || null }).eq('id', img.id);
+      const { error } = await supabase.from('chapter_images').update({ image_url: newUrl, width: newWidth, height: newHeight }).eq('id', img.id);
       if (error) { notify('Алдаа: ' + error.message); setEditChapterEditBusy(false); return; }
       setEditChapterExistingImages(prev => prev.map((it, idx) => idx === editChapterEditTarget.index ? { ...it, image_url: newUrl } : it));
       try { await deleteFromR2([img.image_url]); } catch { /* хор хөнөөлгvй */ }
@@ -712,16 +711,10 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // ЗАСВАР #146: Хуваарь хуудсанд секунд бvрээр тоологддог (жишээ нь 12:15:28)
-  // цаг харуулах тул зөвхөн тэр хуудсан дээр байх vед л 1 секунд тутам сэргээнэ
-  // (бусад хуудсанд 30 сек хангалттай тул илишдэн re-render хийхгvй).
-  const [scheduleNowTs, setScheduleNowTs] = useState(Date.now());
-  useEffect(() => {
-    if (page !== 'schedule' && page !== 'detail') return;
-    setScheduleNowTs(Date.now());
-    const t = setInterval(() => setScheduleNowTs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [page]);
+  // ЗАСВАР #226 (код шинжилгээ): секунд тутмын countdown-г эндээс хассан —
+  // одоо доорх 3 газарт module-level <LiveCountdown> компонент ашиглаж,
+  // зөвхөн ТЭР жижиг компонент секунд тутам өөрийгөө сэргээнэ (App() бvхэлдээ
+  // биш). Дэлгэрэнгvй: components.jsx-ийн LiveCountdown-ийн тайлбар.
 
   // ШИНЭ: цонхны хэмжээгээр утас/компьютер горимыг мэдэрнэ (hamburger цэс)
   useEffect(() => {
@@ -1057,6 +1050,15 @@ export default function App() {
       setResetSending(false);
     }
   };
+
+  // ЗАСВАР #225 (код шинжилгээ): Нэвтрэх/Бvртгvvлэх гэх мэт модал цонх нээлттэй
+  // vед Escape дарахад хаагдах болгов (өмнө нь зөвхөн ✕ дээр дарж л хаагддаг байсан).
+  useEffect(() => {
+    if (!authPage) return;
+    const onKey = e => { if (e.key === 'Escape') setAuthPage(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [authPage]);
 
   // ЗАСВАР #182 (код шинжилгээ): анхны deep-link сэргээлт (доор, dbMangas
   // ирэнгvvт ажилладаг байсан) fetchProfile дуусахыг хvлээхгvйгээр isVip/isStaff-ыг
@@ -2255,8 +2257,11 @@ export default function App() {
       {/* AUTH OVERLAY */}
       {authPage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#111', borderRadius: 16, padding: '2.5rem', width: 400, maxWidth: '100%', border: '1px solid #222', position: 'relative', boxSizing: 'border-box' }}>
-            <span onClick={() => setAuthPage(null)} style={{ position: 'absolute', top: 16, right: 20, cursor: 'pointer', fontSize: 20, color: '#555' }}>✕</span>
+          <div role="dialog" aria-modal="true" aria-label={
+              authPage === 'login' ? 'Нэвтрэх' : authPage === 'register' ? 'Бvртгvvлэх' : authPage === 'forgot' ? 'Нууц vг сэргээх' : 'Код баталгаажуулах'
+            } style={{ background: '#111', borderRadius: 16, padding: '2.5rem', width: 400, maxWidth: '100%', border: '1px solid #222', position: 'relative', boxSizing: 'border-box' }}>
+            <button type="button" onClick={() => setAuthPage(null)} aria-label="Хаах"
+              style={{ position: 'absolute', top: 16, right: 20, cursor: 'pointer', fontSize: 20, color: '#555', background: 'none', border: 'none', padding: 0, lineHeight: 1 }}>✕</button>
             <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
               <img src="/logo.png" alt="logo" style={{ height: 60, width: 'auto', objectFit: 'contain', marginBottom: 12 }} />
               <div style={{ fontSize: 18, fontWeight: 800 }}>
@@ -2316,7 +2321,7 @@ export default function App() {
                 {authPage === 'register' && (
                   <div style={{ marginBottom: 16 }}>
                     <label htmlFor="auth-name" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>НЭР</label>
-                    <input id="auth-name" name="name" autoComplete="name" required
+                    <input id="auth-name" name="name" autoComplete="name" required autoFocus={authPage === 'register'}
                       value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})}
                       placeholder="Нэрээ оруулна уу"
                       style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
@@ -2324,7 +2329,7 @@ export default function App() {
                 )}
                 <div style={{ marginBottom: 16 }}>
                   <label htmlFor="auth-email" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>ИМЭЙЛ</label>
-                  <input id="auth-email" name="email" type="email" autoComplete="email" required
+                  <input id="auth-email" name="email" type="email" autoComplete="email" required autoFocus={authPage === 'login'}
                     value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})}
                     placeholder="example@email.com"
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
@@ -2338,10 +2343,10 @@ export default function App() {
                 </div>
                 {authPage === 'login' && (
                   <div style={{ textAlign: 'right', marginBottom: '1.5rem' }}>
-                    <span onClick={() => { setResetCode(''); setResetNewPassword(''); setAuthPage('forgot'); }}
-                      style={{ color: '#8B0000', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                    <button type="button" onClick={() => { setResetCode(''); setResetNewPassword(''); setAuthPage('forgot'); }}
+                      style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', color: '#8B0000', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
                       Нууц үгээ мартсан уу?
-                    </span>
+                    </button>
                   </div>
                 )}
                 {authPage === 'register' && <div style={{ marginBottom: '1.5rem' }} />}
@@ -2350,9 +2355,9 @@ export default function App() {
                 </button>
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
                   {authPage === 'login' ? (
-                    <span>Бүртгэл байхгүй юу? <span onClick={() => setAuthPage('register')} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Бүртгүүлэх</span></span>
+                    <span>Бүртгэл байхгүй юу? <button type="button" onClick={() => setAuthPage('register')} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Бүртгүүлэх</button></span>
                   ) : (
-                    <span>Бүртгэл байна уу? <span onClick={() => setAuthPage('login')} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх</span></span>
+                    <span>Бүртгэл байна уу? <button type="button" onClick={() => setAuthPage('login')} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх</button></span>
                   )}
                 </div>
               </form>
@@ -2376,7 +2381,7 @@ export default function App() {
                   {resetSending ? 'ИЛГЭЭЖ БАЙНА...' : resendCooldown > 0 ? `ДАХИН ИЛГЭЭХ (${resendCooldown}с)` : 'КОД ИЛГЭЭХ'}
                 </button>
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
-                  <span onClick={() => setAuthPage('login')} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>← Нэвтрэх рүү буцах</span>
+                  <button type="button" onClick={() => setAuthPage('login')} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>← Нэвтрэх рүү буцах</button>
                 </div>
               </form>
             )}
@@ -2410,10 +2415,10 @@ export default function App() {
                   {resendCooldown > 0 ? (
                     <span style={{ color: '#555' }}>Дахин илгээх ({resendCooldown}с)</span>
                   ) : (
-                    <span onClick={sendResetCode} style={{ color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Код дахин илгээх</span>
+                    <button type="button" onClick={sendResetCode} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Код дахин илгээх</button>
                   )}
                   {' · '}
-                  <span onClick={() => setAuthPage('login')} style={{ color: '#888', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх рүү буцах</span>
+                  <button type="button" onClick={() => setAuthPage('login')} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#888', cursor: 'pointer', fontWeight: 600 }}>Нэвтрэх рүү буцах</button>
                 </div>
               </form>
             )}
@@ -2952,7 +2957,6 @@ export default function App() {
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         {dayMangas.map((m, i) => {
                           const next = nextScheduleDate(m.schedule_day, m.schedule_time);
-                          const remainingMs = next ? next.getTime() - scheduleNowTs : null;
                           return (
                             <div key={`m${m.id}`} onClick={() => goToDetail(m)}
                               style={{ display: 'flex', gap: 14, alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderTop: i > 0 ? '1px solid #1c2230' : 'none' }}>
@@ -2963,12 +2967,18 @@ export default function App() {
                                     ЯГ БАЙРАНД нь секунд тутам тоологддог countdown-г харуулна —
                                     баруун буланд байсан тусдаа countdown-г арилгав.
                                     ЗАСВАР #161: нэгэнт цаг нь өнгөрсөн (гарсан) бол цаг огт
-                                    харуулахгvй болгов (статик цагийн fallback-ыг арилгав). */}
-                                {m.schedule_time && remainingMs != null && remainingMs > 0 && (
-                                  <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</span>
-                                  </div>
+                                    харуулахгvй болгов (статик цагийн fallback-ыг арилгав).
+                                    ЗАСВАР #226: LiveCountdown өөрөө секунд тутам сэргэж,
+                                    дууссан vед null буцаана (App() дахин render хийхгvй). */}
+                                {m.schedule_time && next && (
+                                  <LiveCountdown target={next.getTime()}>
+                                    {remainingMs => (
+                                      <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</span>
+                                      </div>
+                                    )}
+                                  </LiveCountdown>
                                 )}
                               </div>
                               {isAdmin && (
@@ -2983,7 +2993,6 @@ export default function App() {
                           );
                         })}
                         {dayChapters.map((ch, i) => {
-                          const remainingMs = new Date(ch.publish_at).getTime() - scheduleNowTs;
                           // ЗАСВАР #146: бvлэгт өөрийн гэсэн нэр (default "Бvлэг N"-ээс өөр)
                           // оруулсан бол мангeны нэр + бvлгийн дугаарын хамт харуулна
                           const hasCustomTitle = ch.title && ch.title.trim() && ch.title.trim() !== `Бvлэг ${ch.chapter_number}`;
@@ -3005,13 +3014,16 @@ export default function App() {
                                 </div>
                                 {/* ЗАСВАР #158: нэрний доорх статик цагийн оронд секунд тутам
                                     тоологддог countdown-г шууд ЭНД харуулна
-                                    ЗАСВАР #161: нэгэнт гарсан (өнгөрсөн) бол цаг огт харуулахгvй */}
-                                {remainingMs > 0 && (
-                                  <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</span>
-                                  </div>
-                                )}
+                                    ЗАСВАР #161: нэгэнт гарсан (өнгөрсөн) бол цаг огт харуулахгvй
+                                    ЗАСВАР #226: LiveCountdown өөрөө секунд тутам сэргэнэ. */}
+                                <LiveCountdown target={new Date(ch.publish_at).getTime()}>
+                                  {remainingMs => (
+                                    <div style={{ fontSize: 12, color: '#fff', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCountdownClock(remainingMs)}</span>
+                                    </div>
+                                  )}
+                                </LiveCountdown>
                               </div>
                               {isAdmin && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
@@ -3313,7 +3325,9 @@ export default function App() {
                               </div>
                               <div style={{ fontSize: 12, color: locked ? '#fff' : '#6b7385', marginTop: 5, display: 'flex', gap: 10, alignItems: 'center' }}>
                                 {locked ? (
-                                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>⏳ {formatCountdownClock(new Date(ch.publish_at).getTime() - scheduleNowTs)}</span>
+                                  <LiveCountdown target={new Date(ch.publish_at).getTime()}>
+                                    {remainingMs => <span style={{ fontVariantNumeric: 'tabular-nums' }}>⏳ {formatCountdownClock(remainingMs)}</span>}
+                                  </LiveCountdown>
                                 ) : (
                                   <span>{formatNumericDate(ch.created_at)}</span>
                                 )}
@@ -4254,7 +4268,10 @@ export default function App() {
                           // eslint-disable-next-line no-await-in-loop
                           const optimized = await optimizeImageFile(f, 1200);
                           // eslint-disable-next-line no-await-in-loop
-                          const parts = await splitTallImageFile(optimized, 6000);
+                          // ЗАСВАР #224 (код шинжилгээ): optimizeImageFile/splitTallImageFile
+                          // хоёул одоо {file, width, height} буцаадаг тул дараа нь дахин
+                          // decode хийхгvйгээр хэмжээг нь шууд авна.
+                          const parts = await splitTallImageFile(optimized.file, 6000);
                           expanded.push(...parts);
                         }
                       } catch (e) {
@@ -4332,7 +4349,10 @@ export default function App() {
                     }
 
                     for (let i = 0; i < filesToUpload.length; i++) {
-                      const file = filesToUpload[i];
+                      // ЗАСВАР #224 (код шинжилгээ): filesToUpload[i] нь одоо
+                      // {file, width, height} хэлбэртэй (optimizeImageFile/
+                      // splitTallImageFile-ээс шууд), дахин decode хийх шаардлагагvй.
+                      const { file, width: imgWidth, height: imgHeight } = filesToUpload[i];
                       const fileExt = file.name.split('.').pop();
                       // ЗАСВАР #194: дарааллыг DB-ийн page_number баганаас (доор
                       // insert хийгдэнэ) уншина, файлын нэрэнд дугаар шаардлагагvй —
@@ -4350,12 +4370,6 @@ export default function App() {
                       }
                       markUploadDone();
 
-                      // ЗАСВАР #223 (код шинжилгээ): уншигчийн хуудсанд aspect-ratio-гоор
-                      // зайг нь урьдчилан зарлаж, lazy зураг ачаалагдах vеийн layout
-                      // shift (CLS)-ыг арилгахын тулд бодит хэмжээг нь хадгална.
-                      let dims = null;
-                      try { dims = await getImageDimensions(file); } catch { /* хэмжээ дутуу vлдвэл ч зураг хадгалагдана */ }
-
                       // ЗАСВАР #63: эхний хуудсыг автоматаар thumbnail болгож хадгалдаг байсныг
                       // хассан — тэр нь дурын (санамсаргүй харагдах) хуудасны зургийг "cover"
                       // мэт харуулдаг байсан. Одоо зөвхөн admin ЗОРИУДАА оруулсан cover л
@@ -4364,8 +4378,8 @@ export default function App() {
                         chapter_id: chapterData.id,
                         image_url: publicUrl,
                         page_number: i + 1,
-                        width: dims?.width || null,
-                        height: dims?.height || null,
+                        width: imgWidth || null,
+                        height: imgHeight || null,
                       });
                       if (imgError) { notify(`Зураг ${i + 1} хадгалах алдаа: ` + imgError.message); uploadFailed = true; }
                     }
@@ -5602,22 +5616,21 @@ export default function App() {
                   let parts;
                   try {
                     const optimized = await optimizeImageFile(file, 1200);
-                    parts = await splitTallImageFile(optimized, 6000);
+                    // ЗАСВАР #224 (код шинжилгээ): optimizeImageFile/splitTallImageFile
+                    // хоёул {file, width, height} буцаадаг тул дараа нь дахин decode
+                    // хийж хэмжээ авах шаардлагагvй.
+                    parts = await splitTallImageFile(optimized.file, 6000);
                   } catch (e) {
                     notify(`Зураг хэсэглэхэд алдаа: ${e.message}`);
                     uploadFailed = true;
                     continue;
                   }
-                  for (const part of parts) {
+                  for (const { file: part, width: partWidth, height: partHeight } of parts) {
                     const ext = part.name.split('.').pop();
                     try {
                       // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
                       const url = await uploadToR2(part, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
-                      // ЗАСВАР #223 (код шинжилгээ): add-chapter урсгалтай адил, уншигчийн
-                      // хуудасны CLS-ыг арилгахын тулд бодит хэмжээг хадгална.
-                      let dims = null;
-                      try { dims = await getImageDimensions(part); } catch { /* хэмжээ дутуу vлдвэл ч зураг хадгалагдана */ }
-                      await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage, width: dims?.width || null, height: dims?.height || null });
+                      await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage, width: partWidth || null, height: partHeight || null });
                       nextPage++;
                     } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
                   }
