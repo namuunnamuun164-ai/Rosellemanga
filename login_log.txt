@@ -1,0 +1,4 @@
+navigated ok
+clicked login
+screenshot taken
+html saved

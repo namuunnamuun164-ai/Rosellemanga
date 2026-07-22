@@ -201,7 +201,6 @@ export default function App() {
   // (чирдэг, zoom-гvй) тайрах хэрэгсэл. "existing" бол шинэ файлыг тэр даруй
   // R2-д upload хийж DB мөрийг шинэчилнэ (applyExistingChapterImageEdit), "new"
   // бол зөвхөн local state дотор солино.
-  const editChapterPreviewListRef = useRef(null);
   const openEditChapterCrop = () => {
     if (!editChapterEditTarget) return;
     const { kind, index } = editChapterEditTarget;
@@ -5024,7 +5023,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ maxWidth: 720, margin: '0 auto', paddingBottom: chapterEditIndex !== null ? 90 : 0 }}>
-              <div ref={chapterPreviewListRef} style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
+              <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
                 {chapterFiles.map((file, i) => {
                   const isSelected = chapterEditIndex === i;
                   if (isSelected && chapterCropActive) {
@@ -5581,7 +5580,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ maxWidth: 720, margin: '0 auto', paddingBottom: editChapterEditTarget ? 90 : 0 }}>
-              <div ref={editChapterPreviewListRef} style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
+              <div style={{ width: `${readerZoom}%`, margin: '0 auto' }}>
                 {/* ЗАСВАР #164: "existing" (DB-д аль хэдийн байгаа) зургийг зөвхөн
                     Солих/Устгах/Зөөх л ажиллана (align/stitch хийхгvй — учир нь энэ нь
                     2 өөр DB мөрийг нэгтгэх/дараалал өөрчлөх нэмэлт логик шаардана). */}
