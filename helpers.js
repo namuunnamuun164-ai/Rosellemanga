@@ -150,6 +150,37 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
   return pieces;
 };
 
+// ЗАСВАР #200 (хэрэглэгчийн хvсэлт — дата хэрэглээ багасгах): бvлгийн хуудасны
+// зургийг унших дэлгэцэд шаардлагагvй өндөр нягтралтай (жишээ нь 2000-3000px+
+// өргөнтэй) хэвээр нь R2-д хадгалж, уншигч бvр тэр хэмжээгээр нь татдаг байсан.
+// Одоо upload хийхийн өмнө: (1) өргөн нь 1200px-ээс ДЭЭШ бол л 1200px рvv
+// (харьцаагаа хадгалж) жижигрvvлнэ — 1200-аас бага/тэнцvv бол хэмжээг vл
+// хөндөнө; (2) WEBP форматруу хөрвvvлнэ (ижил чанарт ихэвчлэн 25-50% бага байт).
+// Энэ нь ЗӨВХӨН ШИНЭЭР upload хийж буй зурагт нөлөөлнө, өмнө орсон хуучин
+// зургуудыг vл хөндөнө.
+export const optimizeImageFile = async (file, maxWidth = 1200, quality = 0.85) => {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+  // ЗАСВАР #193-тай адил шалтгаанаар (browser tab унах эрсдэл) хэт өндөр
+  // нягтралтай эх зургийг vргэлжлvvлэхийн өмнө шалгана.
+  if (width * height > MAX_SAFE_PIXELS) {
+    bitmap.close?.();
+    throw new Error(`Зураг хэт өндөр нягтралтай (${width}x${height}px) тул browser найдвартай боловсруулж чадахгvй байж магадгvй — эх зургийг жижигрvvлж дахин оруулна уу.`);
+  }
+  const targetWidth = Math.min(width, maxWidth);
+  const targetHeight = Math.round(height * (targetWidth / width));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+  bitmap.close?.();
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+  if (!blob) throw new Error('Зургийг шахахад алдаа гарлаа (санах ой хvрэлцэхгvй байж магадгvй).');
+  const baseName = file.name.replace(/\.[^.]+$/, '');
+  return new File([blob], `${baseName}.webp`, { type: 'image/webp' });
+};
+
 // ЗАСВАР #173: зургийг өгөгдсөн тэгш өнцөгт хэсгээр нь таслана. rect нь эх
 // зургийн БОДИТ (natural) пикселийн нэгжээр өгөгдсөн байх ёстой.
 export const cropImageFile = async (file, rect) => {

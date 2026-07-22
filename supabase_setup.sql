@@ -151,6 +151,25 @@ create table if not exists public.comments (
   created_at timestamptz not null default now()
 );
 
+-- ЗАСВАР #198 (код шинжилгээ): chapter_id/manga_id хоёул nullable тул (өмнөх
+-- ЗАСВАР #11-ийн зорилготойгоор) хvснэгтийн түвшинд ХОЁРЫН АЛЬ Ч НЭГ нь ЗААВАЛ
+-- байх ёстойг (нэг нь бvлгийн, нөгөө нь манганы ерөнхий сэтгэгдэл) хамгаалдаг
+-- CHECK constraint байгаагvй — клиент код (postComment/postMangaComment) л
+-- зөвхөн НЭГ талыг нь тавьдаг зан төлөвт итгэдэг байсан бөгөөд Network tab-аар
+-- (эсвэл ирээдvйд шинэ код бичихдээ санамсаргvй) хоёуланг нь null/аль алиныг
+-- нь тавьсан "хогийн" мөр vvсгэх боломжтой хэвээр байв.
+-- АНХААР: хэрэв энэ мөр "check constraint ... is violated by some row"
+-- алдаагаар унавал, эхэлж зөрчсөн мөрvvдийг доорх query-гээр олж vзнэ vv:
+--   select id, chapter_id, manga_id from public.comments
+--   where (chapter_id is null) = (manga_id is null);
+alter table public.comments
+  drop constraint if exists comments_chapter_xor_manga;
+alter table public.comments
+  add constraint comments_chapter_xor_manga check (
+    (chapter_id is not null and manga_id is null)
+    or (chapter_id is null and manga_id is not null)
+  );
+
 -- ============================================================
 -- 6) COMMENT_LIKES
 -- ============================================================

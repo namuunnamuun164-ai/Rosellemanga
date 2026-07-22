@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile } from './helpers';
-import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop } from './icons';
+import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
+import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
 import { PasswordField } from './PasswordField';
 import { Avatar, MangaCard, SectionHeader } from './components';
 
@@ -57,6 +57,13 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 900);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [genreOpen, setGenreOpen] = useState(false);
+  // ШИНЭ: мэдэгдлийн хонх — staff (admin/moderator/editor)-т сайт даяарх шинэ
+  // сэтгэгдэл, энгийн/VIP хэрэглэгчид зөвхөн ӨӨРИЙНХ нь сэтгэгдэлд ирсэн
+  // reply/like мэдэгдэл (доор тусад нь тооцно).
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [personalActivity, setPersonalActivity] = useState([]);
+  const [notifLastSeenAt, setNotifLastSeenAt] = useState(0);
   const [dbChapters, setDbChapters] = useState([]);
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [chapterImages, setChapterImages] = useState([]);
@@ -163,8 +170,13 @@ export default function App() {
     if (!img) return;
     setEditChapterEditBusy(true);
     try {
-      const newFile = await produceNewFileFrom(img);
-      const ext = (img.image_url.split('.').pop() || 'jpg').split('?')[0];
+      const producedFile = await produceNewFileFrom(img);
+      // ЗАСВАР #200 (хэрэглэгчийн хvсэлт — дата хэрэглээ багасгах): нэг зургийг
+      // солих/тайрах vед ч бусад upload зам шиг өргөнийг хязгаарлаж WebP болгоно
+      // (энд олон хуудас болгож хуваахгvй — нэг зургийг НЭГ зурагтай сольж байгаа
+      // тул page_number дараалал өөрчлөгдөх ёсгvй).
+      const newFile = await optimizeImageFile(producedFile, 1200);
+      const ext = 'webp';
       // ЗАСВАР #194 (код шинжилгээ): Date.now() бол дараалсан/таамаглаж болохуйц
       // тул crypto.randomUUID() болгов — доорх бусад chapters/ upload-той адил шалтгаан.
       const newUrl = await uploadToR2(newFile, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
@@ -317,9 +329,6 @@ export default function App() {
   const [chapterNumber, setChapterNumber] = useState('');
   const [chapterTitle, setChapterTitle] = useState('');
   const [chapterFiles, setChapterFiles] = useState([]);
-  // ЗАСВАР #163: "Бvтнээр" (өөрчлөхгvй) эсвэл "Хуваах" (4000px-ээс урт зургийг
-  // тэр хэмжээгээр таслаж, олон хуудас болгох) горим сонгох.
-  const [chapterSplitMode, setChapterSplitMode] = useState('full');
   // ЗАСВАР #169: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж Солих/Устгах/Зөөх хийж болно.
   const [chapterEditIndex, setChapterEditIndex] = useState(null); // chapterFiles-ийн alь index засварлаж буй
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
@@ -1268,6 +1277,110 @@ export default function App() {
     return list.map(c => ({ ...c, users: byId[c.user_id] || null }));
   };
 
+  // ШИНЭ: staff (admin/moderator/editor)-т зориулсан "шинэ сэтгэгдэл" мэдэгдлийн
+  // хонх — сайт даяар (бvх манга/бvлэг) сvvлийн 30 сэтгэгдлийг 30 секунд тутам
+  // татаж, хамгийн сvvлд харсан (localStorage-д хадгалсан) цагаас хойшхыг
+  // "уншаагvй" гэж vзнэ. Comments select RLS policy бvгдэд нээлттэй тул нэмэлт
+  // эрхийн шалгалт шаардлагагvй, харин UI-г зөвхөн isStaff vед л харуулна.
+  useEffect(() => {
+    if (!isStaff) return;
+    let cancelled = false;
+    const fetchActivity = () => {
+      supabase.from('comments')
+        .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, mangas(id, title)), mangas(id, title)')
+        .order('created_at', { ascending: false })
+        .limit(30)
+        .then(async ({ data, error }) => {
+          if (cancelled || error) return;
+          const list = await attachAuthors(data || []);
+          if (!cancelled) setRecentActivity(list);
+        });
+    };
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isStaff]);
+
+  // ШИНЭ: энгийн/VIP (staff БИШ) хэрэглэгчид зөвхөн ӨӨРСДИЙНХ нь сэтгэгдэлд
+  // ирсэн reply болон ❤️ like-ийг л мэдэгдэл болгож харуулна — staff-ийн дээрх
+  // "сайт даяарх" мэдэгдлээс ялгаатай, зөвхөн хувийн idsv шvvгдсэн.
+  useEffect(() => {
+    if (!currentUser || isStaff) return;
+    let cancelled = false;
+    const fetchPersonal = async () => {
+      // 1) миний сvvлийн 50 сэтгэгдлийн id — reply/like-ийн эх (query-г хязгаарлана)
+      const { data: ownComments } = await supabase.from('comments')
+        .select('id').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(50);
+      const ownIds = (ownComments || []).map(c => c.id);
+      if (cancelled) return;
+      if (ownIds.length === 0) { setPersonalActivity([]); return; }
+
+      const [repliesRes, likesRes] = await Promise.all([
+        supabase.from('comments')
+          .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, mangas(id, title)), mangas(id, title)')
+          .in('parent_id', ownIds).neq('user_id', currentUser.id)
+          .order('created_at', { ascending: false }).limit(20),
+        supabase.from('comment_likes')
+          .select('comment_id, user_id, created_at, comments!comment_id(content, chapter_id, manga_id, chapters(chapter_number, manga_id, mangas(id, title)), mangas(id, title))')
+          .in('comment_id', ownIds).neq('user_id', currentUser.id)
+          .order('created_at', { ascending: false }).limit(20),
+      ]);
+      if (cancelled) return;
+
+      const replies = (repliesRes.data || []).map(r => ({
+        id: `reply-${r.id}`, kind: 'reply', user_id: r.user_id, created_at: r.created_at,
+        content: r.content, sticker_url: r.sticker_url,
+        chapter_id: r.chapter_id, manga_id: r.manga_id, chapters: r.chapters, mangas: r.mangas,
+      }));
+      const likes = (likesRes.data || []).map(l => ({
+        id: `like-${l.comment_id}-${l.user_id}-${l.created_at}`, kind: 'like', user_id: l.user_id, created_at: l.created_at,
+        content: l.comments?.content, sticker_url: null,
+        chapter_id: l.comments?.chapter_id, manga_id: l.comments?.manga_id, chapters: l.comments?.chapters, mangas: l.comments?.mangas,
+      }));
+      const merged = [...replies, ...likes].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
+      const withAuthors = await attachAuthors(merged);
+      if (!cancelled) setPersonalActivity(withAuthors);
+    };
+    fetchPersonal();
+    const interval = setInterval(fetchPersonal, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [currentUser, isStaff]);
+
+  // Хэрэглэгчийн role-оос хамааран аль мэдэгдлийн жагсаалтыг харуулахыг сонгоно
+  const activeNotifFeed = isStaff ? recentActivity : personalActivity;
+  const notifStorageKey = isStaff ? 'staff_notif_last_seen_at' : `personal_notif_last_seen_${currentUser?.id || ''}`;
+
+  // "Сvvлд харсан" цагийг тухайн хэрэглэгч/feed-ийн localStorage key-ээс уншина
+  useEffect(() => {
+    if (!currentUser) { setNotifLastSeenAt(0); return; }
+    try { setNotifLastSeenAt(Number(localStorage.getItem(notifStorageKey)) || 0); } catch { setNotifLastSeenAt(0); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, isStaff]);
+
+  const unreadNotifCount = activeNotifFeed.filter(c => new Date(c.created_at).getTime() > notifLastSeenAt).length;
+
+  // Хонх дарахад цонх нээгдэх/хаагдах, НЭЭГДЭХ vед л "сvvлд харсан" цагийг шинэчилнэ
+  const toggleNotif = () => {
+    setNotifOpen(prev => {
+      const next = !prev;
+      if (next) {
+        const now = Date.now();
+        setNotifLastSeenAt(now);
+        try { localStorage.setItem(notifStorageKey, String(now)); } catch { /* хор хөнөөлгvй */ }
+      }
+      return next;
+    });
+  };
+
+  // Мэдэгдэл дээр дарахад тухайн сэтгэгдэл байрлах манга руу шилжvvлнэ
+  const goToNotification = (item) => {
+    setNotifOpen(false);
+    const mangaId = item.chapter_id ? item.chapters?.manga_id : item.manga_id;
+    const manga = dbMangas.find(m => m.id === mangaId);
+    if (!manga) { notify('Манга олдсонгvй (устсан байж магадгvй).'); return; }
+    goToDetail(manga);
+  };
+
   // ШИНЭ: сэтгэгдэл татах (нэр, avatar, like-ийн тоотой хамт)
   // isCancelled — өмнөх бүлгийн хүсэлт хожуу ирвэл state дарж бичихээс сэргийлэх (заавал биш)
   const fetchComments = (chapterId, isCancelled = () => false) => {
@@ -2148,6 +2261,58 @@ export default function App() {
             <span onClick={() => setSearchOpen(true)} style={{ cursor: 'pointer', color: '#aaa' }}>
               <IconSearch />
             </span>
+
+            {/* ШИНЭ: мэдэгдлийн хонх — staff-т сайт даяарх сэтгэгдэл, энгийн/VIP
+                хэрэглэгчид зөвхөн өөрсдийнх нь сэтгэгдэлд ирсэн reply/like */}
+            {currentUser && (
+              <div style={{ position: 'relative' }}>
+                <span onClick={toggleNotif} title="Мэдэгдэл" style={{ cursor: 'pointer', color: '#aaa', position: 'relative', display: 'flex' }}>
+                  <IconBell />
+                  {unreadNotifCount > 0 && (
+                    <span style={{ position: 'absolute', top: -6, right: -6, background: '#8B0000', color: '#fff', fontSize: 9, fontWeight: 800, borderRadius: 10, minWidth: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>
+                      {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                    </span>
+                  )}
+                </span>
+                {notifOpen && (
+                  <>
+                    <div onClick={() => setNotifOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 290 }} />
+                    <div style={{ position: 'absolute', top: '130%', right: 0, width: 320, maxWidth: '90vw', maxHeight: 420, overflowY: 'auto', background: '#141414', border: '1px solid #2a2a2a', borderRadius: 12, zIndex: 291, boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
+                      <div style={{ padding: '12px 14px', borderBottom: '1px solid #222', fontWeight: 700, fontSize: 13 }}>
+                        {isStaff ? 'ШИНЭ СЭТГЭГДЭЛ' : 'МИНИЙ МЭДЭГДЭЛ'}
+                      </div>
+                      {activeNotifFeed.length === 0 ? (
+                        <div style={{ padding: '20px 14px', fontSize: 12, color: '#555', textAlign: 'center' }}>Мэдэгдэл алга</div>
+                      ) : activeNotifFeed.map(item => {
+                        const mangaTitle = item.chapter_id ? item.chapters?.mangas?.title : item.mangas?.title;
+                        const chapterLabel = item.chapter_id && item.chapters ? ` · Бvлэг ${item.chapters.chapter_number}` : '';
+                        const isUnread = new Date(item.created_at).getTime() > notifLastSeenAt;
+                        // ШИНЭ: staff-ийн feed-т item.kind байхгvй (энгийн сэтгэгдэл);
+                        // энгийн/VIP хэрэглэгчийн feed-т 'reply'/'like' гэж ялгарна.
+                        const actionLabel = item.kind === 'reply' ? 'таны сэтгэгдэлд хариулав'
+                          : item.kind === 'like' ? 'таны сэтгэгдэлд ❤️ дарлаа'
+                          : (mangaTitle ? `→ ${mangaTitle}${chapterLabel}` : '');
+                        return (
+                          <div key={item.id} onClick={() => goToNotification(item)}
+                            style={{ display: 'flex', gap: 10, padding: '10px 14px', borderBottom: '1px solid #1c1c1c', cursor: 'pointer', background: isUnread ? 'rgba(139,0,0,0.08)' : 'transparent' }}>
+                            <Avatar url={item.users?.avatar_url} letter={(item.users?.name || '?')[0]} size={30} />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {item.users?.name || 'Хэрэглэгч'} <span style={{ fontWeight: 400, color: '#777' }}>{actionLabel}</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: '#ccc', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginTop: 2 }}>
+                                {item.content || (item.sticker_url ? '🖼️ Стикер' : '')}
+                              </div>
+                              <div style={{ fontSize: 10, color: '#555', marginTop: 3 }}>{formatMnDate(item.created_at)}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -3687,21 +3852,15 @@ export default function App() {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БҮЛГИЙН ЗУРАГНУУД (хуудас бүрээр, дараалсан)</div>
 
-                  {/* ЗАСВАР #163: "Бvтнээр" (өөрчлөхгvй) / "Хуваах" (4000px-ээс урт зургийг
-                      тэр хэмжээгээр таслаж олон хуудас болгох) горим сонголт. */}
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                    <button type="button" onClick={() => setChapterSplitMode('full')}
-                      style={{ flex: 1, padding: '7px 10px', borderRadius: 8, border: chapterSplitMode === 'full' ? '1px solid #8B0000' : '1px solid #2a2a2a', background: chapterSplitMode === 'full' ? 'rgba(139,0,0,0.15)' : '#1a1a1a', color: chapterSplitMode === 'full' ? '#fff' : '#888', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                      Бvтнээр
-                    </button>
-                    <button type="button" onClick={() => setChapterSplitMode('split')}
-                      style={{ flex: 1, padding: '7px 10px', borderRadius: 8, border: chapterSplitMode === 'split' ? '1px solid #8B0000' : '1px solid #2a2a2a', background: chapterSplitMode === 'split' ? 'rgba(139,0,0,0.15)' : '#1a1a1a', color: chapterSplitMode === 'split' ? '#fff' : '#888', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                      Хуваах (4000px)
-                    </button>
-                  </div>
-                  {chapterSplitMode === 'split' && (
-                    <div style={{ fontSize: 10, color: '#f5a623', marginBottom: 8 }}>4000px-ээс урт зураг тэр хэмжээгээр нь автоматаар олон хуудас болж хуваагдана (өргөн хэвээрээ vлдэнэ). Upload хийхэд арай удаан байж болно.</div>
-                  )}
+                  {/* ЗАСВАР #199 (хэрэглэгчийн хvсэлт): "Бvтнээр"/"Хуваах" гэсэн гараар
+                      сонгох товчийг хассан — оронд нь 6000px-ээс УРТ ЗУРАГ бvгд
+                      АВТОМАТААР хуваагдана. Учир нь маш урт (жишээ нь 60000px) зургийг
+                      бvтнээр нь (1 файлаар) upload хийвэл уншигчид тэр их хэмжээний
+                      зургийг НЭГ дор (дата ихээр зарцуулж, удаан ачаалж) татаж авах
+                      шаардлагатай болдог байсан — хэсэг хэсгээр нь (6000px тус бvр)
+                      progressively ачаалуулснаар унших туршлага/дата хэрэглээ хоёул сайжирна.
+                  */}
+                  <div style={{ fontSize: 10, color: '#555', marginBottom: 8 }}>6000px-ээс урт зураг унших vед хялбар болгохын тулд автоматаар олон хуудас болж хуваагдана (өргөн хэвээрээ vлдэнэ).</div>
 
                   {/* ЗАСВАР #23: сонгосон зургуудыг шууд upload хийдэггүй болгож, эхлээд
                       шалгах/устгах/дараалал сольж болдог preview үзүүлдэг болгосон.
@@ -3793,16 +3952,23 @@ export default function App() {
                     setChapterUploading(true);
                     setChapterUploadProgress(0);
 
-                    // ЗАСВАР #163: "Хуваах" горим сонгосон бол 4000px-ээс урт зургийг
-                    // upload эхлэхээс өмнө хэсэг хэсэг болгож таслана (нэг нэгээр нь,
-                    // зэрэг биш — олон том зургийг зэрэг декодлож санах ойг дvvргэхээс сэргийлнэ).
+                    // ЗАСВАР #199 (хэрэглэгчийн хvсэлт): гараар сонгодог "Хуваах" горимыг
+                    // хассан — 6000px-ээс урт зургийг upload эхлэхээс өмнө vргэлж
+                    // автоматаар хэсэг хэсэг болгож таслана (нэг нэгээр нь, зэрэг биш —
+                    // олон том зургийг зэрэг декодлож санах ойг дvvргэхээс сэргийлнэ).
+                    // ЗАСВАР #200 (хэрэглэгчийн хvсэлт — дата хэрэглээ багасгах): хуваахаас
+                    // ӨМНӨ өргөнийг нь (1200px-ээс дээш бол л) багасгаж, WebP рvv хөрвvvлнэ —
+                    // ингэснээр давхар (a) уншигчийн татах байт багасна, (б) хуваах vеийн
+                    // pixel тоо цөөрч, MAX_SAFE_PIXELS-д хvрэх эрсдэл ч буурна.
                     let filesToUpload = chapterFiles;
-                    if (chapterSplitMode === 'split') {
+                    {
                       const expanded = [];
                       try {
                         for (const f of chapterFiles) {
                           // eslint-disable-next-line no-await-in-loop
-                          const parts = await splitTallImageFile(f, 4000);
+                          const optimized = await optimizeImageFile(f, 1200);
+                          // eslint-disable-next-line no-await-in-loop
+                          const parts = await splitTallImageFile(optimized, 6000);
                           expanded.push(...parts);
                         }
                       } catch (e) {
@@ -5118,13 +5284,27 @@ export default function App() {
                 let nextPage = editChapterExistingImages.length + 1;
                 let uploadFailed = false;
                 for (const file of editChapterNewFiles) {
-                  const ext = file.name.split('.').pop();
+                  // ЗАСВАР #199/#200 (хэрэглэгчийн хvсэлт): нэмэх (add-chapter) урсгалтай
+                  // адил, энд ч эхлээд өргөнийг (1200px-ээс дээш бол) багасгаж WebP
+                  // болгоод, дараа нь 6000px-ээс урт бол автоматаар хэсэглэнэ.
+                  let parts;
                   try {
-                    // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
-                    const url = await uploadToR2(file, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
-                    await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage });
-                    nextPage++;
-                  } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
+                    const optimized = await optimizeImageFile(file, 1200);
+                    parts = await splitTallImageFile(optimized, 6000);
+                  } catch (e) {
+                    notify(`Зураг хэсэглэхэд алдаа: ${e.message}`);
+                    uploadFailed = true;
+                    continue;
+                  }
+                  for (const part of parts) {
+                    const ext = part.name.split('.').pop();
+                    try {
+                      // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
+                      const url = await uploadToR2(part, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
+                      await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage });
+                      nextPage++;
+                    } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
+                  }
                 }
 
                 // ЗАСВАР #184: шинэ зураг нэмсэн бол л (эсрэг тохиолдолд is_hidden
