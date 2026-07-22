@@ -537,6 +537,14 @@ export default function App() {
   const chapterCommentsRef = useRef(null);
   const mangaCommentsRef = useRef(null);
   const [pendingScrollToComments, setPendingScrollToComments] = useState(false);
+  // ЗАСВАР #203 (хэрэглэгчийн хvсэлт): мэдэгдлээс орж ирэхэд зурган хуудас/манганы
+  // дэлгэрэнгvй агуулгыг харуулахгvй, зөвхөн сэтгэгдлийн хэсгийг харуулна.
+  const [commentsOnlyView, setCommentsOnlyView] = useState(false);
+  // ЗАСВАР #204 (код шинжилгээ): доорх "манга сольмогц detailTab-ыг 'chapters'
+  // болгож дахин тохируулах" effect нь goToNotification-ийн setDetailTab('rating')-г
+  // дараа нь дарж бичдэг (унтардаг) байсан тул манганы сэтгэгдлийн мэдэгдэл дээр
+  // дарахад "vнэлгээ+сэтгэгдэл" биш "Бvлгvvд" tab руу л орчихдог байв.
+  const skipDetailTabResetRef = useRef(false);
   // ЗАСВАР #108: сэтгэгдэлд хавсаргах сонгосон стикер, upload хийж буй slot
   const [selectedSticker, setSelectedSticker] = useState(null);
   const [stickerUploading, setStickerUploading] = useState(null);
@@ -793,6 +801,10 @@ export default function App() {
     setSelected(manga);
     setMangaNoteEditing(false);
     setPage('detail');
+    // ЗАСВАР #203: энгийн (жирийн) навигацаар орж ирвэл vргэлж БvРЭН агуулгыг
+    // (comments-only бус) харуулна — commentsOnlyView зөвхөн goToNotification-с
+    // дараа нь тусад нь идэвхжvvлнэ.
+    setCommentsOnlyView(false);
   };
 
   // ЗАСВАР #155: production-д гарахын өмнө нийт сайт даяар (60 гаруй газарт)
@@ -1065,6 +1077,39 @@ export default function App() {
     return `/${page}`;
   }, [page, selected, selectedChapter]);
 
+  // ШИНЭ (SEO): SPA тул бvх хуудас index.html-ийн НЭГ ижил <title>/meta
+  // description-той байсан — Google/browser tab хуудас бvрийг ялгаж чадахгvй
+  // байв. Хуудас солигдох бvрт эдгээрийг тухайн агуулгад тохируулж шинэчилнэ.
+  useEffect(() => {
+    const SITE_NAME = 'Roselle Manga';
+    const DEFAULT_TITLE = 'Roselle Manga — Монгол хэл дээрх манга, манхва унших сайт';
+    const DEFAULT_DESC = 'Roselle Manga (rosellemanga.mn) — Монгол хэлээр орчуулсан манга, манхва, вэбтvvнийг vнэгvй унших цахим сайт. Шинэ бvлэг өдөр бvр нэмэгддэг.';
+    let title = DEFAULT_TITLE;
+    let description = DEFAULT_DESC;
+    if (page === 'detail' && selected) {
+      title = `${selected.title} — ${SITE_NAME}`;
+      description = (selected.desc || '').trim().slice(0, 160) || DEFAULT_DESC;
+    } else if (page === 'reader' && selected && selectedChapter) {
+      title = `${selected.title} — Бvлэг ${selectedChapter.chapter_number} — ${SITE_NAME}`;
+    } else if (page === 'all') {
+      title = `Бvх манга, манхва — ${SITE_NAME}`;
+    } else if (page === 'schedule') {
+      title = `Гарах хуваарь — ${SITE_NAME}`;
+    } else if (page === 'vip') {
+      title = `VIP эрх авах — ${SITE_NAME}`;
+    } else if (page === 'library') {
+      title = `Миний сан — ${SITE_NAME}`;
+    }
+    document.title = title;
+    const setMeta = (selector, attr, value) => {
+      const el = document.querySelector(selector);
+      if (el) el.setAttribute(attr, value);
+    };
+    setMeta('meta[name="description"]', 'content', description);
+    setMeta('meta[property="og:title"]', 'content', title);
+    setMeta('meta[property="og:description"]', 'content', description);
+  }, [page, selected, selectedChapter]);
+
   const restoreFromPath = useCallback((pathname) => {
     const chMatch = pathname.match(/^\/manga\/(\d+)\/chapter\/([\d.]+)$/);
     const mMatch = pathname.match(/^\/manga\/(\d+)$/);
@@ -1215,7 +1260,11 @@ export default function App() {
     let cancelled = false;
     fetchMangaRatings(selected.id, () => cancelled);
     fetchMangaComments(selected.id, () => cancelled);
-    setDetailTab('chapters');
+    if (skipDetailTabResetRef.current) {
+      skipDetailTabResetRef.current = false;
+    } else {
+      setDetailTab('chapters');
+    }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, selected?.id]);
@@ -1399,28 +1448,44 @@ export default function App() {
         created_at: item.chapters.created_at,
         thumbnail_url: item.chapters.thumbnail_url,
       });
+      // ЗАСВАР #203 (хэрэглэгчийн хvсэлт): openReader-ийн дараа тавина — openReader
+      // өөрөө (энгийн навигацийн vед БvРЭН харагдахын тулд) үvнийг false болгодог.
+      setCommentsOnlyView(true);
       setPendingScrollToComments(true);
     } else {
       const manga = dbMangas.find(m => m.id === item.manga_id);
       if (!manga) { notify('Манга олдсонгvй (устсан байж магадгvй).'); return; }
+      // ЗАСВАР #204: "манга сольмогц detailTab-ыг 'chapters' болгоно" гэсэн effect
+      // (доор, [page, selected?.id]-д хамаарсан) энэ доорх setDetailTab('rating')-ыг
+      // дараа нь дарж бичихээс сэргийлнэ.
+      skipDetailTabResetRef.current = true;
       goToDetail(manga);
       setDetailTab('rating');
+      setCommentsOnlyView(true);
       setPendingScrollToComments(true);
     }
   };
 
-  // ЗАСВАР #201: pendingScrollToComments идэвхжсэн vед, тухайн хуудас (reader
-  // эсвэл detail-ийн rating tab) бодитоор DOM-д харагдмагц сэтгэгдлийн хэсэг рvv
-  // гvйлгэнэ (жижиг хугацаа хойшлуулж, layout бvрэн тогтворжихыг хvлээнэ).
+  // ЗАСВАР #201/#202 (код шинжилгээ): pendingScrollToComments идэвхжсэн vед
+  // сэтгэгдлийн хэсэг рvv гvйлгэнэ. ЗАСВАР #123-ийн window.scrollTo(0,0) effect
+  // (дээш, page/selected/selectedChapter солигдох бvр дээшээ шилжvvлдэг) энэ
+  // effect-ээс ӨМНӨ ажилладаг тул нэг л удаа шууд scrollIntoView хийвэл тэр
+  // дараагаа гvйцэтгэгдэнэ гэдэг нь баталгаатай. Гэвч бvлгийн зургууд (ялангуяа
+  // олон хэсэгт хуваагдсан урт зураг) АСИНХРОНААР ачаалагдсаар (progressive)
+  // байх vед дээд талын зураг ачаалагдаж намхнаас vvдэн layout шилждэг тул НЭГ
+  // удаагийн scrollIntoView хийсний дараа сэтгэгдлийн хэсэг дэлгэцнээс "гарч"
+  // (доош шилжиж) хэрэглэгчид "яг очсонгvй" мэт санагддаг байв — тиймээс хэд
+  // хэдэн удаа (progressively) дахин чиглvvлнэ.
   useEffect(() => {
     if (!pendingScrollToComments) return;
     const ref = page === 'reader' ? chapterCommentsRef : page === 'detail' ? mangaCommentsRef : null;
     if (!ref) { setPendingScrollToComments(false); return; }
-    const t = setTimeout(() => {
+    const delays = [250, 700, 1400, 2200];
+    const timers = delays.map(ms => setTimeout(() => {
       ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setPendingScrollToComments(false);
-    }, 200);
-    return () => clearTimeout(t);
+    }, ms));
+    const cleanupTimer = setTimeout(() => setPendingScrollToComments(false), delays[delays.length - 1] + 100);
+    return () => { timers.forEach(clearTimeout); clearTimeout(cleanupTimer); };
   }, [page, selectedChapter, pendingScrollToComments]);
 
   // ШИНЭ: сэтгэгдэл татах (нэр, avatar, like-ийн тоотой хамт)
@@ -1940,6 +2005,9 @@ export default function App() {
     setSelected(manga);
     setSelectedChapter(chapter);
     setPage('reader');
+    // ЗАСВАР #203: энгийн навигацаар (chapter switcher, prev/next, MangaCard
+    // гэх мэт) орж ирвэл vргэлж БvРЭН агуулгыг харуулна.
+    setCommentsOnlyView(false);
     const nextHistory = [
       { mangaId: manga.id, chapter: chapter.chapter_number, date: Date.now() },
       ...history.filter(h => h.mangaId !== manga.id),
@@ -2331,8 +2399,11 @@ export default function App() {
                         const isUnread = new Date(item.created_at).getTime() > notifLastSeenAt;
                         // ШИНЭ: staff-ийн feed-т item.kind байхгvй (энгийн сэтгэгдэл);
                         // энгийн/VIP хэрэглэгчийн feed-т 'reply'/'like' гэж ялгарна.
-                        const actionLabel = item.kind === 'reply' ? 'таны сэтгэгдэлд хариулав'
-                          : item.kind === 'like' ? 'таны сэтгэгдэлд ❤️ дарлаа'
+                        // ЗАСВАР #204 (хэрэглэгчийн хvсэлт): reply/like мэдэгдэлд ч аль
+                        // манга/бvлэгт хамаарахыг (бvлгийн дугаарын хамт) харуулна.
+                        const contextLabel = mangaTitle ? ` (${mangaTitle}${chapterLabel})` : '';
+                        const actionLabel = item.kind === 'reply' ? `таны сэтгэгдэлд хариулав${contextLabel}`
+                          : item.kind === 'like' ? `таны сэтгэгдэлд ❤️ дарлаа${contextLabel}`
                           : (mangaTitle ? `→ ${mangaTitle}${chapterLabel}` : '');
                         return (
                           <div key={item.id} onClick={() => goToNotification(item)}
@@ -2927,6 +2998,23 @@ export default function App() {
             3 tab-тай (Бvлгvvд / Мэдээлэл / Vнэлгээ+сэтгэгдэл) шинэ бvтэц. */}
         {page === 'detail' && selected && (
           <div>
+            {/* ЗАСВАР #203 (хэрэглэгчийн хvсэлт): мэдэгдлээс орж ирэхэд манганы
+                баннер/тайлбар/tab-г огт харуулахгvй, шууд сэтгэгдэлд хvргэх
+                энгийн толгой хэсэг. */}
+            {commentsOnlyView && (
+              <div style={{ position: 'sticky', padding: '1rem', top: 0, zIndex: 60, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <button onClick={() => setPage(previousPage)} title="Буцах"
+                  style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <div style={{ minWidth: 0, flex: 1, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected.title}</div>
+                <span onClick={() => setCommentsOnlyView(false)} style={{ cursor: 'pointer', fontSize: 11, color: '#8B0000', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                  Бvтнээр харах
+                </span>
+              </div>
+            )}
+            {!commentsOnlyView && (
+            <>
             <div style={{ position: 'relative', height: 220, overflow: 'hidden' }}>
               {/* ЗАСВАР #114: дэвсгэрт cover биш, манганы panel/banner зургийг ашиглана
                   (banner байхгvй бол л cover-с нөөцлөнө) */}
@@ -3038,6 +3126,8 @@ export default function App() {
                 </div>
               ))}
             </div>
+            </>
+            )}
 
             <div style={{ padding: '1.5rem 2rem' }}>
               {/* ЗАСВАР #110: "Бvлгvvд" tab — гарчиг + орчуулагчийн нэр (энгийн, хvрээгvй) + бvлгийн жагсаалт */}
@@ -3195,6 +3285,9 @@ export default function App() {
               {detailTab === 'rating' && (
                 <div>
                   {/* ЗАСВАР #111: 10 товчны оронд тоо бичдэг, илvv загварлаг vнэлгээний карт */}
+                  {/* ЗАСВАР #203: мэдэгдлээс орж ирэхэд (commentsOnlyView) vнэлгээний
+                      картыг нуугаад шууд сэтгэгдлийг харуулна. */}
+                  {!commentsOnlyView && (
                   <div style={{ background: 'linear-gradient(160deg, #1a1210, #111)', border: '1px solid #2a1e1a', borderRadius: 18, padding: '1.75rem 1.25rem', marginBottom: '2rem', textAlign: 'center' }}>
                     {(() => {
                       const count = mangaRatings.length;
@@ -3227,6 +3320,7 @@ export default function App() {
                       );
                     })()}
                   </div>
+                  )}
 
                   <div ref={mangaCommentsRef} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.25rem' }}>
                     <div style={{ width: 4, height: 18, background: '#8B0000', borderRadius: 2 }} />
@@ -3460,6 +3554,26 @@ export default function App() {
         {/* READER PAGE — ЗАСВАР #19: 100% өргөнөөр (edge-to-edge) харагдана, ойртуулах (pinch-zoom) хориглосон */}
         {page === 'reader' && selectedChapter && (
           <div style={{ touchAction: 'pan-y pinch-zoom' }}>
+            {/* ЗАСВАР #203 (хэрэглэгчийн хvсэлт): мэдэгдлээс орж ирэхэд зурган
+                хуудсыг огт харуулахгvй, шууд сэтгэгдлийн хэсэгт хvргэх энгийн
+                толгой хэсэг. */}
+            {commentsOnlyView && (
+              <div style={{ position: 'sticky', padding: '1rem', top: 0, zIndex: 60, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <button onClick={() => setPage('detail')} title="Буцах"
+                  style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected?.title}</div>
+                  <div style={{ fontSize: 11, color: '#888' }}>Бvлэг {selectedChapter.chapter_number}</div>
+                </div>
+                <span onClick={() => setCommentsOnlyView(false)} style={{ cursor: 'pointer', fontSize: 11, color: '#8B0000', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                  Бvтнээр харах
+                </span>
+              </div>
+            )}
+            {!commentsOnlyView && (
+            <>
             {/* ЗАСВАР #34: доошоо гүйлгэсэн ч буцах товч үргэлж хүрч болохоор
                 sticky (шидэгдэж) байрлалтай болгосон — өмнө нь энгийн урсгалд
                 байсан тул урт бүлгийг доош гүйлгэхэд буцах товч дэлгэцээс гарч
@@ -3561,6 +3675,8 @@ export default function App() {
                   );
                 })()}
               </div>
+            )}
+            </>
             )}
 
             {/* ШИНЭ: СЭТГЭГДЛИЙН ХЭСЭГ — ЗАСВАР #88: гар утсан дэлгэц дээр 100%
