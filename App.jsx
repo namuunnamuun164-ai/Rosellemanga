@@ -14,6 +14,9 @@ export default function App() {
   const [previousPage, setPreviousPage] = useState('home');
   // ШИНЭ: манга хуудсанд admin бичдэг тэмдэглэл засах горим
   const [mangaNoteEditing, setMangaNoteEditing] = useState(false);
+  // ШИНЭ: манга дэлгэрэнгvй хуудаснаас Facebook/Messenger/утасны native share (Instagram
+  // гэх мэт бvх суулгасан app-ыг хамарна) руу хуваалцах цэс
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [mangaNoteDraft, setMangaNoteDraft] = useState('');
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [showPopup, setShowPopup] = useState(false);
@@ -30,6 +33,8 @@ export default function App() {
   const [paymentRequests, setPaymentRequests] = useState([]);
   // ЗАСВАР #163: admin-д VIP эрх авсан хэрэглэгчдийн жагсаалт (имэйл + vлдсэн хоног)
   const [vipUsers, setVipUsers] = useState([]);
+  // ШИНЭ: VIP хэрэглэгчдийн жагсаалтаас имэйлээр (жишээ нь gmail) хайх
+  const [vipUserSearch, setVipUserSearch] = useState('');
   // ЗАСВАР #163: admin-ий статистик таб — цагаар идэвхжил + сvvлийн 1 сарын топ манга
   const [viewsByHour, setViewsByHour] = useState([]);
   const [topMangaMonth, setTopMangaMonth] = useState([]);
@@ -80,6 +85,8 @@ export default function App() {
   const [vipDays, setVipDays] = useState('30');
   const [vipSaving, setVipSaving] = useState(false);
   const [posterFile, setPosterFile] = useState(null);
+  // ШИНЭ: манга нэмэхдээ шууд нуугдмал (is_hidden) байдлаар vvсгэх сонголт
+  const [adminMangaHidden, setAdminMangaHidden] = useState(false);
   // ШИНЭ: нүүр хэсгийн "Санал болгох" мөрөнд ашиглах урт нарийн (portrait) баннер зураг
   const [bannerFile, setBannerFile] = useState(null);
   // ШИНЭ: оруулсан мангаг засах (edit) цонх
@@ -625,6 +632,8 @@ export default function App() {
   const [readChapters, setReadChapters] = useState({});
   // ШИНЭ: role систем, нийтлэх урсгал, report
   const [chapterIsVip, setChapterIsVip] = useState(false);
+  // ШИНЭ: бvлэг нэмэхдээ (амжилттай upload дуусаад ч) зориудаар нуугдмал vлдээх сонголт
+  const [chapterHidden, setChapterHidden] = useState(false);
   // ЗАСВАР #60: "ҮНЭГҮЙ"/"VIP" бэлгэдлийн оронд admin өөрөө бичих дурын тэмдэглэгээ (жишээ нь S1 END)
   const [chapterLabel, setChapterLabel] = useState('');
   // ШИНЭ: admin/moderator шууд нэмэхдээ ч ирээдүйн гарах цаг товлож болно
@@ -1205,6 +1214,35 @@ export default function App() {
     if (page === 'home') return '/';
     return `/${page}`;
   }, [page, selected, selectedChapter]);
+
+  // ШИНЭ: манга хуваалцах — mobile дээр navigator.share() ашиглана (Instagram,
+  // Messenger, Facebook гэх мэт төхөөрөмж дээр суулгасан бvх app-ыг өөрөө
+  // жагсаана, тул тус бvрт нь гараар URL scheme бичих шаардлагагvй/найдваргvй
+  // байдлаас зайлсхийнэ), дэмжигдэхгvй (desktop) орчинд Facebook + холбоос хуулах-руу бууна.
+  const shareManga = (manga) => {
+    const url = `${window.location.origin}/manga/${manga.id}`;
+    if (navigator.share) {
+      navigator.share({ title: manga.title, url }).catch(() => {});
+      setShareMenuOpen(false);
+      return;
+    }
+    setShareMenuOpen(o => !o);
+  };
+  const shareToFacebook = (manga) => {
+    const url = `${window.location.origin}/manga/${manga.id}`;
+    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank', 'noopener,noreferrer,width=600,height=520');
+    setShareMenuOpen(false);
+  };
+  const copyMangaLink = async (manga) => {
+    const url = `${window.location.origin}/manga/${manga.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      notify('Холбоос хуулагдлаа 📋');
+    } catch {
+      notify('Холбоос хуулж чадсангvй');
+    }
+    setShareMenuOpen(false);
+  };
 
   // ШИНЭ (SEO): SPA тул бvх хуудас index.html-ийн НЭГ ижил <title>/meta
   // description-той байсан — Google/browser tab хуудас бvрийг ялгаж чадахгvй
@@ -3188,10 +3226,40 @@ export default function App() {
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
 
-              <button onClick={() => toggleLibrary(selected.id)}
-                style={{ position: 'absolute', top: 16, right: 16, zIndex: 5, background: library.includes(selected.id) ? 'rgba(139,0,0,0.85)' : 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '8px 16px', borderRadius: 6, fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(6px)', fontWeight: 700 }}>
-                {library.includes(selected.id) ? '★ Хадгалсан' : '☆ Хадгалах'}
-              </button>
+              <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 5, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => shareManga(selected)} title="Хуваалцах"
+                    style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', cursor: 'pointer', backdropFilter: 'blur(6px)' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                  </button>
+                  {/* ШИНЭ: navigator.share дэмжигдэхгvй (desktop) орчинд бууж очих цэс —
+                      Facebook + холбоос хуулах (Instagram/Messenger/story зэрэгт найдвартай
+                      web URL байхгvй тул mobile дээр native share sheet-ээр л дамждаг). */}
+                  {shareMenuOpen && !navigator.share && (
+                    <>
+                      <div onClick={() => setShareMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                      <div style={{ position: 'absolute', top: '120%', right: 0, width: 200, background: '#161616', border: '1px solid #2a2a2a', borderRadius: 10, zIndex: 61, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
+                        <div onClick={() => shareToFacebook(selected)}
+                          style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#1e2430'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                          📘 Facebook-д хуваалцах
+                        </div>
+                        <div onClick={() => copyMangaLink(selected)}
+                          style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', borderTop: '1px solid #222' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#1e2430'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                          🔗 Холбоос хуулах
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <button onClick={() => toggleLibrary(selected.id)}
+                  style={{ background: library.includes(selected.id) ? 'rgba(139,0,0,0.85)' : 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '8px 16px', borderRadius: 6, fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(6px)', fontWeight: 700 }}>
+                  {library.includes(selected.id) ? '★ Хадгалсан' : '☆ Хадгалах'}
+                </button>
+              </div>
             </div>
 
             {/* Голлосон том cover */}
@@ -3787,46 +3855,48 @@ export default function App() {
               </div>
             </div>
 
-            {/* ШИНЭ: доод талын унших хяналтын мөр — толгой хэсэгтэй адил, дэлгэцийг
-                дээшлvvлэхэд гарч ирж, доошлуулахад нуугдана (readerHeaderVisible-ийг хамт ашиглана). */}
-            <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 60, padding: '10px 16px', boxSizing: 'border-box', background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: 10, transform: readerHeaderVisible ? 'translateY(0)' : 'translateY(100%)', opacity: readerHeaderVisible ? 1 : 0, transition: 'transform 0.25s ease, opacity 0.25s ease' }}>
-              {(() => {
-                const idx = dbChapters.findIndex(c => c.id === selectedChapter.id);
-                const prevCh = idx > 0 ? dbChapters[idx - 1] : null;
-                const nextCh = idx >= 0 && idx < dbChapters.length - 1 ? dbChapters[idx + 1] : null;
-                return (
-                  <>
-                    <button disabled={!prevCh} onClick={() => prevCh && openReader(selected, prevCh)} title="Өмнөх бvлэг"
-                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: prevCh ? '#fff' : '#444', cursor: prevCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-                    </button>
+            {/* ШИНЭ: доод талын унших хяналтын мөр — толгой хэсэгтэй адил дэлгэцийг
+                дээшлvvлэхэд гарч ирж, доошлуулахад нуугдана. ЗАСВАР: явцын мөрийг
+                чирэхэд өөрөө scroll vvсгэж (seekReaderProgress → window.scrollTo)
+                тэр нь мөрийг дундаас нь нуучихдаг тул "барьцгvй" мэдрэгддэг байсан —
+                гэхдээ 100%-д (бvлгийн эцэст) хvрэхэд vргэлж харагдаж vлдэнэ. */}
+            {(() => {
+              const barVisible = readerHeaderVisible || readerScrollPercent >= 100;
+              const idx = dbChapters.findIndex(c => c.id === selectedChapter.id);
+              const prevCh = idx > 0 ? dbChapters[idx - 1] : null;
+              const nextCh = idx >= 0 && idx < dbChapters.length - 1 ? dbChapters[idx + 1] : null;
+              return (
+                <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 60, padding: '7px 10px', boxSizing: 'border-box', background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: 6, transform: barVisible ? 'translateY(0)' : 'translateY(100%)', opacity: barVisible ? 1 : 0, transition: 'transform 0.25s ease, opacity 0.25s ease' }}>
+                  <button disabled={!prevCh} onClick={() => prevCh && openReader(selected, prevCh)} title="Өмнөх бvлэг"
+                    style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: prevCh ? '#fff' : '#444', cursor: prevCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                  </button>
 
-                    <div ref={readerProgressTrackRef} onPointerDown={startReaderProgressDrag} onTouchStart={startReaderProgressDrag}
-                      style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', position: 'relative', cursor: 'pointer' }}>
-                      <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: `${readerScrollPercent}%`, borderRadius: 3, background: 'linear-gradient(to right, #6fa8ff, #3b82f6)' }} />
-                      <div style={{ position: 'absolute', top: '50%', left: `${readerScrollPercent}%`, transform: 'translate(-50%, -50%)', width: 14, height: 14, borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 0 3px rgba(59,130,246,0.3)' }} />
-                    </div>
+                  <div ref={readerProgressTrackRef} onPointerDown={startReaderProgressDrag} onTouchStart={startReaderProgressDrag}
+                    style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.12)', position: 'relative', cursor: 'pointer' }}>
+                    <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: `${readerScrollPercent}%`, borderRadius: 2, background: 'linear-gradient(to right, #6fa8ff, #3b82f6)' }} />
+                    <div style={{ position: 'absolute', top: '50%', left: `${readerScrollPercent}%`, transform: 'translate(-50%, -50%)', width: 11, height: 11, borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 0 2px rgba(59,130,246,0.3)' }} />
+                  </div>
 
-                    <span style={{ fontSize: 13, color: '#ccc', minWidth: 36, textAlign: 'center', flexShrink: 0 }}>{readerScrollPercent}%</span>
+                  <span style={{ fontSize: 11, color: '#ccc', minWidth: 28, textAlign: 'center', flexShrink: 0 }}>{readerScrollPercent}%</span>
 
-                    <button disabled={!nextCh} onClick={() => nextCh && openReader(selected, nextCh)} title="Дараах бvлэг"
-                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: nextCh ? '#fff' : '#444', cursor: nextCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-                    </button>
+                  <button disabled={!nextCh} onClick={() => nextCh && openReader(selected, nextCh)} title="Дараах бvлэг"
+                    style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: nextCh ? '#fff' : '#444', cursor: nextCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
 
-                    <button onClick={scrollReaderToTop} title="Дээшээ"
-                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-                    </button>
+                  <button onClick={scrollReaderToTop} title="Дээшээ"
+                    style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                  </button>
 
-                    <button onClick={scrollReaderToBottom} title="Доошоо"
-                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-                    </button>
-                  </>
-                );
-              })()}
-            </div>
+                  <button onClick={scrollReaderToBottom} title="Доошоо"
+                    style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* ЗАСВАР #85: бүлгийн зургийг татаж авахаас сэргийлэв (right-click
                 context menu + drag хоёуланг нь хориглов). 100% хамгаалалт биш
@@ -4122,6 +4192,12 @@ export default function App() {
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Оруулаагүй бол poster зураг ашиглагдана</div>
                 </div>
+                {/* ШИНЭ: манга нэмэхдээ шууд нуугдмал байдлаар vvсгэх сонголт */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer', fontSize: 13, color: '#aaa' }}>
+                  <input type="checkbox" checked={adminMangaHidden} onChange={e => setAdminMangaHidden(e.target.checked)}
+                    style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
+                  🥀 Нуугдмал байдлаар нэмэх (зөвхөн ажилтан харна, дараа ил гаргаж болно)
+                </label>
                 <button disabled={mangaSaving} onClick={async () => {
                   // ЗАСВАР #142: олон дарахад давхар vvсгэхээс сэргийлж, хамгийн эхэнд шалгана
                   // (disabled attribute React-ийн дараагийн render хvртэл хойшлогддог тул
@@ -4159,6 +4235,7 @@ export default function App() {
                       poster_url: posterUrl,
                       banner_url: bannerUrl || null,
                       created_by: currentUser.id,
+                      is_hidden: adminMangaHidden,
                     });
                     if (error) notify('Алдаа: ' + error.message);
                     else {
@@ -4166,6 +4243,7 @@ export default function App() {
                       setAdminManga({ title: '', desc: '', genres: [], status: 'Гарч байгаа' });
                       setPosterFile(null);
                       setBannerFile(null);
+                      setAdminMangaHidden(false);
                       fetchMangas(); // ЗАСВАР: жагсаалтыг шууд шинэчилнэ (өмнө нь refresh хэрэгтэй байсан)
                     }
                   } catch (e) {
@@ -4281,6 +4359,13 @@ export default function App() {
                   <input type="checkbox" checked={chapterIsVip} onChange={e => setChapterIsVip(e.target.checked)}
                     style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
                   VIP бүлэг (зөвхөн эрхтэй хэрэглэгч уншина)
+                </label>
+
+                {/* ШИНЭ: upload амжилттай дуусаад ч зориудаар нуугдмал vлдээх сонголт */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer', fontSize: 13, color: '#aaa' }}>
+                  <input type="checkbox" checked={chapterHidden} onChange={e => setChapterHidden(e.target.checked)}
+                    style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
+                  🥀 Нуугдмал байдлаар нэмэх (зөвхөн ажилтан харна, дараа ил гаргаж болно)
                 </label>
 
                 {/* ЗАСВАР #60: "ҮНЭГҮЙ"/"VIP" бэлгэдлийн оронд бичдэг дурын тэмдэглэгээ */}
@@ -4467,8 +4552,10 @@ export default function App() {
                     // ЗАСВАР #163: бvх зураг амжилттай орсон vед л ил болгоно; аль нэг нь
                     // амжилтгvй болсон бол is_hidden:true хэвээр vлдээж, admin/moderator-т л
                     // (staff тул is_hidden vл харгалзан) харагдаж дутуу хуудсаа нөхөх боломжтой байна.
+                    // ШИНЭ: upload бvгд амжилттай болсон ч, admin зориудаар "Нуугдмал" сонговол
+                    // (chapterHidden) ил болгохгvй, тэр хэвээр нь vлдээнэ.
                     const chapterUpdates = {};
-                    if (!uploadFailed) chapterUpdates.is_hidden = false;
+                    if (!uploadFailed) chapterUpdates.is_hidden = chapterHidden;
                     if (thumbnailUrl) chapterUpdates.thumbnail_url = thumbnailUrl;
                     if (Object.keys(chapterUpdates).length > 0) {
                       await supabase.from('chapters')
@@ -4489,6 +4576,7 @@ export default function App() {
                     setChapterFiles([]);
                     setChapterCover(null);
                     setChapterIsVip(false);
+                    setChapterHidden(false);
                     setChapterLabel('');
                     setChapterPublishAt('');
                     setChapterUploading(false);
@@ -4768,11 +4856,19 @@ export default function App() {
                   <div style={{ width: 4, height: 16, background: '#f5a623', borderRadius: 2 }} />
                   👑 ИДЭВХТЭЙ VIP ХЭРЭГЛЭГЧИД ({vipUsers.length})
                 </div>
-                {vipUsers.length === 0 ? (
-                  <div style={{ fontSize: 13, color: '#555' }}>Одоогоор VIP хэрэглэгч алга</div>
-                ) : (
+                {vipUsers.length > 0 && (
+                  <input value={vipUserSearch} onChange={e => setVipUserSearch(e.target.value)}
+                    placeholder="Имэйлээр хайх (жишээ нь gmail)..."
+                    style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box', marginBottom: 10 }} />
+                )}
+                {(() => {
+                  const q = vipUserSearch.trim().toLowerCase();
+                  const filteredVipUsers = q ? vipUsers.filter(u => (u.email || '').toLowerCase().includes(q)) : vipUsers;
+                  if (vipUsers.length === 0) return <div style={{ fontSize: 13, color: '#555' }}>Одоогоор VIP хэрэглэгч алга</div>;
+                  if (filteredVipUsers.length === 0) return <div style={{ fontSize: 13, color: '#555' }}>Тохирох хэрэглэгч олдсонгvй</div>;
+                  return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
-                    {vipUsers.map(u => {
+                    {filteredVipUsers.map(u => {
                       const daysLeft = u.vip_expires_at ? Math.max(0, Math.ceil((new Date(u.vip_expires_at).getTime() - nowTs) / 86400000)) : null;
                       return (
                         <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#1a1a1a', borderRadius: 8 }}>
@@ -4794,7 +4890,8 @@ export default function App() {
                       );
                     })}
                   </div>
-                )}
+                  );
+                })()}
               </div>
               </>
               )}
