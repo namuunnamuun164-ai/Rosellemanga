@@ -164,14 +164,54 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
 // Энэ нь ЗӨВХӨН ШИНЭЭР upload хийж буй зурагт нөлөөлнө, өмнө орсон хуучин
 // зургуудыг vл хөндөнө.
 export const optimizeImageFile = async (file, maxWidth = 1200, quality = 0.85) => {
-  const bitmap = await createImageBitmap(file);
-  const { width, height } = bitmap;
-  // ЗАСВАР #193-тай адил шалтгаанаар (browser tab унах эрсдэл) хэт өндөр
-  // нягтралтай эх зургийг vргэлжлvvлэхийн өмнө шалгана.
-  if (width * height > MAX_SAFE_PIXELS) {
-    bitmap.close?.();
-    throw new Error(`Зураг хэт өндөр нягтралтай (${width}x${height}px) тул browser найдвартай боловсруулж чадахгvй байж магадгvй — эх зургийг жижигрvvлж дахин оруулна уу.`);
+  // ЗАСВАР #236 (код шинжилгээ): маш өндөр нягтралтай (жишээ нь 30000px+
+  // өндөртэй, утсаар бvтэн бvлгийг нэг зурагт хуулсан) эх зургийг ӨМНӨ нь
+  // ЭХЛЭЭД бvтнээр нь (жижигрvvлэхээс өмнө) createImageBitmap-аар decode
+  // хийж MAX_SAFE_PIXELS-тэй харьцуулдаг байсан — эцсийн vр дvн (maxWidth-д
+  // багассны дараа) бvрэн аюулгvй хэмжээтэй болох байсан ч, эх decode
+  // дээрээ л алдаа шидээд бvлэг нэмэхийг (бусад зурагтай хамт) бvхэлд нь
+  // зогсоодог байв. Одоо эхлээд хямд (header-с уншигддаг metadata) хэмжээг
+  // <img>.decode()-оор мэдэж аваад (crop хэрэгсэлтэй адил, өмнө батлагдсан
+  // арга — App.jsx-ийн openEditChapterCrop-ыг vз), жижигрvvлэх шаардлагатай
+  // бол createImageBitmap-ийн resizeWidth сонголтоор шууд ЖИЖИГ хэмжээтэйгээр
+  // decode хийлгэнэ — том (жишээ нь 480MB+) pixel buffer огт vvсэхгvй тул
+  // санах ойн ачаалал vндсэндээ арилна.
+  // ЗАСВАР #237 (код шинжилгээ): дээрх хэмжээг мэдэх (probe) болон доорх
+  // бодит bitmap vvсгэх хоёр vйлдэл хоёул ЯГ ТvvНХ эх `file`-ыг унших ёстой.
+  // Утасны файл сонгогч (жишээ нь Android content picker)-с ирсэн File зарим
+  // vед НЭГ Л УДАА уншигддаг stream шиг ажилладаг тул хоёр дахин уншихад
+  // ("The source image could not be decoded") алдаа өгдгийг ажиглав. Тиймээс
+  // файлыг НЭГ Л УДАА arrayBuffer()-аар уншиж, санах ойд байрлах (дахин
+  // дахин уншигдахуйц) тогтвортой Blob vvсгээд, доорх ХОЁР vйлдэлд ижил
+  // тэр Blob-ыг ашиглана.
+  const stableBlob = new Blob([await file.arrayBuffer()], { type: file.type });
+
+  let naturalWidth = 0, naturalHeight = 0;
+  try {
+    const probeUrl = URL.createObjectURL(stableBlob);
+    const probe = new Image();
+    probe.src = probeUrl;
+    await probe.decode();
+    naturalWidth = probe.naturalWidth;
+    naturalHeight = probe.naturalHeight;
+    URL.revokeObjectURL(probeUrl);
+  } catch {
+    // Хэмжээг мэдэж чадаагvй бол доорх хуучин (жижигрvvлэхгvй decode) замаар vргэлжлvvлнэ.
   }
+
+  let bitmap;
+  if (naturalWidth > maxWidth) {
+    const resizeHeight = Math.round(naturalHeight * (maxWidth / naturalWidth));
+    bitmap = await createImageBitmap(stableBlob, { resizeWidth: maxWidth, resizeHeight, resizeQuality: 'medium' });
+  } else {
+    // ЗАСВАР #193-тай адил шалтгаанаар (browser tab унах эрсдэл): жижигрvvлэх
+    // шаардлагагvй (өргөрхөн) зурагт л энэ хуучин шалгалт хэвээр хамаарна.
+    if (naturalWidth && naturalHeight && naturalWidth * naturalHeight > MAX_SAFE_PIXELS) {
+      throw new Error(`Зураг хэт өндөр нягтралтай (${naturalWidth}x${naturalHeight}px) тул browser найдвартай боловсруулж чадахгvй байж магадгvй — эх зургийг жижигрvvлж дахин оруулна уу.`);
+    }
+    bitmap = await createImageBitmap(stableBlob);
+  }
+  const { width, height } = bitmap;
   const targetWidth = Math.min(width, maxWidth);
   const targetHeight = Math.round(height * (targetWidth / width));
   const canvas = document.createElement('canvas');
