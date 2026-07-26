@@ -95,6 +95,8 @@ export default function App() {
   const [editChapterExistingImages, setEditChapterExistingImages] = useState([]); // DB-д байгаа [{id, image_url, page_number}]
   const [editChapterNewFiles, setEditChapterNewFiles] = useState([]); // шинээр нэмэх файлууд
   const [editChapterSaving, setEditChapterSaving] = useState(false);
+  // ШИНЭ: бvлэг нэмэхтэй адил, засах vед ч хэдэн хувь upload дуусснаа товч дээр харуулна.
+  const [editChapterSaveProgress, setEditChapterSaveProgress] = useState(0);
   const [editChapterNewFileUrls, setEditChapterNewFileUrls] = useState([]);
   // ЗАСВАР #161: бvлэг ЗАСАХ цонхонд ч (нэмэх цонхны adил) бvтэн харах (preview) товч
   const [editChapterPreviewOpen, setEditChapterPreviewOpen] = useState(false);
@@ -513,6 +515,39 @@ export default function App() {
   // ЗАСВАР #102: доошоо гvйлгэхэд толгой хэсгийг нуух, дээшээ гvйлгэхэд харуулах
   const [readerHeaderVisible, setReaderHeaderVisible] = useState(true);
   const lastScrollY = useRef(0);
+  // ШИНЭ: доод талын унших хяналтын мөрөнд харуулах явцын хувь (0-100)
+  const [readerScrollPercent, setReaderScrollPercent] = useState(0);
+  const readerProgressTrackRef = useRef(null);
+  const seekReaderProgress = (clientX) => {
+    const el = readerProgressTrackRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    window.scrollTo({ top: frac * scrollable });
+  };
+  const startReaderProgressDrag = (e) => {
+    e.preventDefault();
+    const point = e.touches ? e.touches[0] : e;
+    seekReaderProgress(point.clientX);
+    const onMove = (ev) => {
+      if (ev.touches) ev.preventDefault();
+      const p = ev.touches ? ev.touches[0] : ev;
+      seekReaderProgress(p.clientX);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+  const scrollReaderToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+  const scrollReaderToBottom = () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
   // ЗАСВАР #141: Safari (ялангуяа утсан дээр) удаан нуугдсан tab-ыг санамсаргvй
   // дахин ачаалахад унших байрлал алдагдаж, эхнээс эхэлдэг байсан асуудлыг
   // багасгах зорилгоор гvйлгэсэн байрлалыг тогтмол хугацаанд sessionStorage-д
@@ -521,11 +556,17 @@ export default function App() {
   useEffect(() => {
     if (page !== 'reader' || !selectedChapter) return;
     lastScrollY.current = window.scrollY;
+    const updatePercent = () => {
+      const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+      setReaderScrollPercent(scrollable > 0 ? Math.min(100, Math.max(0, Math.round((window.scrollY / scrollable) * 100))) : 0);
+    };
+    updatePercent();
     const onScroll = () => {
       const y = window.scrollY;
       if (y > lastScrollY.current && y > 80) setReaderHeaderVisible(false);
       else if (y < lastScrollY.current) setReaderHeaderVisible(true);
       lastScrollY.current = y;
+      updatePercent();
       const now = Date.now();
       if (now - lastScrollSaveTime.current > 300) {
         lastScrollSaveTime.current = now;
@@ -3746,6 +3787,47 @@ export default function App() {
               </div>
             </div>
 
+            {/* ШИНЭ: доод талын унших хяналтын мөр — толгой хэсэгтэй адил, дэлгэцийг
+                дээшлvvлэхэд гарч ирж, доошлуулахад нуугдана (readerHeaderVisible-ийг хамт ашиглана). */}
+            <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 60, padding: '10px 16px', boxSizing: 'border-box', background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: 10, transform: readerHeaderVisible ? 'translateY(0)' : 'translateY(100%)', opacity: readerHeaderVisible ? 1 : 0, transition: 'transform 0.25s ease, opacity 0.25s ease' }}>
+              {(() => {
+                const idx = dbChapters.findIndex(c => c.id === selectedChapter.id);
+                const prevCh = idx > 0 ? dbChapters[idx - 1] : null;
+                const nextCh = idx >= 0 && idx < dbChapters.length - 1 ? dbChapters[idx + 1] : null;
+                return (
+                  <>
+                    <button disabled={!prevCh} onClick={() => prevCh && openReader(selected, prevCh)} title="Өмнөх бvлэг"
+                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: prevCh ? '#fff' : '#444', cursor: prevCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+
+                    <div ref={readerProgressTrackRef} onPointerDown={startReaderProgressDrag} onTouchStart={startReaderProgressDrag}
+                      style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', position: 'relative', cursor: 'pointer' }}>
+                      <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: `${readerScrollPercent}%`, borderRadius: 3, background: 'linear-gradient(to right, #6fa8ff, #3b82f6)' }} />
+                      <div style={{ position: 'absolute', top: '50%', left: `${readerScrollPercent}%`, transform: 'translate(-50%, -50%)', width: 14, height: 14, borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 0 3px rgba(59,130,246,0.3)' }} />
+                    </div>
+
+                    <span style={{ fontSize: 13, color: '#ccc', minWidth: 36, textAlign: 'center', flexShrink: 0 }}>{readerScrollPercent}%</span>
+
+                    <button disabled={!nextCh} onClick={() => nextCh && openReader(selected, nextCh)} title="Дараах бvлэг"
+                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: nextCh ? '#fff' : '#444', cursor: nextCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+
+                    <button onClick={scrollReaderToTop} title="Дээшээ"
+                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                    </button>
+
+                    <button onClick={scrollReaderToBottom} title="Доошоо"
+                      style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+
             {/* ЗАСВАР #85: бүлгийн зургийг татаж авахаас сэргийлэв (right-click
                 context menu + drag хоёуланг нь хориглов). 100% хамгаалалт биш
                 (screenshot-с сэргийлэх боломжгүй), гэвч энгийн татаж авахыг
@@ -4254,15 +4336,23 @@ export default function App() {
                     {
                       const expanded = [];
                       try {
+                        // ЗАСВАР #238 (код шинжилгээ): ӨМНӨ нь эхлээд optimize (өргөнийг
+                        // 1200px рvv багасгах), дараа нь split хийдэг байсан — НАРИЙХАН
+                        // (1200px-с бага, тул optimize хэмжээг vл хөндөнө) БОЛОВЧ МАШ УРТ
+                        // (жишээ нь 58000px) зурагт split хэзээ ч хvрдэггvй, харин
+                        // optimize өөрөө бvтэн 58000px өндөртэй canvas зурахыг оролдож,
+                        // iOS Safari-ийн canvas хэмжээний хязгаараас хэтэрч toBlob() null
+                        // буцаадаг байв. Одоо ЭХЛЭЭД split хийж (6000px-с урт бол хэсэглэж),
+                        // ДАРАА нь хэсэг бvрийг optimize хийнэ — ингэснээр аль ч функцэд
+                        // нэг ч удаа бvтэн өндрөөрөө canvas vvсэхгvй.
                         for (const f of chapterFiles) {
                           // eslint-disable-next-line no-await-in-loop
-                          const optimized = await optimizeImageFile(f, 1200);
-                          // eslint-disable-next-line no-await-in-loop
-                          // ЗАСВАР #224 (код шинжилгээ): optimizeImageFile/splitTallImageFile
-                          // хоёул одоо {file, width, height} буцаадаг тул дараа нь дахин
-                          // decode хийхгvйгээр хэмжээг нь шууд авна.
-                          const parts = await splitTallImageFile(optimized.file, 6000);
-                          expanded.push(...parts);
+                          const parts = await splitTallImageFile(f, 6000);
+                          for (const part of parts) {
+                            // eslint-disable-next-line no-await-in-loop
+                            const optimized = await optimizeImageFile(part.file, 1200);
+                            expanded.push(optimized);
+                          }
                         }
                       } catch (e) {
                         // ЗАСВАР #191 (код шинжилгээ): toBlob null буцаах эрсдэлээс vvдэн
@@ -5529,7 +5619,40 @@ export default function App() {
                 const badFile = [editChapterCoverFile, ...editChapterNewFiles].filter(Boolean).map(validateImageFile).find(Boolean);
                 if (badFile) { notify(badFile); return; }
                 setEditChapterSaving(true);
+                setEditChapterSaveProgress(0);
                 try {
+
+                // ШИНЭ: upload эхлэхээс өмнө шинэ зургуудыг БvГДИЙГ нь split+optimize
+                // хийж, нийт хэдэн upload хийгдэхийг (cover + хуудас бvр) урьдчилж
+                // мэдэж авна — ингэснээр доор progress (хувь) тооцох боломжтой болно
+                // (add-chapter урсгалтай адил хандлага).
+                let expandedNewFiles = [];
+                try {
+                  for (const file of editChapterNewFiles) {
+                    // ЗАСВАР #238 (код шинжилгээ): нэмэх (add-chapter) урсгалтай адил
+                    // шалтгаанаар (нарийхан боловч маш урт зурагт optimize өөрөө бvтэн
+                    // өндрөөрөө canvas зурахыг оролдож iOS Safari дээр toBlob() null
+                    // буцаадаг байсан) — ЭХЛЭЭД split (6000px-с урт бол хэсэглэх), ДАРАА
+                    // нь хэсэг бvрийг optimize (1200px рvv багасгаж WebP болгох) хийнэ.
+                    // eslint-disable-next-line no-await-in-loop
+                    const splitParts = await splitTallImageFile(file, 6000);
+                    for (const p of splitParts) {
+                      // eslint-disable-next-line no-await-in-loop
+                      expandedNewFiles.push(await optimizeImageFile(p.file, 1200));
+                    }
+                  }
+                } catch (e) {
+                  notify(`Зураг хэсэглэхэд алдаа: ${e.message}`);
+                  setEditChapterSaving(false);
+                  return;
+                }
+
+                const totalUploads = (editChapterCoverFile ? 1 : 0) + expandedNewFiles.length;
+                let doneUploads = 0;
+                const markUploadDone = () => {
+                  doneUploads += 1;
+                  setEditChapterSaveProgress(totalUploads > 0 ? Math.round((doneUploads / totalUploads) * 100) : 0);
+                };
 
                 // ЗАСВАР #145: гарах цагийг өөрчилсөн эсэхийг анхны утгатай нь харьцуулна
                 // ЗАСВАР #196 (код шинжилгээ): STRING-ээр (!==) харьцуулдаг байсан тул
@@ -5568,6 +5691,7 @@ export default function App() {
                     // ЗАСВАР #194: Date.now() таамаглаж болохуйц тул crypto.randomUUID()
                     updates.thumbnail_url = await uploadToR2(editChapterCoverFile, `chapters/${editChapter.id}/${crypto.randomUUID()}-cover.${ext}`);
                   } catch (e) { notify('Cover upload алдаа: ' + e.message); return; }
+                  markUploadDone();
                   // ЗАСВАР #163: cover солиход хуучин файл R2-д мөнхөд орхигддог байсныг засав
                   if (oldThumbnailUrl) { try { await deleteFromR2([oldThumbnailUrl]); } catch { /* хор хөнөөлгvй, orphan хэвээр vлдэнэ */ } }
                 }
@@ -5597,33 +5721,19 @@ export default function App() {
                   if (reorderError) notify('Дараалал шинэчлэх алдаа: ' + reorderError.message);
                 }
                 // Шинэ зургуудыг upload хийж, vлдсэн зургуудын араас дараалуулж нэмнэ
+                // (split+optimize нь дээр, upload эхлэхээс өмнө нэг мөр дор хийгдсэн —
+                // expandedNewFiles-г ашиглана, энд дахин хийхгvй).
                 let nextPage = editChapterExistingImages.length + 1;
                 let uploadFailed = false;
-                for (const file of editChapterNewFiles) {
-                  // ЗАСВАР #199/#200 (хэрэглэгчийн хvсэлт): нэмэх (add-chapter) урсгалтай
-                  // адил, энд ч эхлээд өргөнийг (1200px-ээс дээш бол) багасгаж WebP
-                  // болгоод, дараа нь 6000px-ээс урт бол автоматаар хэсэглэнэ.
-                  let parts;
+                for (const { file: part, width: partWidth, height: partHeight } of expandedNewFiles) {
+                  const ext = part.name.split('.').pop();
                   try {
-                    const optimized = await optimizeImageFile(file, 1200);
-                    // ЗАСВАР #224 (код шинжилгээ): optimizeImageFile/splitTallImageFile
-                    // хоёул {file, width, height} буцаадаг тул дараа нь дахин decode
-                    // хийж хэмжээ авах шаардлагагvй.
-                    parts = await splitTallImageFile(optimized.file, 6000);
-                  } catch (e) {
-                    notify(`Зураг хэсэглэхэд алдаа: ${e.message}`);
-                    uploadFailed = true;
-                    continue;
-                  }
-                  for (const { file: part, width: partWidth, height: partHeight } of parts) {
-                    const ext = part.name.split('.').pop();
-                    try {
-                      // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
-                      const url = await uploadToR2(part, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
-                      await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage, width: partWidth || null, height: partHeight || null });
-                      nextPage++;
-                    } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
-                  }
+                    // ЗАСВАР #194: Date.now()-${nextPage} дараалсан/таамаглаж болохуйц тул crypto.randomUUID()
+                    const url = await uploadToR2(part, `chapters/${editChapter.id}/${crypto.randomUUID()}.${ext}`);
+                    await supabase.from('chapter_images').insert({ chapter_id: editChapter.id, image_url: url, page_number: nextPage, width: partWidth || null, height: partHeight || null });
+                    nextPage++;
+                  } catch (e) { notify(`Зураг upload алдаа: ${e.message}`); uploadFailed = true; }
+                  markUploadDone();
                 }
 
                 // ЗАСВАР #184: шинэ зураг нэмсэн бол л (эсрэг тохиолдолд is_hidden
@@ -5645,9 +5755,18 @@ export default function App() {
                   notify('Алдаа: ' + e.message);
                 } finally {
                   setEditChapterSaving(false);
+                  setEditChapterSaveProgress(0);
                 }
-              }} style={{ width: '100%', background: editChapterSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700, cursor: editChapterSaving ? 'not-allowed' : 'pointer', fontSize: 15 }}>
-                {editChapterSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ХАДГАЛАХ'}
+              }} style={{
+                width: '100%', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 700,
+                cursor: editChapterSaving ? 'not-allowed' : 'pointer', fontSize: 15,
+                // ШИНЭ: бvлэг нэмэхтэй адил, upload хийж байх vед хэдэн хувь дуусснаа
+                // товч дээр өнгөөр (progress bar шиг) болон тоогоор хамт харуулна.
+                background: editChapterSaving
+                  ? `linear-gradient(to right, #8B0000 ${editChapterSaveProgress}%, #555 ${editChapterSaveProgress}%)`
+                  : '#8B0000',
+              }}>
+                {editChapterSaving ? `ХАДГАЛЖ БАЙНА... ${editChapterSaveProgress}%` : 'ХАДГАЛАХ'}
               </button>
             </div>
           </div>

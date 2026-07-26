@@ -109,38 +109,79 @@ export const formatRemaining = (ms) => {
 // хамгийн багадаа browser-ийг найдваргvй байдалд оруулахын оронд ойлгомжтой
 // алдаа vзvvлж, эх зургийг жижигрvvлж дахин оруулахыг санал болгоно.
 const MAX_SAFE_PIXELS = 120_000_000; // ~120 megapixel — ердийн урт вэбтvн (webtoon) стрипэд хvрэлцээтэй
-// ЗАСВАР #224 (код шинжилгээ): өмнө нь зөвхөн File[] буцаадаг байсан тул
-// уншигчийн CLS-засварт зориулж хэмжээ хэрэгтэй болоход дуудагч тал дахин
-// createImageBitmap хийж (upload бvрд 2-3 дахин decode) admin-ы upload-ыг
-// удаашруулж байсан — decode vеэрээ аль хэдийн мэдэгдэж байгаа width/height-ыг
-// шууд буцаана.
-export const splitTallImageFile = async (file, maxHeight = 4000) => {
-  const bitmap = await createImageBitmap(file);
-  const { width, height } = bitmap;
-  if (width * height > MAX_SAFE_PIXELS) {
-    bitmap.close?.();
-    throw new Error(`Зураг хэт өндөр нягтралтай (${width}x${height}px) тул browser найдвартай боловсруулж чадахгvй байж магадгvй — эх зургийг жижигрvvлж (жишээ нь хэд хэдэн хэсэгт гараар хуваагаад) дахин оруулна уу.`);
+
+// ЗАСВАР #237 (код шинжилгээ): файлыг НЭГ Л УДАА arrayBuffer()-аар уншиж,
+// санах ойд байрлах (дахин дахин уншигдахуйц) тогтвортой Blob vvсгэнэ.
+// Утасны файл сонгогч (жишээ нь Android content picker)-с ирсэн File зарим
+// vед НЭГ Л УДАА уншигддаг stream шиг ажилладаг тул хоёр (probe + bitmap)
+// дахин уншихад "The source image could not be decoded" алдаа өгдгийг
+// ажиглав — vvнээс сэргийлэхийн тулд бvх дуудагчид ЭНЭ НЭГ Blob-ыг vргэлж
+// дахин ашиглана.
+const toStableBlob = async (file) => new Blob([await file.arrayBuffer()], { type: file.type });
+
+// <img>.decode()-оор хямд аргаар эх зургийн жинхэнэ хэмжээг мэднэ (crop
+// хэрэгсэлтэй адил, өмнө батлагдсан арга — App.jsx-ийн openEditChapterCrop-ыг vз).
+// Амжилтгvй бол null буцаана (дуудагч тал хуучин (бvтнээр decode) замаар vргэлжлvvлнэ).
+const probeImageDimensions = async (stableBlob) => {
+  try {
+    const url = URL.createObjectURL(stableBlob);
+    const probe = new Image();
+    probe.src = url;
+    await probe.decode();
+    const dims = { width: probe.naturalWidth, height: probe.naturalHeight };
+    URL.revokeObjectURL(url);
+    return dims;
+  } catch {
+    return null;
   }
-  if (height <= maxHeight) {
+};
+
+// ЗАСВАР #224 (код шинжилгээ): decode vеэрээ аль хэдийн мэдэгдэж байгаа
+// width/height-ыг шууд буцаана (дуудагч тал дахин decode хийх шаардлагагvй).
+// ЗАСВАР #238 (код шинжилгээ): өмнө нь эх зургийг ЭХЛЭЭД бvтнээр нь (бvх
+// өндрөөр нь) НЭГ ImageBitmap-д decode хийгээд, дараа нь тэрнээс хэсэг
+// хэсгийг canvas-д зурдаг байсан. НАРИЙХАН (жишээ нь 1200px-с нарийн, тул
+// optimizeImageFile жижигрvvлдэггvй) БОЛОВЧ МАШ УРТ (жишээ нь 58000px)
+// зурагт энэ нь MAX_SAFE_PIXELS шалгалтыг давсан ч ("зөвшөөрөгдсөн" MP
+// хэмжээтэй атлаа), эцсийн ГАРАЛТЫН canvas бvтэн 58000px өндөртэй байх
+// шаардлагатай болж, iOS Safari-ийн canvas-ийн хэмжээний хязгаараас хэтэрч
+// toBlob() null буцаадаг байв (жишээ нь "58000-тай урт зураг" гомдол).
+// Одоо createImageBitmap-ийн (sx, sy, sw, sh) crop overload-оор ЗӨВХӨН
+// тухайн НЭГ хэсгийг л decode хийж, ЗӨВХӨН тэр хэсгийн (≤maxHeight)
+// хэмжээтэй жижиг canvas дээр зурна — эх зураг хэдий чинээ урт байсан ч
+// НЭГ ч удаа бvтэн өндрөөрөө canvas/decode vvсгэхгvй.
+export const splitTallImageFile = async (file, maxHeight = 4000) => {
+  const stableBlob = await toStableBlob(file);
+  let dims = await probeImageDimensions(stableBlob);
+  if (!dims) {
+    // Хэмжээг хямд аргаар мэдэж чадаагvй ховор тохиолдолд хуучин (бvтнээр decode) замаар нөхнө.
+    const bitmap = await createImageBitmap(stableBlob);
+    dims = { width: bitmap.width, height: bitmap.height };
     bitmap.close?.();
+  }
+  const { width, height } = dims;
+
+  if (height <= maxHeight) {
     return [{ file, width, height }];
   }
 
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const mimeType = file.type || (ext === 'png' ? 'image/png' : 'image/jpeg');
   const baseName = file.name.replace(/\.[^.]+$/, '');
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  const ctx = canvas.getContext('2d');
 
   const pieces = [];
   let y = 0;
   let partIndex = 1;
   while (y < height) {
     const pieceHeight = Math.min(maxHeight, height - y);
+    // eslint-disable-next-line no-await-in-loop
+    const bitmap = await createImageBitmap(stableBlob, 0, y, width, pieceHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
     canvas.height = pieceHeight;
-    ctx.clearRect(0, 0, width, pieceHeight);
-    ctx.drawImage(bitmap, 0, y, width, pieceHeight, 0, 0, width, pieceHeight);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close?.();
     // eslint-disable-next-line no-await-in-loop
     const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.92));
     // ЗАСВАР #191 (код шинжилгээ): маш том canvas дээр browser toBlob-оор null
@@ -151,7 +192,6 @@ export const splitTallImageFile = async (file, maxHeight = 4000) => {
     y += pieceHeight;
     partIndex += 1;
   }
-  bitmap.close?.();
   return pieces;
 };
 
@@ -177,27 +217,13 @@ export const optimizeImageFile = async (file, maxWidth = 1200, quality = 0.85) =
   // decode хийлгэнэ — том (жишээ нь 480MB+) pixel buffer огт vvсэхгvй тул
   // санах ойн ачаалал vндсэндээ арилна.
   // ЗАСВАР #237 (код шинжилгээ): дээрх хэмжээг мэдэх (probe) болон доорх
-  // бодит bitmap vvсгэх хоёр vйлдэл хоёул ЯГ ТvvНХ эх `file`-ыг унших ёстой.
-  // Утасны файл сонгогч (жишээ нь Android content picker)-с ирсэн File зарим
-  // vед НЭГ Л УДАА уншигддаг stream шиг ажилладаг тул хоёр дахин уншихад
-  // ("The source image could not be decoded") алдаа өгдгийг ажиглав. Тиймээс
-  // файлыг НЭГ Л УДАА arrayBuffer()-аар уншиж, санах ойд байрлах (дахин
-  // дахин уншигдахуйц) тогтвортой Blob vvсгээд, доорх ХОЁР vйлдэлд ижил
-  // тэр Blob-ыг ашиглана.
-  const stableBlob = new Blob([await file.arrayBuffer()], { type: file.type });
-
-  let naturalWidth = 0, naturalHeight = 0;
-  try {
-    const probeUrl = URL.createObjectURL(stableBlob);
-    const probe = new Image();
-    probe.src = probeUrl;
-    await probe.decode();
-    naturalWidth = probe.naturalWidth;
-    naturalHeight = probe.naturalHeight;
-    URL.revokeObjectURL(probeUrl);
-  } catch {
-    // Хэмжээг мэдэж чадаагvй бол доорх хуучин (жижигрvvлэхгvй decode) замаар vргэлжлvvлнэ.
-  }
+  // бодит bitmap vvсгэх хоёр vйлдэл хоёул ЯГ ТvvНХ эх `file`-ыг унших ёстой
+  // тул тогтвортой Blob (toStableBlob) ашиглана — splitTallImageFile-тэй
+  // адил шалтгаан (дээрх коммент, мөн тэнд байгаа коммент-ыг vз).
+  const stableBlob = await toStableBlob(file);
+  const dims = await probeImageDimensions(stableBlob);
+  const naturalWidth = dims?.width || 0;
+  const naturalHeight = dims?.height || 0;
 
   let bitmap;
   if (naturalWidth > maxWidth) {
