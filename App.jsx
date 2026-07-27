@@ -1380,7 +1380,14 @@ export default function App() {
   }, [page, selected?.id, selectedChapter?.id]);
 
   useEffect(() => {
-    if (page !== 'detail' || !selected) return;
+    // ЗАСВАР #239 (код шинжилгээ): өмнө нь зөвхөн page === 'detail' vед л
+    // dbChapters-ыг fetch хийдэг байсан тул, хэрэглэгч дэлгэрэнгvй хуудсаар
+    // ДАМЖИЛГvйгээр шууд бvлэг унших руу орвол (жишээ нь нvvр хуудасны "Шинэ
+    // бvлэг" карт эсвэл мэдэгдлээс openReader шууд дуудагдахад page нэг мөр
+    // 'reader' болдог, 'detail' огт болдоггvй) dbChapters хоосон vлдэж,
+    // унших дэлгэцийн Дараах/Өмнөх бvлэг товч (мөн доод хяналтын мөр) ажиллахгvй
+    // болдог байв — 'reader' хуудсанд ч мөн адил хэрэгтэй тул нэмэв.
+    if ((page !== 'detail' && page !== 'reader') || !selected) return;
     // ЗАСВАР #10: манга хурдан сольход хуучин хүсэлт хожуу ирж шинэ жагсаалтыг
     // дарж бичихээс сэргийлнэ (race condition).
     let cancelled = false;
@@ -3866,14 +3873,14 @@ export default function App() {
               const prevCh = idx > 0 ? dbChapters[idx - 1] : null;
               const nextCh = idx >= 0 && idx < dbChapters.length - 1 ? dbChapters[idx + 1] : null;
               return (
-                <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 60, padding: '7px 10px', boxSizing: 'border-box', background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: 6, transform: barVisible ? 'translateY(0)' : 'translateY(100%)', opacity: barVisible ? 1 : 0, transition: 'transform 0.25s ease, opacity 0.25s ease' }}>
+                <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 60, padding: '7px 10px', boxSizing: 'border-box', background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(6px)', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, transform: barVisible ? 'translateY(0)' : 'translateY(100%)', opacity: barVisible ? 1 : 0, transition: 'transform 0.25s ease, opacity 0.25s ease' }}>
                   <button disabled={!prevCh} onClick={() => prevCh && openReader(selected, prevCh)} title="Өмнөх бvлэг"
                     style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: prevCh ? '#fff' : '#444', cursor: prevCh ? 'pointer' : 'not-allowed', flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
                   </button>
 
                   <div ref={readerProgressTrackRef} onPointerDown={startReaderProgressDrag} onTouchStart={startReaderProgressDrag}
-                    style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.12)', position: 'relative', cursor: 'pointer' }}>
+                    style={{ flex: '0 1 140px', maxWidth: 140, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.12)', position: 'relative', cursor: 'pointer' }}>
                     <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: `${readerScrollPercent}%`, borderRadius: 2, background: 'linear-gradient(to right, #6fa8ff, #3b82f6)' }} />
                     <div style={{ position: 'absolute', top: '50%', left: `${readerScrollPercent}%`, transform: 'translate(-50%, -50%)', width: 11, height: 11, borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 0 2px rgba(59,130,246,0.3)' }} />
                   </div>
@@ -3931,30 +3938,9 @@ export default function App() {
               <div style={{ color: '#555', textAlign: 'center', marginTop: '3rem' }}>Зураг ачааллаж байна эсвэл байхгүй байна...</div>
             )}
 
-            {/* Өмнөх / Дараах бүлэг рүү шилжих товч */}
-            {dbChapters.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2rem 1rem' }}>
-                {(() => {
-                  const idx = dbChapters.findIndex(c => c.id === selectedChapter.id);
-                  const prevCh = idx > 0 ? dbChapters[idx - 1] : null;
-                  const nextCh = idx >= 0 && idx < dbChapters.length - 1 ? dbChapters[idx + 1] : null;
-                  return (
-                    <>
-                      <button disabled={!prevCh}
-                        onClick={() => prevCh && openReader(selected, prevCh)}
-                        style={{ background: prevCh ? '#111' : '#0a0a0a', border: '1px solid #333', color: prevCh ? '#fff' : '#444', padding: '10px 20px', borderRadius: 8, cursor: prevCh ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 700 }}>
-                        ← Өмнөх бүлэг
-                      </button>
-                      <button disabled={!nextCh}
-                        onClick={() => nextCh && openReader(selected, nextCh)}
-                        style={{ background: nextCh ? '#8B0000' : '#0a0a0a', border: '1px solid #333', color: nextCh ? '#fff' : '#444', padding: '10px 20px', borderRadius: 8, cursor: nextCh ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 700 }}>
-                        Дараах бүлэг →
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
+            {/* ЗАСВАР: Өмнөх/Дараах бvлэг рvv шилжих энгийн товчнууд эндээс хасав —
+                доод талын байнгын хяналтын мөрөнд (‹ / ›) яг ижил vйлдэл давхардаж
+                байгаа тул шаардлагагvй болсон. */}
             </>
             )}
 
