@@ -18,6 +18,38 @@ export const validateImageFile = (file) => {
   return null;
 };
 
+// ШИНЭ: HEIC/HEIF (iPhone-ийн өгөгдмөл зургийн формат) файлыг таних. Ихэнх
+// browser (Safari-с бусад) HEIC-ийг canvas/createImageBitmap-аар шууд decode
+// хийж чаддаггvй, мөн дээрх ALLOWED_IMAGE_TYPES жагсаалтад ч байхгvй тул
+// validateImageFile-д "буруу төрөл" гэж татгалзагддаг байсан.
+const HEIC_TYPES = ['image/heic', 'image/heif'];
+const isHeicFile = (file) => {
+  if (!file) return false;
+  if (HEIC_TYPES.includes((file.type || '').toLowerCase())) return true;
+  const name = (file.name || '').toLowerCase();
+  return name.endsWith('.heic') || name.endsWith('.heif');
+};
+
+// ШИНЭ: HEIC/HEIF зургийг validateImageFile/upload/optimize урсгалд орохоос
+// ӨМНӨ image/jpeg рvv хөрвvvлнэ. HEIC биш файлыг хэвээр нь буцаана.
+// heic2any-г dynamic import хийж байгаа нь (том сан тул) зөвхөн бодитоор
+// HEIC файл сонгогдсон vед л ачаалуулахын тулд (энгийн jpg/png upload-д
+// нөлөөлөхгvй).
+export const normalizeImageFile = async (file) => {
+  if (!file || !isHeicFile(file)) return file;
+  let converted;
+  try {
+    const heic2any = (await import('heic2any')).default;
+    converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+  } catch (e) {
+    throw new Error('HEIC зургийг хөрвvvлэхэд алдаа гарлаа — өөр форматтай (jpg/png) зураг оруулна уу.');
+  }
+  // heic2any нь заримдаа (жишээ нь Live Photo) Blob[] буцаадаг тул эхнийхийг нь авна.
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  const baseName = (file.name || 'image').replace(/\.[^.]+$/, '');
+  return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
+};
+
 // ЗАСВАР #94: зургийн upload-ыг Supabase Storage-с Cloudflare R2 руу шилжүүлэв
 // (upload-to-r2 edge function-оор дамжуулж, Secret Access Key browser талд гардаггүй).
 export const uploadToR2 = async (file, path) => {

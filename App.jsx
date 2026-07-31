@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
-import { validateImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
+import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
 import { PasswordField } from './PasswordField';
 import { Avatar, MangaCard, SectionHeader, LiveCountdown, SearchOverlay } from './components';
@@ -195,10 +195,14 @@ export default function App() {
     setEditChapterEditBusy(false);
   };
 
-  const handleEditChapterReplaceFile = (e) => {
-    const file = e.target.files[0];
+  const handleEditChapterReplaceFile = async (e) => {
+    const rawFile = e.target.files[0];
     e.target.value = '';
-    if (!file || !editChapterEditTarget) return;
+    if (!rawFile || !editChapterEditTarget) return;
+    let file;
+    try {
+      file = await normalizeImageFile(rawFile);
+    } catch (err) { notify(err.message); return; }
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     if (editChapterEditTarget.kind === 'new') {
@@ -404,10 +408,14 @@ export default function App() {
   };
 
   const chapterReplaceInputRef = useRef(null);
-  const handleChapterReplaceFile = (e) => {
-    const file = e.target.files[0];
+  const handleChapterReplaceFile = async (e) => {
+    const rawFile = e.target.files[0];
     e.target.value = '';
-    if (!file || chapterEditIndex === null) return;
+    if (!rawFile || chapterEditIndex === null) return;
+    let file;
+    try {
+      file = await normalizeImageFile(rawFile);
+    } catch (err) { notify(err.message); return; }
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     setChapterFiles(prev => prev.map((f, idx) => idx === chapterEditIndex ? file : f));
@@ -1709,15 +1717,25 @@ export default function App() {
   };
 
   // ШИНЭ: like дарах/болих
+  // ЗАСВАР #241 (код шинжилгээ): өмнө нь optimistic update хийдэггvй байсан тул
+  // товч дарсны дараа тоо/өнгө шууд өөрчлөгдөхгvй (сvлжээний хариу ирэх хvртэл),
+  // хэрэглэгч "ажиллахгvй байна" гэж бодоод дахин дарахад comment_likes хvснэгтийн
+  // (comment_id, user_id) PRIMARY KEY зөрчигдөж "duplicate key" алдаа шидэгддэг
+  // байв. Одоо (1) UI-г шууд (optimistic) шинэчилж алдаа/удаашрал мэдрэгдэхгvй
+  // болгож, (2) давхар товшилтоос vvдэх duplicate-key алдааг (Postgres код
+  // 23505) чимээгvй vл тоож зөвхөн жинхэнэ (сvлжээ/бусад) алдаанд л мессеж vзvvлнэ.
   const toggleLike = async (c) => {
     if (!currentUser) { setAuthPage('login'); return; }
-    if (myLikes.includes(c.id)) {
-      await supabase.from('comment_likes').delete().eq('comment_id', c.id).eq('user_id', currentUser.id);
+    const alreadyLiked = myLikes.includes(c.id);
+    setMyLikes(prev => alreadyLiked ? prev.filter(id => id !== c.id) : [...prev, c.id]);
+    setCommentLikeCounts(prev => ({ ...prev, [c.id]: Math.max(0, (prev[c.id] || 0) + (alreadyLiked ? -1 : 1)) }));
+    if (alreadyLiked) {
+      const { error } = await supabase.from('comment_likes').delete().eq('comment_id', c.id).eq('user_id', currentUser.id);
+      if (error) { notify('Алдаа: ' + error.message); fetchComments(selectedChapter.id); }
     } else {
       const { error } = await supabase.from('comment_likes').insert({ comment_id: c.id, user_id: currentUser.id });
-      if (error) { notify('Алдаа: ' + error.message); return; }
+      if (error && error.code !== '23505') { notify('Алдаа: ' + error.message); fetchComments(selectedChapter.id); }
     }
-    fetchComments(selectedChapter.id);
   };
 
   // ШИНЭ: сэтгэгдэл/хариулт илгээх (parentId байвал хариулт болно)
@@ -1789,15 +1807,20 @@ export default function App() {
       });
   };
 
+  // ЗАСВАР #241 (код шинжилгээ): toggleLike-тэй адил шалтгаанаар — optimistic
+  // update + давхар товшилтоос vvдэх duplicate-key (23505) алдааг чимээгvй vл тоох.
   const toggleMangaCommentLike = async (c) => {
     if (!currentUser) { setAuthPage('login'); return; }
-    if (myMangaLikes.includes(c.id)) {
-      await supabase.from('comment_likes').delete().eq('comment_id', c.id).eq('user_id', currentUser.id);
+    const alreadyLiked = myMangaLikes.includes(c.id);
+    setMyMangaLikes(prev => alreadyLiked ? prev.filter(id => id !== c.id) : [...prev, c.id]);
+    setMangaCommentLikeCounts(prev => ({ ...prev, [c.id]: Math.max(0, (prev[c.id] || 0) + (alreadyLiked ? -1 : 1)) }));
+    if (alreadyLiked) {
+      const { error } = await supabase.from('comment_likes').delete().eq('comment_id', c.id).eq('user_id', currentUser.id);
+      if (error) { notify('Алдаа: ' + error.message); fetchMangaComments(selected.id); }
     } else {
       const { error } = await supabase.from('comment_likes').insert({ comment_id: c.id, user_id: currentUser.id });
-      if (error) { notify('Алдаа: ' + error.message); return; }
+      if (error && error.code !== '23505') { notify('Алдаа: ' + error.message); fetchMangaComments(selected.id); }
     }
-    fetchMangaComments(selected.id);
   };
 
   const postMangaComment = async (parentId = null, textOverride = null) => {
@@ -1927,8 +1950,12 @@ export default function App() {
   };
 
   // ЗАСВАР #108: профайлдаа хадгалсан 3 стикер upload/устгах
-  const uploadSticker = async (slot, file) => {
-    if (!currentUser || !file) return;
+  const uploadSticker = async (slot, rawFile) => {
+    if (!currentUser || !rawFile) return;
+    let file;
+    try {
+      file = await normalizeImageFile(rawFile);
+    } catch (err) { notify(err.message); return; }
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     setStickerUploading(slot);
@@ -1960,8 +1987,12 @@ export default function App() {
   };
 
   // ШИНЭ: профайл зураг (avatar) оруулах
-  const uploadAvatar = async (file) => {
-    if (!file || !currentUser) return;
+  const uploadAvatar = async (rawFile) => {
+    if (!rawFile || !currentUser) return;
+    let file;
+    try {
+      file = await normalizeImageFile(rawFile);
+    } catch (err) { notify(err.message); return; }
     const invalid = validateImageFile(file);
     if (invalid) { notify(invalid); return; }
     setAvatarUploading(true);
@@ -4169,12 +4200,22 @@ export default function App() {
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>POSTER ЗУРАГ</div>
-                  <input type="file" accept="image/*" onChange={e => setPosterFile(e.target.files[0])}
+                  <input type="file" accept="image/*" onChange={async e => {
+                    const rawFile = e.target.files[0];
+                    e.target.value = '';
+                    if (!rawFile) { setPosterFile(null); return; }
+                    try { setPosterFile(await normalizeImageFile(rawFile)); } catch (err) { notify(err.message); }
+                  }}
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БАННЕР ЗУРАГ (нүүр хэсгийн "Санал болгох" мөрөнд харагдах урт нарийн зураг)</div>
-                  <input type="file" accept="image/*" onChange={e => setBannerFile(e.target.files[0] || null)}
+                  <input type="file" accept="image/*" onChange={async e => {
+                    const rawFile = e.target.files[0];
+                    e.target.value = '';
+                    if (!rawFile) { setBannerFile(null); return; }
+                    try { setBannerFile(await normalizeImageFile(rawFile)); } catch (err) { notify(err.message); }
+                  }}
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Оруулаагүй бол poster зураг ашиглагдана</div>
                 </div>
@@ -4258,7 +4299,10 @@ export default function App() {
                   <select value={chapterManga} onChange={e => setChapterManga(e.target.value)}
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }}>
                     <option value="">-- Манга сонгох --</option>
-                    {dbMangas.filter(m => m.status !== 'Дууссан').map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                    {/* ШИНЭ: жагсаалтыг нэрээр нь (Монгол vсгийн зvй дараалал) эрэмбэлж,
+                        DB-с ирсэн санамсаргvй (жишээ нь vvсгэсэн огноогоор) дарааллын
+                        оронд олдоцыг хялбарчилав. */}
+                    {dbMangas.filter(m => m.status !== 'Дууссан').sort((a, b) => a.title.localeCompare(b.title, 'mn')).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
                   </select>
                 </div>
 
@@ -4280,7 +4324,12 @@ export default function App() {
                 {/* ШИНЭ: бүлгийн COVER зураг тусдаа оруулна */}
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БҮЛГИЙН COVER ЗУРАГ (жагсаалтад харагдана)</div>
-                  <input type="file" accept="image/*" onChange={e => setChapterCover(e.target.files[0] || null)}
+                  <input type="file" accept="image/*" onChange={async e => {
+                    const rawFile = e.target.files[0];
+                    e.target.value = '';
+                    if (!rawFile) { setChapterCover(null); return; }
+                    try { setChapterCover(await normalizeImageFile(rawFile)); } catch (err) { notify(err.message); }
+                  }}
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Оруулаагүй бол эхний хуудас автоматаар cover болно</div>
                 </div>
@@ -4302,7 +4351,16 @@ export default function App() {
                       шалгах/устгах/дараалал сольж болдог preview үзүүлдэг болгосон.
                       Дахин файл сонговол ХУУЧНЫГ ДАРААГҮЙ нэмэгдэнэ (өмнө нь бүхэлд нь орлуулдаг байсан). */}
                   <input type="file" accept="image/*" multiple
-                    onChange={e => { const picked = Array.from(e.target.files); setChapterFiles(prev => [...prev, ...picked]); e.target.value = ''; }}
+                    onChange={async e => {
+                      const picked = Array.from(e.target.files);
+                      e.target.value = '';
+                      const normalized = [];
+                      for (const f of picked) {
+                        // eslint-disable-next-line no-await-in-loop
+                        try { normalized.push(await normalizeImageFile(f)); } catch (err) { notify(err.message); }
+                      }
+                      setChapterFiles(prev => [...prev, ...normalized]);
+                    }}
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Дахин сонговол нэмэгдэнэ. Доор гүйлгэж харж, устгаж, дараалал сольж болно.</div>
 
@@ -5528,12 +5586,22 @@ export default function App() {
               </div>
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>POSTER ЗУРАГ (заавал биш — солихгүй бол хуучнаараа үлдэнэ)</div>
-                <input type="file" accept="image/*" onChange={e => setEditPosterFile(e.target.files[0] || null)}
+                <input type="file" accept="image/*" onChange={async e => {
+                  const rawFile = e.target.files[0];
+                  e.target.value = '';
+                  if (!rawFile) { setEditPosterFile(null); return; }
+                  try { setEditPosterFile(await normalizeImageFile(rawFile)); } catch (err) { notify(err.message); }
+                }}
                   style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
               </div>
               <div style={{ marginBottom: '1.5rem' }}>
                 <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БАННЕР ЗУРАГ (заавал биш — солихгүй бол хуучнаараа үлдэнэ)</div>
-                <input type="file" accept="image/*" onChange={e => setEditBannerFile(e.target.files[0] || null)}
+                <input type="file" accept="image/*" onChange={async e => {
+                  const rawFile = e.target.files[0];
+                  e.target.value = '';
+                  if (!rawFile) { setEditBannerFile(null); return; }
+                  try { setEditBannerFile(await normalizeImageFile(rawFile)); } catch (err) { notify(err.message); }
+                }}
                   style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
               </div>
 
@@ -5636,7 +5704,12 @@ export default function App() {
                 {editChapter.thumbnail_url && (
                   <img src={editChapter.thumbnail_url} alt="" style={{ width: 76, height: 102, objectFit: 'cover', borderRadius: 8, marginBottom: 8, display: 'block', border: '1px solid #2a2a2a' }} />
                 )}
-                <input type="file" accept="image/*" onChange={e => setEditChapterCoverFile(e.target.files[0] || null)}
+                <input type="file" accept="image/*" onChange={async e => {
+                  const rawFile = e.target.files[0];
+                  e.target.value = '';
+                  if (!rawFile) { setEditChapterCoverFile(null); return; }
+                  try { setEditChapterCoverFile(await normalizeImageFile(rawFile)); } catch (err) { notify(err.message); }
+                }}
                   style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
               </div>
 
@@ -5679,7 +5752,16 @@ export default function App() {
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ШИНЭ ЗУРАГ НЭМЭХ (жагсаалтын төгсгөлд нэмэгдэнэ)</div>
                 <input type="file" accept="image/*" multiple
-                  onChange={e => { const picked = Array.from(e.target.files); setEditChapterNewFiles(prev => [...prev, ...picked]); e.target.value = ''; }}
+                  onChange={async e => {
+                    const picked = Array.from(e.target.files);
+                    e.target.value = '';
+                    const normalized = [];
+                    for (const f of picked) {
+                      // eslint-disable-next-line no-await-in-loop
+                      try { normalized.push(await normalizeImageFile(f)); } catch (err) { notify(err.message); }
+                    }
+                    setEditChapterNewFiles(prev => [...prev, ...normalized]);
+                  }}
                   style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, boxSizing: 'border-box' }} />
                 {editChapterNewFiles.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, maxHeight: 260, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
