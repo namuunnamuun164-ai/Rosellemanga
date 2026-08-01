@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
-import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile } from './helpers';
+import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, checkImageDecodable } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
 import { PasswordField } from './PasswordField';
 import { Avatar, MangaCard, SectionHeader, LiveCountdown, SearchOverlay } from './components';
@@ -4355,9 +4355,21 @@ export default function App() {
                       const picked = Array.from(e.target.files);
                       e.target.value = '';
                       const normalized = [];
+                      const badNames = [];
                       for (const f of picked) {
                         // eslint-disable-next-line no-await-in-loop
-                        try { normalized.push(await normalizeImageFile(f)); } catch (err) { notify(err.message); }
+                        try {
+                          const norm = await normalizeImageFile(f);
+                          // ЗАСВАР #241 (хэрэглэгчийн хvсэлт — хуудас дундаасаа дутахгvй
+                          // байх ёстой): decode шалгалт унасан ч файлыг ОРХИХГvй, зөвхөн
+                          // урьдчилан анхааруулна — upload хийх vед боловсруулагдаагvй
+                          // эх хэвээр нь орно (доорх ЗАСВАР #241-ийг vз).
+                          if (!(await checkImageDecodable(norm))) badNames.push(f.name || 'нэргvй зураг');
+                          normalized.push(norm);
+                        } catch (err) { notify(err.message); }
+                      }
+                      if (badNames.length > 0) {
+                        notify(`Анхаар: дараах зураг(ууд) энэ дэлгэцэн дээр урьдчилан харагдахгvй байж болзошгvй, гэхдээ upload хийхэд хуудас нь дутахгvй (эх хэвээрээ орно): ${badNames.join(', ')}`);
                       }
                       setChapterFiles(prev => [...prev, ...normalized]);
                     }}
@@ -4464,17 +4476,27 @@ export default function App() {
                     let filesToUpload = chapterFiles;
                     {
                       const expanded = [];
-                      try {
-                        // ЗАСВАР #238 (код шинжилгээ): ӨМНӨ нь эхлээд optimize (өргөнийг
-                        // 1200px рvv багасгах), дараа нь split хийдэг байсан — НАРИЙХАН
-                        // (1200px-с бага, тул optimize хэмжээг vл хөндөнө) БОЛОВЧ МАШ УРТ
-                        // (жишээ нь 58000px) зурагт split хэзээ ч хvрдэггvй, харин
-                        // optimize өөрөө бvтэн 58000px өндөртэй canvas зурахыг оролдож,
-                        // iOS Safari-ийн canvas хэмжээний хязгаараас хэтэрч toBlob() null
-                        // буцаадаг байв. Одоо ЭХЛЭЭД split хийж (6000px-с урт бол хэсэглэж),
-                        // ДАРАА нь хэсэг бvрийг optimize хийнэ — ингэснээр аль ч функцэд
-                        // нэг ч удаа бvтэн өндрөөрөө canvas vvсэхгvй.
-                        for (const f of chapterFiles) {
+                      // ЗАСВАР #241 (хэрэглэгчийн гомдол — Samsung S22 дээр зарим
+                      // screenshot/өөр апп-аас хуулсан зураг "The source image could
+                      // not be decoded" гэж browser-т decode хийгдэхгvй): өмнө нь ГАНЦ
+                      // файл decode хийгдэхгvй бол БvХ бvлгийг (бусад хэвийн зурагтай
+                      // нь хамт) upload хийхээс зогсоодог, мөн аль файл нь эвдэрсэн
+                      // гэдгийг заадаггvй байв. Одоо файл бvрийг ТУСДАА (per-file)
+                      // алдаанаас хамгаалж, эвдэрсэн файлыг нэрээр нь мэдэгдээд
+                      // алгасаж, vлдсэн хэвийн зурагтай нь vргэлжлvvлнэ.
+                      const failedNames = [];
+                      const rawFallbackNames = [];
+                      for (const f of chapterFiles) {
+                        try {
+                          // ЗАСВАР #238 (код шинжилгээ): ӨМНӨ нь эхлээд optimize (өргөнийг
+                          // 1200px рvv багасгах), дараа нь split хийдэг байсан — НАРИЙХАН
+                          // (1200px-с бага, тул optimize хэмжээг vл хөндөнө) БОЛОВЧ МАШ УРТ
+                          // (жишээ нь 58000px) зурагт split хэзээ ч хvрдэггvй, харин
+                          // optimize өөрөө бvтэн 58000px өндөртэй canvas зурахыг оролдож,
+                          // iOS Safari-ийн canvas хэмжээний хязгаараас хэтэрч toBlob() null
+                          // буцаадаг байв. Одоо ЭХЛЭЭД split хийж (6000px-с урт бол хэсэглэж),
+                          // ДАРАА нь хэсэг бvрийг optimize хийнэ — ингэснээр аль ч функцэд
+                          // нэг ч удаа бvтэн өндрөөрөө canvas vvсэхгvй.
                           // eslint-disable-next-line no-await-in-loop
                           const parts = await splitTallImageFile(f, 6000);
                           for (const part of parts) {
@@ -4482,12 +4504,30 @@ export default function App() {
                             const optimized = await optimizeImageFile(part.file, 1200);
                             expanded.push(optimized);
                           }
+                        } catch (e) {
+                          // ЗАСВАР #241 (хэрэглэгчийн хvсэлт — манганы хуудас дундаасаа
+                          // дутахгvй байх ёстой): хэт өндөр нягтралтай (MAX_SAFE_PIXELS,
+                          // browser crash эрсдэлтэй) зургийг л алгасна — бусад ("could not
+                          // be decoded" гэх мэт зөвхөн split/optimize decode хийж чадаагvй,
+                          // жинхэнэ эвдрэлгvй магадгvй) зургийг БОЛОВСРУУЛАЛГvй эх хэвээр
+                          // нь (split/webp хийхгvй, header аль хэдийн шалгагдсан) upload-д
+                          // оруулна — ингэснээр хуудас дутахгvй, зөвхөн хэмжээ/формат
+                          // оптимайз хийгдээгvй vлдэнэ.
+                          if (/хэт өндөр нягтралтай/.test(e.message || '')) {
+                            failedNames.push(f.name || 'нэргvй зураг');
+                          } else {
+                            expanded.push({ file: f, width: 0, height: 0 });
+                            rawFallbackNames.push(f.name || 'нэргvй зураг');
+                          }
                         }
-                      } catch (e) {
-                        // ЗАСВАР #191 (код шинжилгээ): toBlob null буцаах эрсдэлээс vvдэн
-                        // splitTallImageFile throw хийж болох болсон тул энд шалгахгvй бол
-                        // chapterUploading vнэн хэвээр (товч мөнхөд идэвхгvй) vлдэнэ.
-                        notify('Алдаа: ' + e.message);
+                      }
+                      if (failedNames.length > 0) {
+                        notify(`Алдаа: дараах зураг(ууд) хэт өндөр нягтралтай тул орсонгvй (жижигрvvлж дахин оруулна уу): ${failedNames.join(', ')}`);
+                      }
+                      if (rawFallbackNames.length > 0) {
+                        notify(`Анхаар: дараах зураг(ууд) энэ утсан дээр боловсруулагдаагvй ЭХ хэвээрээ орсон (хуудас дутахгvй, гэхдээ жижигрvvлэгдээгvй/webp болоогvй): ${rawFallbackNames.join(', ')}`);
+                      }
+                      if (expanded.length === 0) {
                         setChapterUploading(false);
                         return;
                       }
@@ -5756,9 +5796,19 @@ export default function App() {
                     const picked = Array.from(e.target.files);
                     e.target.value = '';
                     const normalized = [];
+                    const badNames = [];
                     for (const f of picked) {
                       // eslint-disable-next-line no-await-in-loop
-                      try { normalized.push(await normalizeImageFile(f)); } catch (err) { notify(err.message); }
+                      try {
+                        const norm = await normalizeImageFile(f);
+                        // ЗАСВАР #241: decode шалгалт унасан ч файлыг орхихгvй, зөвхөн
+                        // урьдчилан анхааруулна (доорх upload гогцоо эх хэвээр оруулна).
+                        if (!(await checkImageDecodable(norm))) badNames.push(f.name || 'нэргvй зураг');
+                        normalized.push(norm);
+                      } catch (err) { notify(err.message); }
+                    }
+                    if (badNames.length > 0) {
+                      notify(`Анхаар: дараах зураг(ууд) энэ дэлгэцэн дээр урьдчилан харагдахгvй байж болзошгvй, гэхдээ upload хийхэд хуудас нь дутахгvй (эх хэвээрээ орно): ${badNames.join(', ')}`);
                     }
                     setEditChapterNewFiles(prev => [...prev, ...normalized]);
                   }}
@@ -5792,24 +5842,50 @@ export default function App() {
                 // мэдэж авна — ингэснээр доор progress (хувь) тооцох боломжтой болно
                 // (add-chapter урсгалтай адил хандлага).
                 let expandedNewFiles = [];
-                try {
+                {
+                  // ЗАСВАР #241 (хэрэглэгчийн гомдол — Samsung S22 дээр зарим
+                  // screenshot/өөр апп-аас хуулсан зураг decode хийгдэхгvй): add-chapter
+                  // урсгалтай адил, файл бvрийг ТУСДАА алдаанаас хамгаалж, эвдэрсэн
+                  // файлыг нэрээр нь мэдэгдээд алгасаж, vлдсэн хэвийн зурагтай нь
+                  // vргэлжлvvлнэ (нэг файл БvХ upload-ыг зогсоохгvй).
+                  const failedNames = [];
+                  const rawFallbackNames = [];
                   for (const file of editChapterNewFiles) {
-                    // ЗАСВАР #238 (код шинжилгээ): нэмэх (add-chapter) урсгалтай адил
-                    // шалтгаанаар (нарийхан боловч маш урт зурагт optimize өөрөө бvтэн
-                    // өндрөөрөө canvas зурахыг оролдож iOS Safari дээр toBlob() null
-                    // буцаадаг байсан) — ЭХЛЭЭД split (6000px-с урт бол хэсэглэх), ДАРАА
-                    // нь хэсэг бvрийг optimize (1200px рvv багасгаж WebP болгох) хийнэ.
-                    // eslint-disable-next-line no-await-in-loop
-                    const splitParts = await splitTallImageFile(file, 6000);
-                    for (const p of splitParts) {
+                    try {
+                      // ЗАСВАР #238 (код шинжилгээ): нэмэх (add-chapter) урсгалтай адил
+                      // шалтгаанаар (нарийхан боловч маш урт зурагт optimize өөрөө бvтэн
+                      // өндрөөрөө canvas зурахыг оролдож iOS Safari дээр toBlob() null
+                      // буцаадаг байсан) — ЭХЛЭЭД split (6000px-с урт бол хэсэглэх), ДАРАА
+                      // нь хэсэг бvрийг optimize (1200px рvv багасгаж WebP болгох) хийнэ.
                       // eslint-disable-next-line no-await-in-loop
-                      expandedNewFiles.push(await optimizeImageFile(p.file, 1200));
+                      const splitParts = await splitTallImageFile(file, 6000);
+                      for (const p of splitParts) {
+                        // eslint-disable-next-line no-await-in-loop
+                        expandedNewFiles.push(await optimizeImageFile(p.file, 1200));
+                      }
+                    } catch (e) {
+                      // ЗАСВАР #241 (хэрэглэгчийн хvсэлт — add-chapter урсгалтай адил):
+                      // хэт өндөр нягтралтай зургийг л алгасна, бусад decode-ийн алдааг
+                      // (жишээ нь тухайн утсан дээр л гарах "could not be decoded")
+                      // БОЛОВСРУУЛАЛГvй эх хэвээр нь upload-д оруулна — хуудас дутахгvй.
+                      if (/хэт өндөр нягтралтай/.test(e.message || '')) {
+                        failedNames.push(file.name || 'нэргvй зураг');
+                      } else {
+                        expandedNewFiles.push({ file, width: 0, height: 0 });
+                        rawFallbackNames.push(file.name || 'нэргvй зураг');
+                      }
                     }
                   }
-                } catch (e) {
-                  notify(`Зураг хэсэглэхэд алдаа: ${e.message}`);
-                  setEditChapterSaving(false);
-                  return;
+                  if (failedNames.length > 0) {
+                    notify(`Алдаа: дараах зураг(ууд) хэт өндөр нягтралтай тул орсонгvй (жижигрvvлж дахин оруулна уу): ${failedNames.join(', ')}`);
+                  }
+                  if (rawFallbackNames.length > 0) {
+                    notify(`Анхаар: дараах зураг(ууд) энэ утсан дээр боловсруулагдаагvй ЭХ хэвээрээ орсон (хуудас дутахгvй, гэхдээ жижигрvvлэгдээгvй/webp болоогvй): ${rawFallbackNames.join(', ')}`);
+                  }
+                  if (editChapterExistingImages.length === 0 && expandedNewFiles.length === 0) {
+                    setEditChapterSaving(false);
+                    return;
+                  }
                 }
 
                 const totalUploads = (editChapterCoverFile ? 1 : 0) + expandedNewFiles.length;

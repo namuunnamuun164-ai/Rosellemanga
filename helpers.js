@@ -23,11 +23,32 @@ export const validateImageFile = (file) => {
 // хийж чаддаггvй, мөн дээрх ALLOWED_IMAGE_TYPES жагсаалтад ч байхгvй тул
 // validateImageFile-д "буруу төрөл" гэж татгалзагддаг байсан.
 const HEIC_TYPES = ['image/heic', 'image/heif'];
+const HEIC_BRANDS = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'];
 const isHeicFile = (file) => {
   if (!file) return false;
   if (HEIC_TYPES.includes((file.type || '').toLowerCase())) return true;
   const name = (file.name || '').toLowerCase();
   return name.endsWith('.heic') || name.endsWith('.heif');
+};
+
+// ЗАСВАР #241 (хэрэглэгчийн гомдол — зарим Android утас HEIC файлыг буруу
+// (жишээ нь хоосон эсвэл "image/jpeg") MIME төрөлтэй, .jpg өргөтгөлтэй
+// сонгуулдаг тул isHeicFile дээрх extension/MIME шалгалтаар олдохгvй, тул
+// heic2any-гээр хөрвvvлэгдэлгvй шууд decode-д орж "The source image could not
+// be decoded" алдаанд хvргэдэг байв. ISO BMFF (HEIC) файл бvр эхний 12 байтдаа
+// "....ftypheic" маягийн brand агуулдаг тул extension/MIME худал ярьсан ч энэ
+// байтаар нь бодитоор таньж болно.
+const sniffHeicBrand = async (file) => {
+  try {
+    const head = new Uint8Array(await file.slice(4, 12).arrayBuffer());
+    if (head.length < 8) return false;
+    const ftyp = String.fromCharCode(...head.slice(0, 4));
+    if (ftyp !== 'ftyp') return false;
+    const brand = String.fromCharCode(...head.slice(4, 8)).toLowerCase();
+    return HEIC_BRANDS.includes(brand);
+  } catch {
+    return false;
+  }
 };
 
 // ШИНЭ: HEIC/HEIF зургийг validateImageFile/upload/optimize урсгалд орохоос
@@ -36,7 +57,11 @@ const isHeicFile = (file) => {
 // HEIC файл сонгогдсон vед л ачаалуулахын тулд (энгийн jpg/png upload-д
 // нөлөөлөхгvй).
 export const normalizeImageFile = async (file) => {
-  if (!file || !isHeicFile(file)) return file;
+  if (!file) return file;
+  // ALLOWED_IMAGE_TYPES-д таарч буй (жинхэнэ MIME мэдvvлсэн) файлыг дахин
+  // sniff хийж цаг vрэхгvй — зөвхөн MIME нь итгэмээргvй vед л байтаар шалгана.
+  const looksHeic = isHeicFile(file) || (!ALLOWED_IMAGE_TYPES.includes(file.type) && await sniffHeicBrand(file));
+  if (!looksHeic) return file;
   let converted;
   try {
     const heic2any = (await import('heic2any')).default;
@@ -165,6 +190,23 @@ const probeImageDimensions = async (stableBlob) => {
     return dims;
   } catch {
     return null;
+  }
+};
+
+// ЗАСВАР #241 (хэрэглэгчийн гомдол — Samsung S22 дээр зарим screenshot/өөр
+// апп-аас хуулсан зураг decode хийгдэхгvй): өмнө нь эвдэрсэн файл зөвхөн
+// upload товч дарахад (split/optimize урсгалын дотор) илэрдэг байсан тул
+// хэрэглэгч аль файл нь эвдэрсэнийг мэдэхгvйгээр бvх бvлгийг upload хийж
+// чадахгvй байв. Одоо файл СОНГОМОГЦ (upload дарахаас өмнө) шалгаж, эвдэрсэн
+// бол тэр даруй (нэрээр нь) мэдэгдэж жагсаалтад огт нэмэхгvй байх боломжтой.
+export const checkImageDecodable = async (file) => {
+  try {
+    const stableBlob = await toStableBlob(file);
+    const bitmap = await createImageBitmap(stableBlob);
+    bitmap.close?.();
+    return true;
+  } catch {
+    return false;
   }
 };
 
