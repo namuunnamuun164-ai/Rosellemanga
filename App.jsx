@@ -65,6 +65,10 @@ export default function App() {
   const [feedbackImagePreview, setFeedbackImagePreview] = useState('');
   // admin талын "Санал хvсэлт" таб
   const [feedbackList, setFeedbackList] = useState([]);
+  // ШИНЭ (хэрэглэгчийн хvсэлт): admin-ий "Санал хvсэлт" табын буланд, уншигчдын
+  // ажилтдад илгээсэн "Admin дэмжих" (дэмжих vг + од) мэдэгдлvvдийг жагсаана
+  // (хонхны мэдэгдэл түр зуурынх — энэ бол vvнийг байнга харах боломж).
+  const [recentAppreciations, setRecentAppreciations] = useState([]);
   // ШИНЭ: "team" (баг нэгдэх) ангиллын vед л ашиглагдах холбоос талбар
   const [feedbackLinkUrl, setFeedbackLinkUrl] = useState('');
   // ШИНЭ (хэрэглэгчийн хvсэлт): ажилтныг (editor/moderator/admin) урамшуулах
@@ -175,9 +179,15 @@ export default function App() {
   const [dmGiftFlowersAmount, setDmGiftFlowersAmount] = useState(1);
   const [dmGifting, setDmGifting] = useState(false);
   // ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor уншигчдад vнэгvй
-  // (өөрийн балансаас биш) цэцэг бэлэглэж болно, сард 30 хvртэл хязгаартай.
-  const [dmGiftAsStaff, setDmGiftAsStaff] = useState(false);
-  const [staffGiftQuotaRemaining, setStaffGiftQuotaRemaining] = useState(30);
+  // (өөрийн балансаас биш) цэцэг бэлэглэж болно, сард 10 хvртэл хязгаартай —
+  // тусдаа "ЦЭЦЭГ БЭЛЭГЛЭХ" admin-таб хуудсанд зориулсан state.
+  const [staffGiftQuotaRemaining, setStaffGiftQuotaRemaining] = useState(10);
+  const [staffGiftSearchQuery, setStaffGiftSearchQuery] = useState('');
+  const [staffGiftSearchResults, setStaffGiftSearchResults] = useState([]);
+  const [staffGiftTarget, setStaffGiftTarget] = useState(null);
+  const [staffGiftAmount, setStaffGiftAmount] = useState(1);
+  const [staffGiftMessage, setStaffGiftMessage] = useState('');
+  const [staffGiftSending, setStaffGiftSending] = useState(false);
   // ЗАСВАР #163: admin-д VIP эрх авсан хэрэглэгчдийн жагсаалт (имэйл + vлдсэн хоног)
   const [vipUsers, setVipUsers] = useState([]);
   // ШИНЭ: VIP хэрэглэгчдийн жагсаалтаас имэйлээр (жишээ нь gmail) хайх
@@ -1529,6 +1539,11 @@ export default function App() {
   // ШИНЭ: тусдаа дуу (video эсвэл зурган цуврал reel-д) + хэрэглэгчийн гараар
   // хажуу тийш нь эргvvлдэг зурган цувралын идэвхтэй индексийг удирдах ref/state.
   const reelAudioRefs = useRef({});
+  // ЗАСВАР (алдаа): <audio> элемент хэмжээгvй (0x0) тул IntersectionObserver
+  // vvнийг шууд ажигласан vед хэзээ ч "харагдаж байна" гэж тооцдоггvй, тиймээс
+  // тусдаа дуутай reel (ялангуяа зурган цуврал горим) дуугvй vлддэг байв —
+  // оронд нь бvтэн өндөртэй reel-ийн КОНТЕЙНЕРийг ажиглана.
+  const reelContainerRefs = useRef({});
   const [reelSlideshowIndex, setReelSlideshowIndex] = useState({});
   // ЗАСВАР #100: deep-link (жишээ нь /manga/2 руу шууд орох эсвэл refresh хийх)
   // vед dbMangas ирэхээс ӨМНӨ sync effect ажиллаж, URL-ыг '/' болгож дарж бичдэг
@@ -1856,18 +1871,27 @@ export default function App() {
   // (like дархад dbReels дахин ачаалагддаггvй тул энэ effect тоглуулалтыг тасалдуулахгvй)
   useEffect(() => {
     if (page !== 'reels' || dbReels.length === 0) return;
+    // ЗАСВАР (алдаа): өмнө нь video/audio элементvvдийг шууд ажигладаг байсан ч
+    // <audio> нь хэмжээгvй (0x0) тул IntersectionObserver "харагдаж байна" гэж
+    // хэзээ ч тэмдэглэдэггvй, тиймээс тусдаа дуутай reel (ялангуяа зурган
+    // цуврал горимд, видеогvй) дуугvй vлддэг байв. Одоо бvтэн өндөртэй
+    // reel-ийн КОНТЕЙНЕРийг ажиглаад, тухайн reel-ийн video/audio-г хамт
+    // тоглуулж/зогсооно.
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
-        if (entry.isIntersecting) entry.target.play().catch(() => {});
-        else entry.target.pause();
+        const reelId = entry.target.dataset.reelId;
+        const video = reelVideoRefs.current[reelId];
+        const audio = reelAudioRefs.current[reelId];
+        if (entry.isIntersecting) {
+          video?.play().catch(() => {});
+          audio?.play().catch(() => {});
+        } else {
+          video?.pause();
+          audio?.pause();
+        }
       });
     }, { threshold: 0.6 });
-    Object.values(reelVideoRefs.current).forEach(v => observer.observe(v));
-    // ШИНЭ: тусдаа дуу (audio_url) хавсаргасан reel-vvдийн <audio> элементvvдийг
-    // ч видеотой ижил зарчмаар (харагдаж байх vед л тоглуулна) удирдана.
-    // (Зурган цуврал reel одоо автоматаар биш, хэрэглэгч гараар хажуу тийш нь
-    // эргvvлдэг тул тусдаа slideshow timer/observer шаардлагагvй болов.)
-    Object.values(reelAudioRefs.current).forEach(a => observer.observe(a));
+    Object.values(reelContainerRefs.current).forEach(el => observer.observe(el));
 
     return () => observer.disconnect();
   }, [page, dbReels]);
@@ -1974,6 +1998,12 @@ export default function App() {
             .neq('staff_id', currentUser.id).order('created_at', { ascending: false }).limit(10)
         : Promise.resolve({ data: [] });
 
+      // ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor надад vнэгvй цэцэг
+      // бэлэглэхэд (staff_flower_gifts) хонхон дээр мэдэгдэл харагдана.
+      const staffGiftReceivedPromise = supabase.from('staff_flower_gifts')
+        .select('id, amount, created_at, sender:users!staff_id(name, avatar_url)')
+        .eq('recipient_id', currentUser.id).order('created_at', { ascending: false }).limit(10);
+
       // ЗАСВАР: өмнө нь ownIds хоосон vед funcion шууд return хийж, доорхи VIP
       // мэдэгдлийг ч алгасдаг байсан (сэтгэгдэл vvсгээгvй шинэ хэрэглэгч VIP
       // авсан ч мэдэгдэл огт харагдахгvй байх эрсдэлтэй) — одоо reply/like
@@ -2003,7 +2033,7 @@ export default function App() {
         }));
       }
 
-      const [{ data: approvedVip }, { data: newTasks }, { data: newFeedbackReplies }, { data: donationThanks }, { data: appreciationsReceived }, { data: appreciationsOversight }] = await Promise.all([vipReqPromise, newTasksPromise, feedbackRepliesPromise, donationThanksPromise, appreciationReceivedPromise, appreciationOversightPromise]);
+      const [{ data: approvedVip }, { data: newTasks }, { data: newFeedbackReplies }, { data: donationThanks }, { data: appreciationsReceived }, { data: appreciationsOversight }, { data: staffGiftsReceived }] = await Promise.all([vipReqPromise, newTasksPromise, feedbackRepliesPromise, donationThanksPromise, appreciationReceivedPromise, appreciationOversightPromise, staffGiftReceivedPromise]);
       if (cancelled) return;
       const withAuthors = await attachAuthors([...replies, ...likes]);
       // ЗАСВАР: attachAuthors нь user_id-аар get_public_profiles дуудаж зохиогчийг
@@ -2052,7 +2082,15 @@ export default function App() {
         sticker_url: null, chapter_id: null, manga_id: null, chapters: null, mangas: null,
         users: { name: 'Roselle Manga', avatar_url: null },
       }));
-      const merged = [...withAuthors, ...vipItems, ...newTaskItems, ...feedbackReplyItems, ...donationThanksItems, ...appreciationReceivedItems, ...appreciationOversightItems].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
+      // ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor надад vнэгvй цэцэг
+      // бэлэглэсэн бол хонхон дээр мэдэгдэнэ.
+      const staffGiftReceivedItems = (staffGiftsReceived || []).map(g => ({
+        id: `staffgift-${g.id}`, kind: 'staff_gift_received', user_id: currentUser.id, created_at: g.created_at,
+        content: `${g.sender?.name || 'Ажилтан'} танд ${g.amount} цэцэг бэлэглэлээ`,
+        sticker_url: null, chapter_id: null, manga_id: null, chapters: null, mangas: null,
+        users: { name: g.sender?.name || 'Ажилтан', avatar_url: g.sender?.avatar_url || null },
+      }));
+      const merged = [...withAuthors, ...vipItems, ...newTaskItems, ...feedbackReplyItems, ...donationThanksItems, ...appreciationReceivedItems, ...appreciationOversightItems, ...staffGiftReceivedItems].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
       if (!cancelled) setPersonalActivity(merged);
     };
     fetchPersonal();
@@ -2106,6 +2144,8 @@ export default function App() {
     if (item.kind === 'feedback_reply') { setPage('feedback'); return; }
     if (item.kind === 'donation_thanked') { setPage('feedback'); return; }
     if (item.kind === 'appreciation_received' || item.kind === 'appreciation_oversight') { setPage('feedback'); return; }
+    // ШИНЭ: staff-ийн бэлэглэсэн цэцэг DM мессеж хэлбэрээр ирдэг тул чат руу.
+    if (item.kind === 'staff_gift_received') { setPreviousPage(page); setPage('chat'); setChatMode('inbox'); return; }
     if (item.chapter_id) {
       const mangaId = item.chapters?.manga_id;
       const manga = dbMangas.find(m => m.id === mangaId);
@@ -2535,12 +2575,22 @@ export default function App() {
       .then(({ data, error }) => { if (error) console.error('Санал хvсэлт татах алдаа:', error); else setFeedbackList(data || []); });
   }, []);
 
+  // ШИНЭ (хэрэглэгчийн хvсэлт): admin-д зориулж сvvлийн 30 "Admin дэмжих"
+  // (staff appreciation) мэдэгдлийг татна — хvн бvр (аль ч ажилтанд илгээсэн)
+  // хамрагдана, RLS-ээр зөвхөн admin бvгдийг унших боломжтой.
+  const fetchRecentAppreciations = useCallback(() => {
+    supabase.from('staff_appreciations')
+      .select('id, amount, message, created_at, sender:users!sender_id(name, avatar_url), recipient:users!staff_id(name)')
+      .order('created_at', { ascending: false }).limit(30)
+      .then(({ data, error }) => { if (error) console.error('Дэмжих vг татах алдаа:', error); else setRecentAppreciations(data || []); });
+  }, []);
+
   // ШИНЭ: admin-ий "Даалгавар" таб — vvсгэсэн бvх даалгавар (идэвхтэй/идэвхгvй хамт)
   const fetchTasksAdmin = useCallback(() => {
     supabase.from('tasks').select('*').order('created_at', { ascending: false })
       .then(({ data, error }) => { if (error) console.error('Даалгавар татах алдаа:', error); else setTasksList(data || []); });
     // ШИНЭ: баталгаажуулалт хvлээж буй "манал" даалгаврын хvсэлтvvд
-    supabase.from('task_claims').select('task_id, user_id, proof_image_url, claimed_at, tasks(title, reward_flowers, reward_type, reward_vip_days), users!user_id(name, avatar_url)')
+    supabase.from('task_claims').select('task_id, user_id, proof_image_urls, claimed_at, tasks(title, reward_flowers, reward_type, reward_vip_days), users!user_id(name, avatar_url)')
       .eq('status', 'pending').order('claimed_at', { ascending: true })
       .then(({ data, error }) => { if (error) console.error('Хvлээгдэж буй хvсэлт татах алдаа:', error); else setPendingTaskClaims(data || []); });
   }, []);
@@ -2644,8 +2694,9 @@ export default function App() {
       fetchAnalytics();
       fetchFeedbackList();
       fetchTasksAdmin();
+      fetchRecentAppreciations();
     }
-  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers, fetchAnalytics, fetchFeedbackList, fetchTasksAdmin]);
+  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers, fetchAnalytics, fetchFeedbackList, fetchTasksAdmin, fetchRecentAppreciations]);
 
   // ШИНЭ: "Санал хvсэлт" хуудас нээгдэхэд өөрийн (сvvлийн) мессежvvдийг татна
   useEffect(() => {
@@ -3086,15 +3137,11 @@ export default function App() {
   const giftFlowersToPartner = async () => {
     if (!dmPartner || dmGifting) return;
     const amount = Math.max(1, Math.floor(Number(dmGiftFlowersAmount) || 0));
-    const asStaff = isStaff && dmGiftAsStaff;
     setDmGifting(true);
     try {
-      const { error } = asStaff
-        ? await supabase.rpc('gift_flowers_as_staff', { recipient_id_in: dmPartner.id, amount_in: amount })
-        : await supabase.rpc('gift_flowers', { recipient_id_in: dmPartner.id, amount_in: amount });
+      const { error } = await supabase.rpc('gift_flowers', { recipient_id_in: dmPartner.id, amount_in: amount });
       if (error) {
         if (/not_enough_flowers/.test(error.message || '')) notify('Танд хvрэлцэхvйц цэцэг алга.');
-        else if (/quota_exceeded/.test(error.message || '')) notify('Энэ сарын vнэгvй цэцгийн хязгаарт хvрсэн байна (сард 30).');
         else if (/blocked/.test(error.message || '')) notify('Энэ хэрэглэгчтэй харилцах боломжгvй байна.');
         else notify('Алдаа: ' + error.message);
         return;
@@ -3102,11 +3149,7 @@ export default function App() {
       notify(`${amount} цэцэг бэлэглэлээ! 💐`);
       setDmGiftFlowersOpen(false);
       setDmGiftFlowersAmount(1);
-      if (asStaff) {
-        setStaffGiftQuotaRemaining(q => Math.max(0, q - amount));
-      } else {
-        fetchProfile(currentUser.id);
-      }
+      fetchProfile(currentUser.id);
     } catch (e) {
       notify('Алдаа: ' + e.message);
     } finally {
@@ -3148,6 +3191,56 @@ export default function App() {
     }, 250);
     return () => { cancelled = true; clearTimeout(t); };
   }, [dmSearchQuery]);
+
+  // ШИНЭ: admin-ий "ЦЭЦЭГ БЭЛЭГЛЭХ" хуудсанд хvлээн авагч хайх
+  useEffect(() => {
+    const q = staffGiftSearchQuery.trim();
+    if (!q) { setStaffGiftSearchResults([]); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      supabase.rpc('search_users', { query_in: q }).then(({ data, error }) => {
+        if (cancelled || error) return;
+        setStaffGiftSearchResults((data || []).filter(u => u.id !== currentUser?.id));
+      });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [staffGiftSearchQuery, currentUser]);
+
+  // ШИНЭ: staff-гийн цэцэг бэлэглэх цонх нээгдэх бvрд vлдсэн сарын хязгаарыг татна.
+  useEffect(() => {
+    if (staffGiftTarget && isStaff) {
+      supabase.rpc('get_staff_gift_quota_remaining').then(({ data }) => setStaffGiftQuotaRemaining(data ?? 0));
+    }
+  }, [staffGiftTarget, isStaff]);
+
+  // ШИНЭ: admin/moderator/editor уншигчид vнэгvй цэцэг бэлэглэх (сард 10 хvртэл)
+  const sendStaffGift = async () => {
+    if (!staffGiftTarget || staffGiftSending) return;
+    const amount = Math.max(1, Math.floor(Number(staffGiftAmount) || 0));
+    setStaffGiftSending(true);
+    try {
+      const { error } = await supabase.rpc('gift_flowers_as_staff', {
+        recipient_id_in: staffGiftTarget.id, amount_in: amount, message_in: staffGiftMessage.trim() || null,
+      });
+      if (error) {
+        if (/quota_exceeded/.test(error.message || '')) notify('Энэ сарын vнэгvй цэцгийн хязгаарт хvрсэн байна (сард 10).');
+        else if (/blocked/.test(error.message || '')) notify('Энэ хэрэглэгчтэй харилцах боломжгvй байна.');
+        else if (/cannot_gift_self/.test(error.message || '')) notify('Өөртөө бэлэглэх боломжгvй.');
+        else notify('Алдаа: ' + error.message);
+        return;
+      }
+      notify(`${staffGiftTarget.name || 'Хэрэглэгч'}-д ${amount} цэцэг бэлэглэлээ! 💐`);
+      setStaffGiftTarget(null);
+      setStaffGiftAmount(1);
+      setStaffGiftMessage('');
+      setStaffGiftSearchQuery('');
+      setStaffGiftQuotaRemaining(q => Math.max(0, q - amount));
+    } catch (e) {
+      notify('Алдаа: ' + e.message);
+    } finally {
+      setStaffGiftSending(false);
+    }
+  };
 
   // ШИНЭ: "Санал хvсэлт" илгээх
   const submitFeedback = async () => {
@@ -3272,16 +3365,17 @@ export default function App() {
   // ШИНЭ: даалгаврын шагналыг нэхэх (RPC биелэлтийг серверт дахин шалгаж, цэцэг олгоно).
   // "manual" төрлийн даалгавар vед шагнал шууд биш, admin/moderator баталсны
   // дараа л олгогдоно — тул RPC амжилттай ч, "pending" төлөвтэй тэмдэглэнэ.
-  const claimTask = async (task, proofUrl) => {
+  const claimTask = async (task, proofUrls) => {
     if (taskClaimingId) return;
     const taskId = task.id;
     setTaskClaimingId(taskId);
     try {
-      const { error } = await supabase.rpc('claim_task', { task_id_in: taskId, proof_image_url_in: proofUrl || null });
+      const { error } = await supabase.rpc('claim_task', { task_id_in: taskId, proof_image_urls_in: (proofUrls && proofUrls.length > 0) ? proofUrls : null });
       if (error) {
         if (/not_enough_progress/.test(error.message || '')) notify('Даалгаврыг хараахан гvйцэтгээгvй байна.');
         else if (/already_claimed/.test(error.message || '')) notify('Та энэ шагналыг аль хэдийн авсан байна.');
         else if (/proof_required/.test(error.message || '')) notify('Баталгаажуулах зураг хавсаргана уу.');
+        else if (/too_many_proof_images/.test(error.message || '')) notify('Дээд тал нь 5 зураг хавсаргаж болно.');
         else notify('Алдаа: ' + error.message);
         return;
       }
@@ -3299,18 +3393,26 @@ export default function App() {
     }
   };
 
-  // ШИНЭ: "requires_proof" даалгаврын vед сонгосон зургийг R2-д upload хийгээд,
-  // амжилттай бол л claimTask-ыг proof URL-тэй нь дуудна.
-  const handleTaskProofFile = async (file) => {
-    if (!pendingProofTask || !file) return;
-    const err = validateImageFile(file);
-    if (err) { notify(err); return; }
+  // ШИНЭ: "requires_proof" даалгаврын vед сонгосон зургуудыг (дээд тал нь 5)
+  // R2-д upload хийгээд, амжилттай бол л claimTask-ыг proof URL-vvдтэй нь дуудна.
+  const handleTaskProofFiles = async (fileList) => {
+    if (!pendingProofTask || !fileList || fileList.length === 0) return;
+    const files = Array.from(fileList).slice(0, 5);
+    if (fileList.length > 5) notify('Дээд тал нь 5 зураг хавсаргаж болно — эхний 5-ыг ашиглав.');
+    for (const file of files) {
+      const err = validateImageFile(file);
+      if (err) { notify(err); return; }
+    }
     setProofUploading(true);
     try {
-      const normalized = await normalizeImageFile(file);
-      const optimized = await optimizeImageFile(normalized, 1200);
-      const url = await uploadToR2(optimized.file, `task-proofs/${Date.now()}-${optimized.file.name}`);
-      await claimTask(pendingProofTask, url);
+      const urls = [];
+      for (const file of files) {
+        const normalized = await normalizeImageFile(file);
+        const optimized = await optimizeImageFile(normalized, 1200);
+        const url = await uploadToR2(optimized.file, `task-proofs/${Date.now()}-${crypto.randomUUID()}-${optimized.file.name}`);
+        urls.push(url);
+      }
+      await claimTask(pendingProofTask, urls);
     } catch (e) {
       notify('Зураг upload алдаа: ' + e.message);
     } finally {
@@ -4052,6 +4154,7 @@ export default function App() {
                           : item.kind === 'donation_thanked' ? '💛 таны хандивд баярлалаа!'
                           : item.kind === 'appreciation_received' ? '🙏 танд дэмжих vг илгээлээ'
                           : item.kind === 'appreciation_oversight' ? '👁️ дэмжих vг илгээгдлээ'
+                          : item.kind === 'staff_gift_received' ? '💐 танд цэцэг бэлэглэлээ'
                           : (mangaTitle ? `→ ${mangaTitle}${chapterLabel}` : '');
                         return (
                           <div key={item.id} onClick={() => goToNotification(item)}
@@ -4730,7 +4833,9 @@ export default function App() {
               const slideIndex = reelSlideshowIndex[reel.id] || 0;
               const hasImages = !reel.video_url && reel.image_urls && reel.image_urls.length > 0;
               return (
-                <div key={reel.id} className="reel-item" style={{ position: 'relative', scrollSnapAlign: 'start', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                <div key={reel.id} data-reel-id={reel.id}
+                  ref={el => { if (el) reelContainerRefs.current[reel.id] = el; else delete reelContainerRefs.current[reel.id]; }}
+                  className="reel-item" style={{ position: 'relative', scrollSnapAlign: 'start', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                   {hasImages ? (
                     // ЗАСВАР (хэрэглэгчийн хvсэлт): автомат slideshow-ын оронд хэрэглэгч
                     // өөрөө зураг хажуу тийш нь (баруун/зvvн тал дарж эсвэл сумаар)
@@ -5508,7 +5613,7 @@ export default function App() {
                       {!hasClaim && (
                         done ? (
                           <span style={{ fontSize: 11, fontWeight: 800, color: '#ff8080', flexShrink: 0 }}>
-                            {(taskClaimingId === t.id || (proofUploading && pendingProofTask?.id === t.id)) ? '...' : isManual ? 'БИЕЛvvЛЛЭЭ' : 'АВАХ →'}
+                            {(taskClaimingId === t.id || (proofUploading && pendingProofTask?.id === t.id)) ? '...' : isManual ? 'БИЕЛVVЛЛЭЭ' : 'АВАХ →'}
                           </span>
                         ) : (
                           <span style={{ fontSize: 10, fontWeight: 700, color: '#555', flexShrink: 0 }}>ДУТУУ</span>
@@ -5520,9 +5625,10 @@ export default function App() {
               </div>
             )}
 
-            {/* ШИНЭ: баталгаажуулах зураг сонгуулах нуугдмал input (requires_proof манал даалгаварт) */}
-            <input ref={taskProofInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleTaskProofFile(f); }} />
+            {/* ШИНЭ: баталгаажуулах зураг(ууд) сонгуулах нуугдмал input (манал
+                даалгаварт, дээд тал нь 5 зураг зэрэг сонгож болно) */}
+            <input ref={taskProofInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+              onChange={e => { const files = e.target.files; e.target.value = ''; if (files && files.length > 0) handleTaskProofFiles(files); }} />
 
             {/* ШИНЭ: даалгаврын дэлгэрэнгvй мэдээллийн modal */}
             {taskDetailModal && (
@@ -5577,7 +5683,7 @@ export default function App() {
                     устгах vйлдлvvд одоо inbox жагсаалтын мөр бvрийн "⋮" цэсэнд
                     аль хэдийн байгаа тул давхардуулахгvй) — цэцэг/VIP бэлэглэх
                     хоёрыг шууд харагдахаар жижиг icon товч болгов. */}
-                <span onClick={() => { setDmGiftFlowersOpen(true); setDmGiftAsStaff(false); if (isStaff) { supabase.rpc('get_staff_gift_quota_remaining').then(({ data }) => setStaffGiftQuotaRemaining(data ?? 0)); } }} title="Цэцэг бэлэглэх"
+                <span onClick={() => setDmGiftFlowersOpen(true)} title="Цэцэг бэлэглэх"
                   style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', fontSize: 16 }}>
                   💐
                 </span>
@@ -6029,18 +6135,12 @@ export default function App() {
                   <div style={{ fontSize: 28, marginBottom: 6 }}>💐</div>
                   <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{dmPartner.name || 'Хэрэглэгч'}-д цэцэг бэлэглэх</div>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 14 }}>
-                    {dmGiftAsStaff ? `Энэ сард vлдсэн vнэгvй хязгаар: ${staffGiftQuotaRemaining}/30` : `Танд ${userProfile?.flower_balance || 0} цэцэг байна`}
+                    Танд {userProfile?.flower_balance || 0} цэцэг байна
                   </div>
-                  {isStaff && (
-                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12, cursor: 'pointer', fontSize: 11, color: '#ccc' }}>
-                      <input type="checkbox" checked={dmGiftAsStaff} onChange={e => setDmGiftAsStaff(e.target.checked)} />
-                      🎁 vнэгvй бэлэг (өөрийн цэцгээс биш, сард 30 хvртэл)
-                    </label>
-                  )}
-                  <input type="number" min={1} max={dmGiftAsStaff ? staffGiftQuotaRemaining : (userProfile?.flower_balance || 1)} value={dmGiftFlowersAmount}
+                  <input type="number" min={1} max={userProfile?.flower_balance || 1} value={dmGiftFlowersAmount}
                     onChange={e => setDmGiftFlowersAmount(e.target.value)}
                     style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box', textAlign: 'center', marginBottom: 12 }} />
-                  <button disabled={dmGifting || (dmGiftAsStaff && staffGiftQuotaRemaining <= 0)} onClick={giftFlowersToPartner}
+                  <button disabled={dmGifting} onClick={giftFlowersToPartner}
                     style={{ width: '100%', background: '#8B0000', color: '#fff', border: 'none', padding: 12, borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
                     {dmGifting ? 'БЭЛЭГЛЭЖ БАЙНА...' : 'БЭЛЭГЛЭХ'}
                   </button>
@@ -6551,6 +6651,11 @@ export default function App() {
                                 )}
                                 {currentUser && c.user_id !== currentUser.id && (
                                   <span onClick={() => reportMangaComment(c)} title="Мэдэгдэх" style={{ cursor: 'pointer', fontSize: 11, color: '#555' }}>🚩</span>
+                                )}
+                                {/* ШИНЭ (хэрэглэгчийн хvсэлт): staff сэтгэгдэл бичсэн уншигчийг
+                                    шууд энд дараад vнэгvй цэцгээр дэмжиж болно. */}
+                                {isStaff && currentUser && c.user_id !== currentUser.id && (
+                                  <span onClick={() => setStaffGiftTarget({ id: c.user_id, name: c.users?.name, avatar_url: c.users?.avatar_url })} title="Цэцэг бэлэглэх" style={{ cursor: 'pointer', fontSize: 11 }}>💐</span>
                                 )}
                               </span>
                             </div>
@@ -7081,6 +7186,9 @@ export default function App() {
                             {currentUser && c.user_id !== currentUser.id && (
                               <span onClick={() => reportComment(c)} title="Мэдэгдэх" style={{ cursor: 'pointer', fontSize: 11, color: '#555' }}>🚩</span>
                             )}
+                            {isStaff && currentUser && c.user_id !== currentUser.id && (
+                              <span onClick={() => setStaffGiftTarget({ id: c.user_id, name: c.users?.name, avatar_url: c.users?.avatar_url })} title="Цэцэг бэлэглэх" style={{ cursor: 'pointer', fontSize: 11 }}>💐</span>
+                            )}
                           </span>
                         </div>
                         {c.content && (
@@ -7181,6 +7289,7 @@ export default function App() {
                 { key: 'feedback', label: `САНАЛ ХvСЭЛТ (${feedbackList.filter(f => f.status === 'open').length})`, show: canModerate },
                 { key: 'tasks', label: 'ДААЛГАВАР', show: isAdmin },
                 { key: 'stickers', label: `ЧАТНЫ СТИКЕР (${giftStickers.length})`, show: canModerate },
+                { key: 'giftFlowers', label: '💐 ЦЭЦЭГ БЭЛЭГЛЭХ', show: isStaff },
                 { key: 'analytics', label: '📊 СТАТИСТИК', show: isAdmin },
               ].filter(t => t.show).map(t => (
                 <div key={t.key} onClick={() => setAdminTab(t.key)}
@@ -7514,6 +7623,14 @@ export default function App() {
                     // ЗАСВАР #11: бvх зургийг (cover + хуудсууд) upload эхлэхээс өмнө шалгана
                     const badFile = [chapterCover, ...chapterFiles].filter(Boolean).map(validateImageFile).find(Boolean);
                     if (badFile) { notify(badFile); return; }
+
+                    // ЗАСВАР (хэрэглэгчийн хvсэлт — алдаа): олон/том зураг upload хийхэд
+                    // хэдэн минут vргэлжилж болдог тул эхлэхээс өмнө session/token-ыг
+                    // урьдчилан сэргээнэ (шаардлагатай бол supabase-js автоматаар
+                    // refresh хийдэг) — эс тэгвэл upload дунд token хугацаа дуусаж,
+                    // хэрэглэгч гэнэт "гарсан" мэт болж, upload тасалдах эрсдэлтэй байв.
+                    const { data: { session: freshSession } } = await supabase.auth.getSession();
+                    if (!freshSession) { notify('Нэвтрэлтийн хугацаа дууссан байна — дахин нэвтрээд оролдоно уу.'); return; }
 
                     setChapterUploading(true);
                     setChapterUploadProgress(0);
@@ -8308,6 +8425,36 @@ export default function App() {
 
             {/* ШИНЭ: хэрэглэгчдийн бичсэн санал/асуудал/гаргалт хvсэлтvvд */}
             {adminTab === 'feedback' && canModerate && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* ШИНЭ (хэрэглэгчийн хvсэлт): уншигчдын ажилтдад илгээсэн "Admin
+                  дэмжих" (дэмжих vг + од) мэдэгдлvvдийг admin vvнд байнга харж
+                  болно (хонхны мэдэгдэл түр зуурынхаас гадна). */}
+              {isAdmin && (
+                <div style={{ background: '#111', borderRadius: 12, padding: '1.25rem 1.5rem', border: '1px solid #1e1e1e' }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 4, height: 14, background: '#f5c518', borderRadius: 2 }} />
+                    🙏 СvvЛИЙН ДЭМЖИХ vГС ({recentAppreciations.length})
+                  </div>
+                  {recentAppreciations.length === 0 ? (
+                    <div style={{ fontSize: 12, color: '#555' }}>Одоогоор алга</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                      {recentAppreciations.map(a => (
+                        <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: '#1a1a1a', borderRadius: 8, fontSize: 12 }}>
+                          <Avatar url={a.sender?.avatar_url} letter={(a.sender?.name || '?')[0]} size={24} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ color: '#fff', fontWeight: 600 }}>{a.sender?.name || 'Хэрэглэгч'}</span>
+                            <span style={{ color: '#666' }}> → {a.recipient?.name || 'Ажилтан'}</span>
+                            {a.message && <div style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.message}</div>}
+                          </div>
+                          <span style={{ color: '#f5c518', fontWeight: 700, flexShrink: 0 }}>⭐{a.amount}</span>
+                          <span style={{ color: '#555', flexShrink: 0, fontSize: 11 }}>{formatMnDate(a.created_at)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
@@ -8380,6 +8527,7 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
               </div>
             )}
 
@@ -8528,10 +8676,14 @@ export default function App() {
                           <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
                             {c.tasks?.title} · {c.tasks?.reward_type === 'vip_days' ? `👑 ${c.tasks?.reward_vip_days || 1} хоног VIP` : `💐 ${c.tasks?.reward_flowers} цэцэг`}
                           </div>
-                          {c.proof_image_url && (
-                            <a href={c.proof_image_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 6 }}>
-                              <img src={c.proof_image_url} alt="Баталгаажуулах зураг" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a' }} />
-                            </a>
+                          {c.proof_image_urls && c.proof_image_urls.length > 0 && (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                              {c.proof_image_urls.map((url, i) => (
+                                <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: 'inline-block' }}>
+                                  <img src={url} alt="Баталгаажуулах зураг" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a' }} />
+                                </a>
+                              ))}
+                            </div>
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -8575,6 +8727,35 @@ export default function App() {
                     <input type="file" accept="image/*" style={{ display: 'none' }}
                       onChange={e => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadGiftSticker(f); }} />
                   </label>
+                </div>
+              </div>
+            )}
+
+            {/* ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor хvссэн уншигчдаа
+                vнэгvй цэцгээр (сард 10 хvртэл) дэмжих — нэрээр хайж сонгоод бэлэглэнэ. */}
+            {adminTab === 'giftFlowers' && isStaff && (
+              <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e', maxWidth: 420 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
+                  💐 ЦЭЦЭГ БЭЛЭГЛЭХ
+                </div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 14 }}>
+                  Уншигчдаа vнэгvй цэцгээр дэмжинэ (өөрийн балансаас хасагдахгvй) — сард нийт 10 хvртэл.
+                </div>
+                <input value={staffGiftSearchQuery} onChange={e => setStaffGiftSearchQuery(e.target.value)}
+                  placeholder="Уншигчийн нэрээр хайх..."
+                  style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', marginBottom: 10 }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {staffGiftSearchResults.map(u => (
+                    <div key={u.id} onClick={() => { setStaffGiftTarget(u); setStaffGiftAmount(1); setStaffGiftMessage(''); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', background: '#1a1a1a' }}>
+                      <Avatar url={u.avatar_url} letter={(u.name || '?')[0]} size={30} />
+                      <span style={{ fontSize: 13 }}>{u.name || 'Хэрэглэгч'}</span>
+                    </div>
+                  ))}
+                  {staffGiftSearchQuery.trim() && staffGiftSearchResults.length === 0 && (
+                    <div style={{ fontSize: 12, color: '#555', textAlign: 'center', padding: '1rem 0' }}>Олдсонгvй</div>
+                  )}
                 </div>
               </div>
             )}
@@ -8906,6 +9087,36 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor хэрэглэгчид
+            хvссэн уншигчдаа vнэгvй цэцгээр дэмжих — admin-ий тусгай хуудсанд
+            хайж сонгосноор, эсвэл сэтгэгдэл бичсэн хvний профайл дээрх 💐
+            дарж шууд ГЛОБАЛЬ (аль ч хуудаснаас) нээгддэг цонх. */}
+        {staffGiftTarget && (
+          <>
+            <div onClick={() => setStaffGiftTarget(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400, cursor: 'pointer' }} />
+            <div style={{
+              position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+              width: 300, maxWidth: '90vw', background: 'rgba(17,17,17,0.97)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '1.25rem', zIndex: 401,
+              boxShadow: '0 12px 40px rgba(0,0,0,0.6)', textAlign: 'center',
+            }}>
+              <Avatar url={staffGiftTarget.avatar_url} letter={(staffGiftTarget.name || '?')[0]} size={48} />
+              <div style={{ fontWeight: 800, fontSize: 14, marginTop: 8, marginBottom: 4 }}>{staffGiftTarget.name || 'Хэрэглэгч'}-д цэцэг бэлэглэх</div>
+              <div style={{ fontSize: 11, color: '#888', marginBottom: 14 }}>Энэ сард vлдсэн vнэгvй хязгаар: {staffGiftQuotaRemaining}/10</div>
+              <input type="number" min={1} max={staffGiftQuotaRemaining || 1} value={staffGiftAmount}
+                onChange={e => setStaffGiftAmount(e.target.value)}
+                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box', textAlign: 'center', marginBottom: 10 }} />
+              <textarea value={staffGiftMessage} onChange={e => setStaffGiftMessage(e.target.value.slice(0, 300))} rows={3}
+                placeholder="Дэмжих vг (заавал биш)"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', marginBottom: 12 }} />
+              <button disabled={staffGiftSending || staffGiftQuotaRemaining <= 0} onClick={sendStaffGift}
+                style={{ width: '100%', background: staffGiftQuotaRemaining > 0 ? '#8B0000' : '#555', color: '#fff', border: 'none', padding: 12, borderRadius: 10, cursor: (staffGiftSending || staffGiftQuotaRemaining <= 0) ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
+                {staffGiftSending ? 'БЭЛЭГЛЭЖ БАЙНА...' : staffGiftQuotaRemaining <= 0 ? 'ЭНЭ САРЫН ХЯЗГААРТ ХVРСЭН' : 'БЭЛЭГЛЭХ'}
+              </button>
+            </div>
+          </>
         )}
 
         {/* ЗАСВАР #163: манганы 7 хоног бvрийн хуваарь засах цонх (window.prompt-ийн оронд) */}
@@ -9266,6 +9477,10 @@ export default function App() {
                 if (editChapterExistingImages.length === 0 && editChapterNewFiles.length === 0) { notify('Дор хаяж 1 зураг vлдэх ёстой!'); return; }
                 const badFile = [editChapterCoverFile, ...editChapterNewFiles].filter(Boolean).map(validateImageFile).find(Boolean);
                 if (badFile) { notify(badFile); return; }
+                // ЗАСВАР (хэрэглэгчийн хvсэлт — алдаа): add-chapter урсгалтай адил,
+                // эхлэхээс өмнө session/token-ыг урьдчилан сэргээнэ.
+                const { data: { session: freshEditSession } } = await supabase.auth.getSession();
+                if (!freshEditSession) { notify('Нэвтрэлтийн хугацаа дууссан байна — дахин нэвтрээд оролдоно уу.'); return; }
                 setEditChapterSaving(true);
                 setEditChapterSaveProgress(0);
                 try {
