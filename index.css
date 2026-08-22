@@ -58,3 +58,147 @@ input[type="password"]::-ms-clear {
   height: 100vh;
   height: 100dvh;
 }
+
+/* ЗАСВАР: доод navigation bar-ийн бvтэн саарал/улаан дэвсгэртэй (filled)
+   идэвхтэй pill-ийн оронд — ЗӨВХӨН тухайн идэвхтэй tab дээр л (бvгдэд биш)
+   гялалзсан (амьсгалдаг) улаан ХvРЭЭ (ring) харагдана, дэвсгэр нь бvрэн
+   улаан биш хэвээр vлдэнэ. */
+@keyframes navItemGlowPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(139,0,0,0.5), 0 0 0 1.5px rgba(139,0,0,0.6) inset; border-color: rgba(139,0,0,0.7); }
+  50% { box-shadow: 0 0 26px rgba(139,0,0,0.85), 0 0 0 1.5px rgba(139,0,0,1) inset; border-color: rgba(139,0,0,1); }
+}
+.nav-item-glow {
+  animation: navItemGlowPulse 2.4s ease-in-out infinite;
+}
+
+/* ШИНЭ: хайлтын илэрц гэх мэт жижиг dropdown-ууд гэнэт "цохиулаад" гарахын
+   оронд бага зэрэг өргөжиж/бүдгэрч (fade+scale) гарч ирдэг болгов. */
+@keyframes dropdownPopIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.dropdown-pop-in {
+  animation: dropdownPopIn 0.18s ease-out;
+}
+
+/* ШИНЭ: "Эрх авах" хуудасны давуу талын icon badge-vvдэд зориулсан аажим
+   гэрэлтдэг (амьсгалдаг) glow — статик сvvдрээс илvv "тансаг" мэдрэмж vvсгэнэ. */
+@keyframes benefitIconGlow {
+  0%, 100% { box-shadow: 0 0 16px rgba(139,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.1); }
+  50% { box-shadow: 0 0 26px rgba(139,0,0,0.65), inset 0 0 0 1px rgba(255,255,255,0.18); }
+}
+.benefit-icon-glow {
+  animation: benefitIconGlow 2.8s ease-in-out infinite;
+}
+
+/* ШИНЭ (дизайны 9 сайжруулалт — багц):
+   1) Хуудас солигдох бvрд зөөлөн fade+бага зэрэг дээшээ шилжилт.
+   6) Нэгдсэн font-хэмжээний scale (token) — шинэ/дахин зассан хэсгvvдэд ашиглана. */
+:root {
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+}
+
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-fade-in {
+  animation: pageFadeIn 0.25s ease-out;
+}
+
+/* 2) MangaCard poster дээр hover (desktop) vед бага зэрэг томорч, сvvдэр гvнзгийрнэ.
+   ЗАСВАР (хэрэглэгчийн хvсэлт): улаан өнгийн "gradient glow" нэмэв — poster нь
+   өөрөө overflow:hidden тул энгийн box-shadow хайчлагддаг, харин filter:
+   drop-shadow нь хайчлагддаггvй тул vvгээр хийв. */
+.poster-hover {
+  transition: transform 0.25s ease, filter 0.25s ease;
+  filter: drop-shadow(0 0 0 rgba(139,0,0,0));
+}
+.poster-hover:hover {
+  transform: scale(1.035);
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,0.5)) drop-shadow(0 0 14px rgba(139,0,0,0.55)) drop-shadow(0 0 3px rgba(255,144,144,0.5));
+}
+
+/* 3) Like/heart дарахад бага зэрэг "цохилдог" (pop) анимэйшн. */
+@keyframes likePop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); }
+  60% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+.like-pop {
+  animation: likePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 5) Poster ачаалагдаж дуустал (opacity:0->1 шилжтэл) харагдах "skeleton"
+   гэрэлтдэг дэвсгэр — статик хар дэвсгэрээс илvv "ачааллаж байгаа" мэдрэмж өгнө. */
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.poster-skeleton {
+  background: linear-gradient(100deg, #131313 30%, #1d1d1d 50%, #131313 70%);
+  background-size: 300% 100%;
+  animation: skeletonShimmer 1.8s ease-in-out infinite;
+}
+
+/* 10) Toast (notify) мэдэгдлийг доод/дээд буланд зөөлөн гарч ирэх+glass дэвсгэртэй болгов. */
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-glass {
+  animation: toastSlideIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 11) VIP хэрэглэгчийн avatar-д алтан цагираг + бага зэрэг гэрэлтдэг glow. */
+@keyframes vipRingGlow {
+  0%, 100% { box-shadow: 0 0 8px rgba(245,166,35,0.45); }
+  50% { box-shadow: 0 0 14px rgba(245,166,35,0.75); }
+}
+.vip-ring {
+  border: 2px solid #f5a623;
+  animation: vipRingGlow 2.6s ease-in-out infinite;
+}
+
+/* 16) Нvvр хуудасны hero баннерт зориулсан удаан (ken burns) томроход зэрэг. */
+@keyframes heroKenBurns {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
+}
+.hero-ken-burns {
+  animation: heroKenBurns 9s ease-out infinite alternate;
+}
+
+/* ШИНЭ: Санал хvсэлт илгээх / Даалгавар биелvvлэх зэрэг "баяр ёслолын" vед
+   унагах жижиг өнгөт confetti particle-vvд (App.jsx-ийн fireConfetti() vvсгэнэ). */
+@keyframes confettiFall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(540deg); opacity: 0; }
+}
+.confetti-piece {
+  position: fixed;
+  top: 0;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 9999;
+  animation: confettiFall linear forwards;
+}
+
+/* ШИНЭ: даалгавар яг л биелчих (шаардлага хvрсэн, шагнал аваагvй) мөрийг
+   nav-item-glow-оос ялгаатай, илvv анхаарал татам "pulse" glow-оор тодруулна. */
+@keyframes taskClaimablePulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(255,90,90,0.3); }
+  50% { box-shadow: 0 0 22px rgba(255,90,90,0.65); }
+}
+.task-claimable-glow {
+  animation: taskClaimablePulse 1.6s ease-in-out infinite;
+}

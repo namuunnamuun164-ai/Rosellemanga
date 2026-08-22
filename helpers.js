@@ -6,14 +6,14 @@ import { supabase } from './supabase';
 // (өмнө нь <input accept="image/*"> л байсан бөгөөд энэ нь зөвхөн UI-д зориулсан
 // зөвлөмж тул хэрэглэгч ямар ч файл сонгож upload хийж болдог байсан).
 // ЗАСВАР #17: хэмжээний (8MB) хязгаарлалтыг хассан — жинхэнэ hosting (Supabase
-// Storage) холбогдсон тул бүлгийн өндөр чанартай том зургийг хориглох шаардлагагүй.
+// Storage) холбогдсон тул бvлгийн өндөр чанартай том зургийг хориглох шаардлагагvй.
 // ЗАСВАР #181 (код шинжилгээ): "image/*" бvгдийг зөвшөөрдөг байсан тул
 // image/svg+xml ч нэвтэрдэг байв — SVG дотор <script> байж болох тул (R2-ийн
 // public URL-ыг шууд нээхэд ажиллана) stored XSS эрсдэлтэй. Зөвшөөрөгдсөн
 // төрлийг сервер (upload-to-r2 edge function) талын allowlist-той адилхан болгов.
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 export const validateImageFile = (file) => {
-  if (!file) return 'Файл сонгогдоогүй байна.';
+  if (!file) return 'Файл сонгогдоогvй байна.';
   if (!ALLOWED_IMAGE_TYPES.includes(file.type)) return 'Зөвхөн зургийн файл (jpg, png, webp, gif) оруулна уу.';
   return null;
 };
@@ -75,8 +75,8 @@ export const normalizeImageFile = async (file) => {
   return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
 };
 
-// ЗАСВАР #94: зургийн upload-ыг Supabase Storage-с Cloudflare R2 руу шилжүүлэв
-// (upload-to-r2 edge function-оор дамжуулж, Secret Access Key browser талд гардаггүй).
+// ЗАСВАР #94: зургийн upload-ыг Supabase Storage-с Cloudflare R2 руу шилжvvлэв
+// (upload-to-r2 edge function-оор дамжуулж, Secret Access Key browser талд гардаггvй).
 export const uploadToR2 = async (file, path) => {
   const { data: { session } } = await supabase.auth.getSession();
   const formData = new FormData();
@@ -114,7 +114,7 @@ export const formatMnDate = (dateStr) => {
   return `${d.getFullYear()} оны ${d.getMonth() + 1}-р сарын ${d.getDate()}`;
 };
 
-// ЗАСВАР #68: "2026.07.13" маягийн цэвэрхэн тоон огноо (бүлгийн жагсаалтад ашиглана)
+// ЗАСВАР #68: "2026.07.13" маягийн цэвэрхэн тоон огноо (бvлгийн жагсаалтад ашиглана)
 export const formatNumericDate = (dateStr) => {
   const d = new Date(dateStr);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -125,7 +125,7 @@ export const formatNumericDate = (dateStr) => {
 // ЗАСВАР #139: манганы vзэлт (views) хиймлээр өсгөхөөс сэргийлэх зорилгоор
 // increment_manga_views RPC-д зочин (нэвтрээгvй) хэрэглэгчийг ялгах тогтвортой
 // (browser-д хадгалагдсан) key дамжуулна — нэвтэрсэн бол сервер талд auth.uid()
-// ашиглах тул vvнийг үл хэрэглэнэ, харин зочинд өөр аргагvй тул хэрэгтэй.
+// ашиглах тул vvнийг vл хэрэглэнэ, харин зочинд өөр аргагvй тул хэрэгтэй.
 export const getAnonViewerKey = () => {
   try {
     let key = localStorage.getItem('anon_viewer_key');
@@ -139,7 +139,7 @@ export const getAnonViewerKey = () => {
   }
 };
 
-// Үлдсэн хугацааг "2 өдөр 3 цаг" маягаар
+// Vлдсэн хугацааг "2 өдөр 3 цаг" маягаар
 export const formatRemaining = (ms) => {
   if (ms <= 0) return '';
   const mins = Math.ceil(ms / 60000);
@@ -158,10 +158,10 @@ export const formatRemaining = (ms) => {
 // том зургийг зэрэг декодлож санах ойн ачаалал vvсгэнэ (өмнөх ЗАСВАР #163-ийн
 // urt зургийн crash-тай адил асуудал).
 // ЗАСВАР #193 (код шинжилгээ): маш урт (өндөр нягтралтай) зураг оруулахад
-// browser tab бvхэлдээ "унаад" (crash/freeze) байсан гомдол ирсэн — үvний
+// browser tab бvхэлдээ "унаад" (crash/freeze) байсан гомдол ирсэн — vvний
 // шалтгаан нь createImageBitmap(file) нь эх зургийг ПИКСЕЛИЙН хэмжээгээр нь
 // (файлын MB биш) бvхэлд нь санах ойд decode хийдэгт байна: жишээ нь
-// 4000x60000 пиксел зураг ойролцоогоор 1GB+ санах ой шаардана. Үvнийг бvрэн
+// 4000x60000 пиксел зураг ойролцоогоор 1GB+ санах ой шаардана. Vvнийг бvрэн
 // арилгах боломжгvй (canvas ашиглахын тулд заавал decode хийх ёстой) тул,
 // хамгийн багадаа browser-ийг найдваргvй байдалд оруулахын оронд ойлгомжтой
 // алдаа vзvvлж, эх зургийг жижигрvvлж дахин оруулахыг санал болгоно.

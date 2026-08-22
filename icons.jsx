@@ -83,6 +83,15 @@ export const IconBell = ({ size = 18, color = 'currentColor' }) => (
   </svg>
 );
 
+// ШИНЭ: доод pill nav-ийн "Эрх авах" (VIP) tab-нд ашиглах цэвэрхэн SVG титэм
+// icon — 👑 emoji-ийн оронд (бусад icon-уудтай ижил stroke-style-тай нийцvvлэв).
+export const IconCrown = ({ size = 16, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 20h16"/>
+    <path d="M4 20 2 8l5 4 5-8 5 8 5-4-2 12"/>
+  </svg>
+);
+
 // ШИНЭ: "Google-р нэвтрэх" товчинд ашиглах албан ёсны 4 өнгийн "G" лого
 export const IconGoogle = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 48 48">
