@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
 import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, checkImageDecodable } from './helpers';
-import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell } from './icons';
+import { IconHome, IconGrid, IconBookmark, IconSearch, IconMenu, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell, IconGoogle } from './icons';
 import { PasswordField } from './PasswordField';
 import { Avatar, MangaCard, SectionHeader, LiveCountdown, SearchOverlay } from './components';
 
@@ -51,6 +51,9 @@ export default function App() {
   // ЗАСВАР #156: "БvРТГvvЛЭХ"/"НЭВТРЭХ" товчийг олон дарахад давхар (олон
   // удаа) имэйл/хvсэлт явуулахаас сэргийлнэ
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  // ШИНЭ: "Google-р нэвтрэх" — дарсны дараа Google руу redirect хийгдэх хүртэлх
+  // богино зуурын disabled/loading төлөв (давхар дарахаас сэргийлнэ)
+  const [googleLoading, setGoogleLoading] = useState(false);
   // ШИНЭ: нууц үг сэргээх урсгал (имэйлээр 8 оронтой код)
   const [resetCode, setResetCode] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
@@ -1108,6 +1111,29 @@ export default function App() {
     }
   };
 
+  // ШИНЭ: Google-р нэвтрэх/бvртгvvлэх — Supabase Auth-ийн OAuth (PKCE) урсгал.
+  // Supabase Dashboard → Authentication → Providers → Google дээр Google Client
+  // ID/Secret-ээ тохируулж идэвхжvvлсэн байх ёстой (энд байхгvй бол "provider is
+  // not enabled" алдаа буцна). Амжилттай бол Google өөрөө redirectTo хаяг руу
+  // (?code=... query-той) буцаадаг тул үлдсэн хэсгийг доорх getSession/
+  // onAuthStateChange effect-vvд аль хэдийн зохицуулна.
+  const signInWithGoogle = async () => {
+    if (googleLoading) return;
+    setGoogleLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) { notify('Алдаа: ' + error.message); setGoogleLoading(false); }
+      // Амжилттай бол browser даруй Google руу шилждэг тул энд setGoogleLoading(false)
+      // дуудах шаардлагагvй (энэ component ч бас unmount болно).
+    } catch (err) {
+      notify('Алдаа: ' + err.message);
+      setGoogleLoading(false);
+    }
+  };
+
   // ЗАСВАР #225 (код шинжилгээ): Нэвтрэх/Бvртгvvлэх гэх мэт модал цонх нээлттэй
   // vед Escape дарахад хаагдах болгов (өмнө нь зөвхөн ✕ дээр дарж л хаагддаг байсан).
   // ЗАСВАР #231 (код шинжилгээ): focus trap нэмэв — Tab дарахад модалын гадна
@@ -1150,7 +1176,12 @@ export default function App() {
     // хуудас харагдахын оронд "Имэйл баталгаажлаа" гэсэн ойлгомжтой мэдэгдэл
     // харуулаад, URL-ыг цэвэрлэнэ.
     const url = window.location.href;
-    const isAuthCallback = /[?&#](code|access_token)=/.test(url) || /type=(signup|recovery|email)/.test(url);
+    // ЗАСВАР (Google нэвтрэлт): "type=signup/recovery/email" зөвхөн имэйл холбоос/
+    // код баталгаажуулалтад хамаарна — Google OAuth редирект зөвхөн "code="-той
+    // ирдэг тул type=... байхгvй vед "Имэйл баталгаажлаа" гэж буруу бичихгvйн тулд
+    // хоёрыг тусад нь ялгав.
+    const isEmailConfirmCallback = /type=(signup|recovery|email)/.test(url);
+    const isAuthCallback = /[?&#](code|access_token)=/.test(url) || isEmailConfirmCallback;
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -1159,7 +1190,7 @@ export default function App() {
         // (fetchProfile одоо promise буцаадаг болсон) — эс бол isVip/isStaff
         // хараахан шинэчлэгдээгvй vед deep-link сэргээлт хийгдэх эрсдэлтэй.
         fetchProfile(session.user.id).then(() => setAuthReady(true)).catch(() => setAuthReady(true));
-        if (isAuthCallback) notify('Имэйл баталгаажлаа! Тавтай морилно уу 🎉');
+        if (isAuthCallback) notify(isEmailConfirmCallback ? 'Имэйл баталгаажлаа! Тавтай морилно уу 🎉' : 'Амжилттай нэвтэрлээ! Тавтай морилно уу 🎉');
       } else {
         setAuthReady(true);
       }
@@ -1556,33 +1587,62 @@ export default function App() {
         .select('id').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(50);
       const ownIds = (ownComments || []).map(c => c.id);
       if (cancelled) return;
-      if (ownIds.length === 0) { setPersonalActivity([]); return; }
 
-      const [repliesRes, likesRes] = await Promise.all([
-        supabase.from('comments')
-          .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title)')
-          .in('parent_id', ownIds).neq('user_id', currentUser.id)
-          .order('created_at', { ascending: false }).limit(20),
-        supabase.from('comment_likes')
-          .select('comment_id, user_id, created_at, comments!comment_id(content, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title))')
-          .in('comment_id', ownIds).neq('user_id', currentUser.id)
-          .order('created_at', { ascending: false }).limit(20),
-      ]);
+      // ШИНЭ: batlagдсан (admin "БАТЛАХ" дарсан) сvvлийн VIP хvсэлтvvд —
+      // "VIP эрх сунгагдлаа" мэдэгдлийн эх vvсвэр.
+      const vipReqPromise = supabase.from('payment_requests')
+        .select('id, plan_key, status, reviewed_at')
+        .eq('user_id', currentUser.id).eq('status', 'approved')
+        .order('reviewed_at', { ascending: false }).limit(5);
+
+      // ЗАСВАР: өмнө нь ownIds хоосон vед funcion шууд return хийж, доорхи VIP
+      // мэдэгдлийг ч алгасдаг байсан (сэтгэгдэл vvсгээгvй шинэ хэрэглэгч VIP
+      // авсан ч мэдэгдэл огт харагдахгvй байх эрсдэлтэй) — одоо reply/like
+      // хэсгийг л ownIds-с хамааруулж, VIP хэсгийг vvнээс vл хамааруулав.
+      let replies = [], likes = [];
+      if (ownIds.length > 0) {
+        const [repliesRes, likesRes] = await Promise.all([
+          supabase.from('comments')
+            .select('id, content, sticker_url, created_at, user_id, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title)')
+            .in('parent_id', ownIds).neq('user_id', currentUser.id)
+            .order('created_at', { ascending: false }).limit(20),
+          supabase.from('comment_likes')
+            .select('comment_id, user_id, created_at, comments!comment_id(content, chapter_id, manga_id, chapters(chapter_number, manga_id, is_vip, status, is_hidden, pending_delete, publish_at, created_at, thumbnail_url, mangas(id, title)), mangas(id, title))')
+            .in('comment_id', ownIds).neq('user_id', currentUser.id)
+            .order('created_at', { ascending: false }).limit(20),
+        ]);
+        if (cancelled) return;
+        replies = (repliesRes.data || []).map(r => ({
+          id: `reply-${r.id}`, kind: 'reply', user_id: r.user_id, created_at: r.created_at,
+          content: r.content, sticker_url: r.sticker_url,
+          chapter_id: r.chapter_id, manga_id: r.manga_id, chapters: r.chapters, mangas: r.mangas,
+        }));
+        likes = (likesRes.data || []).map(l => ({
+          id: `like-${l.comment_id}-${l.user_id}-${l.created_at}`, kind: 'like', user_id: l.user_id, created_at: l.created_at,
+          content: l.comments?.content, sticker_url: null,
+          chapter_id: l.comments?.chapter_id, manga_id: l.comments?.manga_id, chapters: l.comments?.chapters, mangas: l.comments?.mangas,
+        }));
+      }
+
+      const { data: approvedVip } = await vipReqPromise;
       if (cancelled) return;
-
-      const replies = (repliesRes.data || []).map(r => ({
-        id: `reply-${r.id}`, kind: 'reply', user_id: r.user_id, created_at: r.created_at,
-        content: r.content, sticker_url: r.sticker_url,
-        chapter_id: r.chapter_id, manga_id: r.manga_id, chapters: r.chapters, mangas: r.mangas,
-      }));
-      const likes = (likesRes.data || []).map(l => ({
-        id: `like-${l.comment_id}-${l.user_id}-${l.created_at}`, kind: 'like', user_id: l.user_id, created_at: l.created_at,
-        content: l.comments?.content, sticker_url: null,
-        chapter_id: l.comments?.chapter_id, manga_id: l.comments?.manga_id, chapters: l.comments?.chapters, mangas: l.comments?.mangas,
-      }));
-      const merged = [...replies, ...likes].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
-      const withAuthors = await attachAuthors(merged);
-      if (!cancelled) setPersonalActivity(withAuthors);
+      const withAuthors = await attachAuthors([...replies, ...likes]);
+      // ЗАСВАР: attachAuthors нь user_id-аар get_public_profiles дуудаж зохиогчийг
+      // татдаг тул VIP мэдэгдлийг (currentUser.id-тай) хамт өнгөрvvлбэл өөрийнхөө
+      // профайл руу attach хийгдэх тул эдгээрийг ТУСДАА, статик "Roselle Manga"
+      // эзэмшигчтэйгээр (одоогийн хэрэглэгчийн profile биш) доор нэмнэ.
+      const vipItems = (approvedVip || []).filter(r => r.reviewed_at).map(r => {
+        const plan = PLANS.find(p => p.key === r.plan_key);
+        const days = PLAN_DAYS[r.plan_key] || 30;
+        return {
+          id: `vip-${r.id}`, kind: 'vip_approved', user_id: currentUser.id, created_at: r.reviewed_at,
+          content: `${plan ? plan.label : r.plan_key} багц · ${days} хоног`,
+          sticker_url: null, chapter_id: null, manga_id: null, chapters: null, mangas: null,
+          users: { name: 'Roselle Manga', avatar_url: null },
+        };
+      });
+      const merged = [...withAuthors, ...vipItems].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
+      if (!cancelled) setPersonalActivity(merged);
     };
     fetchPersonal();
     const interval = setInterval(fetchPersonal, 30000);
@@ -1622,6 +1682,9 @@ export default function App() {
   // шууд нээнэ.
   const goToNotification = (item) => {
     setNotifOpen(false);
+    // ШИНЭ: "VIP эрх сунгагдлаа" мэдэгдэл — бvлэг/манга биш тул профайлын
+    // (avatar дээр дарахад гардаг) VIP тэмдэг рvv шууд чиглvvлнэ.
+    if (item.kind === 'vip_approved') { setProfileOpen(true); return; }
     if (item.chapter_id) {
       const mangaId = item.chapters?.manga_id;
       const manga = dbMangas.find(m => m.id === mangaId);
@@ -2464,7 +2527,13 @@ export default function App() {
                 )}
                 <div style={{ marginBottom: 16 }}>
                   <label htmlFor="auth-email" style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'block' }}>ИМЭЙЛ</label>
-                  <input id="auth-email" name="email" type="email" autoComplete="email" required autoFocus={authPage === 'login'}
+                  {/* ЗАСВАР (browser-ийн "нууц vг хадгалах?" санал): нэвтрэх маягт дээр
+                      autoComplete="username" ашиглана (autoComplete="email" биш) —
+                      Chrome/Edge зэрэг нь username+password хосыг таньж хадгалахдаа
+                      яг "username" token хайдаг тул "email" хэвээр vлдвэл зарим vед
+                      санал огт гардаггvй. Бvртгvvлэх маягтад бол шинэ данс vvсгэж буй
+                      тул "email" token хэвээр vлдээнэ. */}
+                  <input id="auth-email" name="email" type="email" autoComplete={authPage === 'register' ? 'email' : 'username'} required autoFocus={authPage === 'login'}
                     value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})}
                     placeholder="example@email.com"
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
@@ -2489,6 +2558,19 @@ export default function App() {
                 <button type="submit" disabled={authSubmitting} style={{ width: '100%', background: authSubmitting ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 15, cursor: authSubmitting ? 'not-allowed' : 'pointer', fontWeight: 700, marginBottom: 16 }}>
                   {authSubmitting ? 'ХАДГАЛЖ БАЙНА...' : (authPage === 'login' ? 'НЭВТРЭХ' : 'БҮРТГҮҮЛЭХ')}
                 </button>
+
+                {/* ШИНЭ: Google-р нэвтрэх/бvртгvvлэх */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px' }}>
+                  <div style={{ flex: 1, height: 1, background: '#222' }} />
+                  <span style={{ fontSize: 11, color: '#555', fontWeight: 600 }}>ЭСВЭЛ</span>
+                  <div style={{ flex: 1, height: 1, background: '#222' }} />
+                </div>
+                <button type="button" onClick={signInWithGoogle} disabled={googleLoading}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#fff', color: '#1f1f1f', border: '1px solid #2a2a2a', padding: '11px', borderRadius: 8, fontSize: 14, cursor: googleLoading ? 'not-allowed' : 'pointer', fontWeight: 600, marginBottom: 16, opacity: googleLoading ? 0.7 : 1 }}>
+                  <IconGoogle size={18} />
+                  {googleLoading ? 'Уншиж байна...' : 'Google-р үргэлжлүүлэх'}
+                </button>
+
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#555' }}>
                   {authPage === 'login' ? (
                     <span>Бүртгэл байхгүй юу? <button type="button" onClick={() => { setAuthForm(f => ({ ...f, password: '' })); setAuthPage('register'); }} style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 'inherit', color: '#8B0000', cursor: 'pointer', fontWeight: 600 }}>Бүртгүүлэх</button></span>
@@ -2631,6 +2713,7 @@ export default function App() {
                         const contextLabel = mangaTitle ? ` (${mangaTitle}${chapterLabel})` : '';
                         const actionLabel = item.kind === 'reply' ? `таны сэтгэгдэлд хариулав${contextLabel}`
                           : item.kind === 'like' ? `таны сэтгэгдэлд ❤️ дарлаа${contextLabel}`
+                          : item.kind === 'vip_approved' ? '👑 таны VIP эрх амжилттай сунгагдлаа!'
                           : (mangaTitle ? `→ ${mangaTitle}${chapterLabel}` : '');
                         return (
                           <div key={item.id} onClick={() => goToNotification(item)}
@@ -3714,7 +3797,26 @@ export default function App() {
             өгсөн жишээ загвар (тод гарчиг + босоо жагссан радио-картууд +
             давуу тал жагсаалт + нэг "Vргэлжлvvлэх" товч)-ыг сайтын улаан
             (#8B0000) өнгийг ашиглаж дахин зохион байгуулав. */}
-        {page === 'vip' && (
+        {/* ШИНЭ: "Эрх авах" хуудсыг зөвхөн нэвтэрсэн хэрэглэгчид харуулна —
+            нэвтрээгvй хэрэглэгч энд орж ирвэл vнэ/багцын оронд нэвтрэх урилга харна. */}
+        {page === 'vip' && !currentUser && (
+          <div style={{ minHeight: '100vh', background: '#050505', color: '#fff', padding: '2rem 1.25rem 3rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 16 }}>
+            <button onClick={() => setPage(previousPage)} title="Хаах"
+              style={{ position: 'fixed', top: 20, right: 20, width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 18 }}>
+              ✕
+            </button>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(139,0,0,0.15)', border: '1px solid #8B0000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#8B0000" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 800, maxWidth: 320 }}>Эрх авах хэсгийг харахын тулд эхлээд нэвтэрнэ vv</div>
+            <div style={{ fontSize: 13, color: '#888', maxWidth: 300 }}>VIP багц, vнэ болон давуу талуудыг харахын тулд бvртгэл vvсгэх эсвэл нэвтрэх шаардлагатай.</div>
+            <button onClick={() => setAuthPage('login')}
+              style={{ background: '#8B0000', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', marginTop: 8 }}>
+              НЭВТРЭХ
+            </button>
+          </div>
+        )}
+        {page === 'vip' && currentUser && (
           <div style={{ minHeight: '100vh', background: '#050505', color: '#fff', padding: '2rem 1.25rem 3rem', boxSizing: 'border-box' }}>
             <div style={{ maxWidth: 480, margin: '0 auto' }}>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
