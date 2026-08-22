@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
 import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, checkImageDecodable } from './helpers';
@@ -1909,7 +1910,10 @@ export default function App() {
         });
     };
     fetchActivity();
-    const interval = setInterval(fetchActivity, 30000);
+    // ЗАСВАР (хэрэглэгчийн хvсэлт — гvйцэтгэлийн сайжруулалт): олон хэрэглэгчид
+    // зэрэг ажилладаг тул нийт ачааллыг багасгахын тулд 30с → 90с болгов
+    // (энэ мэдэгдэл бага зэрэг хоцрох нь staff-д онц асуудалгvй).
+    const interval = setInterval(fetchActivity, 90000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [isStaff]);
 
@@ -2052,7 +2056,11 @@ export default function App() {
       if (!cancelled) setPersonalActivity(merged);
     };
     fetchPersonal();
-    const interval = setInterval(fetchPersonal, 30000);
+    // ЗАСВАР (хэрэглэгчийн хvсэлт — гvйцэтгэлийн сайжруулалт): энэ query олон
+    // хvснэгт (payment_requests, tasks, feedback, staff_appreciations г.м.)
+    // хамруулдаг хамгийн "хvнд" polling тул хамгийн олон хэрэглэгчид зэрэг
+    // ажилладаг — нийт ачааллыг багасгахын тулд 30с → 90с болгов.
+    const interval = setInterval(fetchPersonal, 90000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [currentUser, isStaff]);
 
@@ -2733,8 +2741,11 @@ export default function App() {
     return () => { cancelled = true; };
   }, [page, currentUser]);
 
-  // ШИНЭ: "Нийтийн чат" хуудас — 4 секунд тутам сvvлийн 60 мессежийг дахин татна
-  // (сайтын бусад хэсгvvдтэй адил polling зарчим, realtime subscription биш).
+  // ЗАСВАР (хэрэглэгчийн хvсэлт — гvйцэтгэлийн сайжруулалт): 4 секундийн
+  // polling-ийн оронд Supabase Realtime (WebSocket) ашиглаж, зөвхөн бодит
+  // шинэ/устсан мессеж vед л шинэчилнэ. АНХААР: Supabase dashboard →
+  // Database → Replication хэсэгт "chat_messages" хvснэгтийг идэвхжvvлсэн
+  // байх ёстой, эс тэгвэл events ирэхгvй.
   useEffect(() => {
     if (page !== 'chat' || chatMode !== 'group' || !currentUser) return;
     let cancelled = false;
@@ -2758,17 +2769,23 @@ export default function App() {
       }
       return msgs.map(m => ({ ...m, likedBy: likesByMsg[m.id] || [] }));
     };
-    const fetchChat = () => {
-      if (document.visibilityState !== 'visible') return;
-      loadChatMessages().then(msgs => {
-        if (cancelled || !msgs) { if (!cancelled) setChatLoading(false); return; }
-        setChatMessages(msgs);
-        setChatLoading(false);
-      });
-    };
-    fetchChat();
-    const interval = setInterval(fetchChat, 4000);
-    return () => { cancelled = true; clearInterval(interval); };
+    loadChatMessages().then(msgs => {
+      if (cancelled || !msgs) { if (!cancelled) setChatLoading(false); return; }
+      setChatMessages(msgs);
+      setChatLoading(false);
+    });
+    const channel = supabase.channel(`chat_room_${chatRoom}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room=eq.${chatRoom}` }, async payload => {
+        const row = payload.new;
+        const { data: author } = await supabase.from('users').select('name, avatar_url, is_vip, roles').eq('id', row.user_id).single();
+        if (cancelled) return;
+        setChatMessages(prev => prev.some(m => m.id === row.id) ? prev : [...prev, { ...row, users: author || null, likedBy: [] }]);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `room=eq.${chatRoom}` }, payload => {
+        setChatMessages(prev => prev.filter(m => m.id !== payload.old.id));
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
   }, [page, chatMode, chatRoom, currentUser]);
 
   // ЗАСВАР (хэрэглэгчийн хvсэлт): текст мессежийн зэрэгцээ стикер ч илгээж
@@ -2788,15 +2805,9 @@ export default function App() {
       setChatInput('');
       setGroupStickerPickerOpen(false);
       setChatReplyTo(null);
-      const { data } = await supabase.from('chat_messages').select('*, users!user_id(name, avatar_url, is_vip, roles)').eq('room', chatRoom).order('created_at', { ascending: false }).limit(60);
-      const msgs = (data || []).slice().reverse();
-      const ids = msgs.map(m => m.id);
-      let likesByMsg = {};
-      if (ids.length > 0) {
-        const { data: likes } = await supabase.from('chat_message_likes').select('message_id, user_id').in('message_id', ids);
-        (likes || []).forEach(l => { (likesByMsg[l.message_id] = likesByMsg[l.message_id] || []).push(l.user_id); });
-      }
-      setChatMessages(msgs.map(m => ({ ...m, likedBy: likesByMsg[m.id] || [] })));
+      // ЗАСВАР (гvйцэтгэлийн сайжруулалт): дахин бvтэн жагсаалт татахгvй —
+      // дээрх Realtime INSERT subscription шинэ мессежийг (өөрийнхөө илгээснийг
+      // ч оролцуулан) автоматаар нэмнэ.
     } catch (e) {
       notify('Алдаа: ' + e.message);
     } finally {
@@ -2881,39 +2892,57 @@ export default function App() {
     fetchDmInbox();
   }, [page, chatMode, currentUser, fetchDmInbox]);
 
-  // ШИНЭ: тухайн хvнтэй хийсэн DM яриаг татаж, 4 секунд тутам сэргээнэ + нээхэд уншсан гэж тэмдэглэнэ
+  // ЗАСВАР (хэрэглэгчийн хvсэлт — гvйцэтгэлийн сайжруулалт): 4 секундийн
+  // polling-ийн оронд Supabase Realtime ашиглана. АНХААР: Supabase dashboard
+  // → Database → Replication хэсэгт "direct_messages" хvснэгтийг идэвхжvvлсэн
+  // байх ёстой.
   useEffect(() => {
     if (page !== 'chat' || chatMode !== 'thread' || !dmPartner || !currentUser) return;
     let cancelled = false;
     supabase.from('blocked_users').select('blocked_id').eq('blocker_id', currentUser.id).eq('blocked_id', dmPartner.id).maybeSingle()
       .then(({ data }) => { if (!cancelled) setDmPartnerBlocked(!!data); });
-    const fetchThread = () => {
-      if (document.visibilityState !== 'visible') return;
-      supabase.from('direct_messages')
-        .select('*, mangas(id, title, poster_url)')
-        .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${dmPartner.id}),and(sender_id.eq.${dmPartner.id},recipient_id.eq.${currentUser.id})`)
-        .order('created_at', { ascending: true }).limit(200)
-        .then(async ({ data, error }) => {
-          if (cancelled) return;
-          if (error) { console.error('DM thread алдаа:', error); setDmLoading(false); return; }
-          const msgs = data || [];
-          const ids = msgs.map(m => m.id);
-          let likesByMsg = {};
-          if (ids.length > 0) {
-            const { data: likes } = await supabase.from('direct_message_likes').select('message_id, user_id').in('message_id', ids);
-            (likes || []).forEach(l => { (likesByMsg[l.message_id] = likesByMsg[l.message_id] || []).push(l.user_id); });
-          }
-          if (cancelled) return;
-          setDmMessages(msgs.map(m => ({ ...m, likedBy: likesByMsg[m.id] || [] })));
-          setDmLoading(false);
-        });
-    };
-    fetchThread();
+    supabase.from('direct_messages')
+      .select('*, mangas(id, title, poster_url)')
+      .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${dmPartner.id}),and(sender_id.eq.${dmPartner.id},recipient_id.eq.${currentUser.id})`)
+      .order('created_at', { ascending: true }).limit(200)
+      .then(async ({ data, error }) => {
+        if (cancelled) return;
+        if (error) { console.error('DM thread алдаа:', error); setDmLoading(false); return; }
+        const msgs = data || [];
+        const ids = msgs.map(m => m.id);
+        let likesByMsg = {};
+        if (ids.length > 0) {
+          const { data: likes } = await supabase.from('direct_message_likes').select('message_id, user_id').in('message_id', ids);
+          (likes || []).forEach(l => { (likesByMsg[l.message_id] = likesByMsg[l.message_id] || []).push(l.user_id); });
+        }
+        if (cancelled) return;
+        setDmMessages(msgs.map(m => ({ ...m, likedBy: likesByMsg[m.id] || [] })));
+        setDmLoading(false);
+      });
     supabase.rpc('mark_dm_read', { partner_id_in: dmPartner.id }).then(() => {
       supabase.rpc('get_dm_unread_count').then(({ data }) => setDmUnreadTotal(data || 0));
     });
-    const interval = setInterval(fetchThread, 4000);
-    return () => { cancelled = true; clearInterval(interval); };
+    // ЗАСВАР: зөвхөн ХАРИЛЦАГЧААС over ирэх мессежийг барина (recipient_id
+    // өөрийн uid-тай тохирсноор шvvж, sender_id нь яг энэ харилцагч мөн эсэхийг
+    // callback дотор дахин баталгаажуулна — өөр хvнтэй харилцах DM танигдахгvй).
+    // Өөрийн илгээсэн мессежийг sendDirectMessage функц шууд орон нvvдлээр нэмдэг.
+    const channel = supabase.channel(`dm_thread_${[currentUser.id, dmPartner.id].sort().join('_')}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `recipient_id=eq.${currentUser.id}` }, async payload => {
+        const row = payload.new;
+        if (row.sender_id !== dmPartner.id) return;
+        let full = row;
+        if (row.manga_id) {
+          const { data: manga } = await supabase.from('mangas').select('id, title, poster_url').eq('id', row.manga_id).maybeSingle();
+          full = { ...row, mangas: manga || null };
+        }
+        if (cancelled) return;
+        setDmMessages(prev => prev.some(m => m.id === row.id) ? prev : [...prev, { ...full, likedBy: [] }]);
+        supabase.rpc('mark_dm_read', { partner_id_in: dmPartner.id }).then(() => {
+          supabase.rpc('get_dm_unread_count').then(({ data }) => setDmUnreadTotal(data || 0));
+        });
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
   }, [page, chatMode, dmPartner, currentUser]);
 
   const openDmThread = (partner) => {
@@ -2939,16 +2968,21 @@ export default function App() {
     if (dmSending || !dmPartner) return;
     setDmSending(true);
     try {
-      const { error } = await supabase.from('direct_messages').insert({
+      const { data: inserted, error } = await supabase.from('direct_messages').insert({
         sender_id: currentUser.id, recipient_id: dmPartner.id,
         reply_to_id: dmReplyTo?.id || null,
         ...payload,
-      });
+      }).select('*, mangas(id, title, poster_url)').single();
       if (error) {
         if (/rate_limited/.test(error.message || '')) notify('Хэт хурдан бичиж байна — жоохон хvлээгээрэй.');
         else notify('Алдаа: ' + error.message);
         return;
       }
+      // ЗАСВАР (гvйцэтгэлийн сайжруулалт — Realtime рvv шилжсэн): доод Realtime
+      // subscription зөвхөн ХАРИЛЦАГЧААС ирэх мессежийг барьдаг (recipient_id
+      // өөрийн uid-тай тохирсноор шvvдэг) тул өөрийн илгээсэн мессежээ энд
+      // шууд орон нvvдэл (optimistic) байдлаар нэмнэ.
+      if (inserted) setDmMessages(prev => prev.some(m => m.id === inserted.id) ? prev : [...prev, { ...inserted, likedBy: [] }]);
       setDmInput('');
       setDmReplyTo(null);
       setDmStickerPickerOpen(false);
@@ -4058,7 +4092,14 @@ export default function App() {
 
                   {/* ЗАСВАР #30: "Хувиар" тусдаа хуудас байхгvй болсон — avatar дээр дарахад
                       буланд гарч ирдэг жижиг цонх (dropdown) болгосон */}
-                  {profileOpen && (
+                  {/* ЗАСВАР (алдаа — код шинжилгээ): энэ панель ("position:fixed")
+                      топбарын дотор байрладаг байсан бөгөөд топбар "backdropFilter"
+                      (glass эффект) ашигладаг тул, CSS-ийн дvрмээр топбар ӨӨРӨӨ
+                      панелийн "containing block" болж, "top:50%" нь БvТЭН дэлгэцийн
+                      биш зөвхөн топбарын (~60px өндөртэй) хэмжээгээр тооцогдож,
+                      панель дэлгэцний дээд ирмэгээс "цухуйж" (хагас цуцарч) харагддаг
+                      байв. React portal ашиглаж document.body руу шууд гаргав. */}
+                  {profileOpen && createPortal(
                     <>
                       <div onClick={() => setProfileOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 290, background: 'rgba(0,0,0,0.6)', cursor: 'pointer' }} />
                       {/* ЗАСВАР: топбарын жижиг avatar-т "хамаарсан" (absolute, top:120%,
@@ -4204,7 +4245,8 @@ export default function App() {
                           <span>⭐ {userProfile?.loyalty_points || 0} од</span>
                         </div>
                       </div>
-                    </>
+                    </>,
+                    document.body
                   )}
                 </div>
               </div>
