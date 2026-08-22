@@ -4114,6 +4114,13 @@ export default function App() {
                         background: 'rgba(17,17,17,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
                         border: '1px solid rgba(255,255,255,0.09)', borderRadius: 16, padding: '1.5rem', zIndex: 291,
                         boxShadow: '0 12px 40px rgba(0,0,0,0.55), 0 0 24px rgba(139,0,0,0.12)',
+                        // ЗАСВАР (алдаа): document.body руу portal хийсний дараа энэ панель
+                        // апп-ийн vндсэн (fontFamily/color тохируулсан) wrapper div-ээс
+                        // ГАДУУР болсон тул тэдгээрийг өвлөхөө больж, browser-ийн
+                        // өгөгдмөл фонт/өнгөөр (жишээ нь Times New Roman, хар текст) орж,
+                        // badge/статистик мөрvvд эмх замбараагvй харагдаж байв — эндээ
+                        // тодорхой заав.
+                        color: '#fff', fontFamily: "'Noto Sans', Arial, 'Segoe UI', sans-serif",
                       }}>
                         {/* ЗАСВАР (хэрэглэгчийн хvсэлт): гадна харанхуй дэвсгэр дээр дарж
                             хаах нь заримдаа тодорхойгvй/бэрх мэдрэгддэг байсан тул, бусад
@@ -4230,20 +4237,10 @@ export default function App() {
                           ))}
                         </div>
 
-                        {/* ЗАСВАР (хэрэглэгчийн хvсэлт): энэ панелаас "ГАРАХ" товчийг хассан
-                            (доод pill nav-ийн Профайл богино цэсэнд аль хэдийн байдаг тул
-                            давхардуулахгvй) — оронд нь цэцэг/од vлдэгдлийг дахин нэг товч
-                            хэлбэрээр тодотгож харуулав. */}
-                        <div style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                          padding: '10px', borderRadius: 10, fontSize: 12, fontWeight: 700, color: '#ccc',
-                          background: 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01))',
-                          border: '1px solid rgba(255,255,255,0.08)',
-                        }}>
-                          <span>💐 {userProfile?.flower_balance || 0}</span>
-                          <span style={{ color: '#444' }}>·</span>
-                          <span>⭐ {userProfile?.loyalty_points || 0} од</span>
-                        </div>
+                        {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "ГАРАХ" товчийг хассанаа орлуулж
+                            нэмсэн байсан цэцэг/од pill-ийг ч бас хассан — дээд талд
+                            (avatar-ийн доор) аль хэдийн ижил тоо харагддаг тул давхардуулах
+                            шаардлагагvй байв. */}
                       </div>
                     </>,
                     document.body
