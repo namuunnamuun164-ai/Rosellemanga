@@ -2663,9 +2663,18 @@ export default function App() {
       return;
     }
     askConfirm(`${user.email} хэрэглэгчээс ${ROLE_LABELS[role] || role} эрхийг хураах уу?`, async () => {
-      const newRoles = (user.roles || []).filter(r => r !== role);
-      const { error } = await supabase.from('users').update({ roles: newRoles }).eq('id', user.id);
-      if (error) { notify('Алдаа: ' + error.message); return; }
+      // ЗАСВАР (код шинжилгээ): хуучирсан клиентийн staffUsers массиваас
+      // newRoles бодож бичдэг байсан тул хоёр admin зэрэг ажиллуулбал нэгнийх
+      // нь өөрчлөлт нөгөөгийнхөө дарж бичигдэх эрсдэлтэй байв (мөн "өөрийн
+      // admin эрхээ хураах" хамгаалалт зөвхөн клиент талд байсан) — одоо
+      // сервер дээр НЭГ atomic array_remove хийдэг RPC-д шилжvvлэв.
+      const { error } = await supabase.rpc('admin_revoke_role', { target_user_id: user.id, role_in: role });
+      if (error) {
+        notify(error.message === 'cannot_self_revoke_admin'
+          ? 'Алдаа: өөрийн Админ эрхийг өөрөө хураах боломжгvй.'
+          : 'Алдаа: ' + error.message);
+        return;
+      }
       notify('Эрх хураагдлаа.');
       fetchStaffUsers();
     });
@@ -3694,13 +3703,12 @@ export default function App() {
     const nextRead = isNewChapter ? [...existing, chapter.chapter_number] : existing;
     setReadChapters(prev => ({ ...prev, [manga.id]: nextRead }));
     if (currentUser) {
-      supabase.from('reading_progress').upsert({
-        user_id: currentUser.id,
-        manga_id: manga.id,
-        last_chapter: chapter.chapter_number,
-        read_chapters: nextRead,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,manga_id' }).then(({ error }) => { if (error) notify('Алдаа: ' + error.message); });
+      // ЗАСВАР (код шинжилгээ): клиентээс read_chapters массивыг бvхэлд нь
+      // чөлөөтэй бичдэг байсан тул хэн ч REST-ээр шууд дуудаж хуурамч (олон)
+      // бvлэг "уншсан" мэт үзvvлж, даалгаврын шагналыг луйварчлах боломжтой
+      // байв — одоо зөвхөн НЭГ бvлгийг нэмдэг security definer RPC ашиглана.
+      supabase.rpc('mark_chapter_read', { manga_id_in: manga.id, chapter_number_in: chapter.chapter_number })
+        .then(({ error }) => { if (error) notify('Алдаа: ' + error.message); });
       // ШИНЭ (хэрэглэгчийн хvсэлт): сарын "ЭРЭМБЭ" (Rank) хуудсанд ашиглах
       // цаг-тэмдэглэгээтэй vйл явдал — зөвхөн ШИНЭЭР уншсан vед л (дахин
       // нээхэд давхар тоологдохгvй).
@@ -5330,11 +5338,11 @@ export default function App() {
 
         {/* ШИНЭ (хэрэглэгчийн хvсэлт): ЭРЭМБЭ хуудас — энэ сард хамгийн олон
             бvлэг уншсан хэрэглэгчдийн жагсаалт, сар бvр шинэчлэгдэнэ. Эхний 3
-            байрыг medal-тай подиум байдлаар, 4-20-г энгийн жагсаалтаар,
+            байрыг medal-тай подиум байдлаар, 4-9-г энгийн жагсаалтаар (нийт эхний 9),
             хэрэглэгчийн өөрийнх нь эрэмбэ доод талд vргэлж харагдана. */}
         {page === 'rank' && currentUser && (() => {
           const top3 = rankList.slice(0, 3);
-          const rest = rankList.slice(3, 20);
+          const rest = rankList.slice(3, 9);
           // ЗАСВАР (хэрэглэгчийн хvсэлт): emoji медалийн оронд сайтын бусад хэсэгтэй
           // ижил (stroke-based SVG) загвартай "цом" дvрс ашиглав.
           const medalMeta = [
@@ -8000,13 +8008,33 @@ export default function App() {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ИМЭЙЛ (Gmail г.м.)</div>
                   <input value={adminWorkerEmail} onChange={e => setAdminWorkerEmail(e.target.value)}
+                    // ЗАСВАР (код шинжилгээ): admin имэйл бичээд шууд "shaana" гэх мэт
+                    // НЭГ л checkbox чагтлаад ЭРХ ОЛГОХ дарвал, тэр хvний ӨМНӨХ бусад
+                    // эрх (moderator/editor/admin) checkbox-д харагдаагvй тул бvгд
+                    // арилж, зарим vед admin эрхээ ч алдаж удирдлагын хуудас алга
+                    // болдог байсан — учир нь admin_grant_roles нь ЗААВАЛ БvХ эрхийг
+                    // (өмнөх+шинэ) дахин бvрдvvлж бичдэг REPLACE vйлдэл. Одоо имэйл
+                    // талбараас гарахад тухайн хэрэглэгчийн ОДООГИЙН эрхийг урьдчилан
+                    // ачаалж, checkbox-уудад тавьдаг болгосноор admin юу арилгаж,
+                    // юу нэмж байгаагаа ХАРЖ БАЙГААД л илгээх боломжтой боллоо.
+                    onBlur={async () => {
+                      const email = adminWorkerEmail.trim();
+                      if (!email) return;
+                      const { data: existing } = await supabase
+                        .rpc('admin_lookup_user_by_email', { lookup_email: email })
+                        .maybeSingle();
+                      if (existing) setAdminWorkerRoles(existing.roles || []);
+                    }}
                     placeholder="Хэрэглэгчийн имэйл"
                     style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 {/* ЗАСВАР #31: сонголтоор биш, чеклэх маягаар — нэг хэрэглэгчид
-                    admin/moderator/editor-ийг ХАМТАД нь (жишээ нь moderator+editor) олгож болно */}
+                    admin/moderator/editor-ийг ХАМТАД нь (жишээ нь moderator+editor) олгож болно.
+                    ЗАСВАР (код шинжилгээ): дээрх имэйл талбараас гарахад одоогийн эрх
+                    автоматаар энд урьдчилан чагталгдана — зөвхөн НЭМЭХ/ХАСАХ ёстой
+                    checkbox-оо л өөрчилнө vv, бvгдийг дахин чагтлах шаардлагагvй. */}
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>ЭРХ (олноор нь сонгож болно)</div>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>ЭРХ (одоогийн эрх автоматаар чагтлагдана — зөвхөн зөрvvг өөрчилнө vv)</div>
                   {[
                     { key: 'editor', desc: 'Эдитор — манга/бvлэг нэмэх (батлагдсаны дараа нийтлэгдэнэ)' },
                     { key: 'moderator', desc: 'Модератор — + батлах/татгалзах, сэтгэгдэл устгах, report' },
@@ -8127,16 +8155,16 @@ export default function App() {
                         .maybeSingle();
                       if (userError) { notify('Алдаа: ' + userError.message); return; }
                       if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгvй!'); return; }
-                      // Идэвхтэй VIP-тэй бол одоо байгаа дуусах хугацаан дээр нь нэмнэ, эс бол өнөөдрөөс эхэлнэ
-                      const base = (userData.is_vip && userData.vip_expires_at && new Date(userData.vip_expires_at).getTime() > Date.now())
-                        ? new Date(userData.vip_expires_at)
-                        : new Date();
-                      base.setDate(base.getDate() + days);
-                      const { error } = await supabase.from('users')
-                        .update({ is_vip: true, vip_expires_at: base.toISOString() })
-                        .eq('id', userData.id);
+                      // ЗАСВАР (код шинжилгээ): "дуусах хугацааг" клиент дээр (хуучирсан
+                      // userData-аас) тооцоод бичдэг байсан нь давхар дарахад (эсвэл өөр
+                      // admin зэрэг олгоход) race vvсгэдэг байсан тул payment-ийн адил
+                      // atomic security definer RPC-д шилжvvлэв.
+                      const { error } = await supabase.rpc('admin_grant_vip_days', { target_user_id: userData.id, days });
                       if (error) { notify('Алдаа: ' + error.message); return; }
-                      notify(`VIP ${days} хоногоор олгогдлоо! 👑 (${formatMnDate(base.toISOString())} хvртэл)`);
+                      const { data: refreshed } = await supabase
+                        .rpc('admin_lookup_user_by_email', { lookup_email: vipEmail.trim() })
+                        .maybeSingle();
+                      notify(`VIP ${days} хоногоор олгогдлоо! 👑${refreshed?.vip_expires_at ? ` (${formatMnDate(refreshed.vip_expires_at)} хvртэл)` : ''}`);
                       setVipEmail('');
                     } catch (e) {
                       notify('Алдаа: ' + e.message);
@@ -8154,7 +8182,7 @@ export default function App() {
                       .maybeSingle();
                     if (userError) { notify('Алдаа: ' + userError.message); return; }
                     if (!userData) { notify('Тэр имэйлтэй хэрэглэгч олдсонгvй!'); return; }
-                    const { error } = await supabase.from('users').update({ is_vip: false, vip_expires_at: null }).eq('id', userData.id);
+                    const { error } = await supabase.rpc('admin_revoke_vip', { target_user_id: userData.id });
                     if (error) notify('Алдаа: ' + error.message);
                     else { notify('VIP цуцлагдлаа'); setVipEmail(''); }
                   }} style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
@@ -8194,7 +8222,7 @@ export default function App() {
                             {daysLeft === null ? 'Хугацаагvй' : `${daysLeft} хоног vлдсэн`}
                           </div>
                           <span onClick={() => askConfirm(`${u.email}-ийн VIP эрхийг цуцлах уу?`, async () => {
-                            const { error } = await supabase.from('users').update({ is_vip: false, vip_expires_at: null }).eq('id', u.id);
+                            const { error } = await supabase.rpc('admin_revoke_vip', { target_user_id: u.id });
                             if (error) { notify('Алдаа: ' + error.message); return; }
                             notify('VIP цуцлагдлаа');
                             fetchVipUsers();
@@ -8405,14 +8433,16 @@ export default function App() {
                     <div style={{ display: 'flex', gap: 10 }}>
                       {r.comments && (
                         <button onClick={() => askConfirm('Сэтгэгдлийг устгах уу?', async () => {
-                          await supabase.from('comments').delete().eq('id', r.comments.id);
+                          const { error } = await supabase.from('comments').delete().eq('id', r.comments.id);
+                          if (error) { notify('Алдаа: ' + error.message); return; }
                           fetchReports();
                         })} style={{ background: 'rgba(139,0,0,0.2)', color: '#8B0000', border: '1px solid #8B0000', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                           🗑 СЭТГЭГДЛИЙГ УСТГАХ
                         </button>
                       )}
                       <button onClick={async () => {
-                        await supabase.from('reports').update({ status: 'resolved' }).eq('id', r.id);
+                        const { error } = await supabase.from('reports').update({ status: 'resolved' }).eq('id', r.id);
+                        if (error) { notify('Алдаа: ' + error.message); return; }
                         fetchReports();
                       }} style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                         ЗVГЭЭР, ХААХ
@@ -9963,7 +9993,7 @@ export default function App() {
       {/* ШИНЭ (хэрэглэгчийн хvсэлт): "Нийтийн чат"-ыг профайл цэснээс хассан —
           оронд нь доод pill nav-ийн дээгvvр (тvvнтэй давхцалгvй), бие даасан
           дугуй чат-bubble товч болгож, chat/reader хуудаснаас бусад vед харуулна. */}
-      {currentUser && page !== 'chat' && page !== 'reader' && (
+      {currentUser && page !== 'chat' && page !== 'reader' && page !== 'rank' && (
         <div onClick={() => { setPreviousPage(page); setPage('chat'); setChatMode('inbox'); setDmPartner(null); }} title="Чат"
           style={{
             position: 'fixed', right: 16, bottom: isMobile ? 104 : 40, zIndex: 240,
