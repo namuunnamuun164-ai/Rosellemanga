@@ -133,6 +133,11 @@ export default function App() {
   const [chatSending, setChatSending] = useState(false);
   const [groupStickerPickerOpen, setGroupStickerPickerOpen] = useState(false);
   const [chatLoading, setChatLoading] = useState(true);
+  // ШИНЭ (хэрэглэгчийн хvсэлт): чат нээхээс ӨМНӨХ "сvvлд харсан" цаг —
+  // энэ нээлт дотор аль мессеж шинэ (тод), аль нь өмнө уншсан (бvдэг) болохыг
+  // ялгахад ашиглана.
+  const [chatSeenBeforeOpen, setChatSeenBeforeOpen] = useState(0);
+  const chatScrollRef = useRef(null);
   // ШИНЭ (хэрэглэгчийн хvсэлт): группд (Roselle уншигчид, Админуудын чат)
   // ч мөн DM-тэй адил тодорхой мессежид reply/❤️ хийх боломжтой болгов.
   const [chatReplyTo, setChatReplyTo] = useState(null);
@@ -2810,11 +2815,18 @@ export default function App() {
     if (page !== 'chat' || chatMode !== 'group' || !currentUser) return;
     let cancelled = false;
     setChatLoading(true);
-    // ЗАСВАР: Нийтийн чатыг нээж vзсэн даруйд "сvvлд харсан" цагийг шинэчилж,
-    // цаашид тоологдох уншаагvй мессежийн тоог 0 болгоно.
+    // ЗАСВАР (хэрэглэгчийн хvсэлт): Нийтийн чатыг нээж vзсэн даруйд "сvvлд
+    // харсан" цагийг ШИНЭЧЛЭХЭЭС ӨМНӨ хуучин утгыг нь хадгалж авна — ингэснээр
+    // тухайн НЭЭЛТ дотор аль мессежvvд шинэ (уншаагvй) байсныг тод, аль нь
+    // өмнө нь уншсан болохыг бvдэг харуулах боломжтой болно (доор рендерт ашиглана).
     if (chatRoom === 'public') {
+      let prevSeen = 0;
+      try { prevSeen = Number(localStorage.getItem('public_chat_last_seen_at')) || 0; } catch { /* хор хөнөөлгvй */ }
+      setChatSeenBeforeOpen(prevSeen);
       try { localStorage.setItem('public_chat_last_seen_at', String(Date.now())); } catch { /* хор хөнөөлгvй */ }
       setPublicChatUnreadCount(0);
+    } else {
+      setChatSeenBeforeOpen(0);
     }
     // ШИНЭ: мессежvvдийн хамт тэдгээрийн ❤️ like-ыг татаж нэгтгэнэ (DM thread-тэй адил загвар).
     const loadChatMessages = async () => {
@@ -2847,6 +2859,15 @@ export default function App() {
       .subscribe();
     return () => { cancelled = true; supabase.removeChannel(channel); };
   }, [page, chatMode, chatRoom, currentUser]);
+
+  // ЗАСВАР (хэрэглэгчийн хvсэлт): чат нээх бvрт (мөн шинэ мессеж ирэх vед)
+  // хамгийн сvvлийн мессеж рvv автоматаар гvйлгэнэ — өмнө нь эхнээсээ (хамгийн
+  // хуучин мессежээс) харагддаг тул доош гараар гvйлгэх шаардлагатай байв.
+  useEffect(() => {
+    if (page !== 'chat' || chatMode !== 'group' || chatLoading) return;
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [page, chatMode, chatLoading, chatMessages]);
 
   // ЗАСВАР (хэрэглэгчийн хvсэлт): текст мессежийн зэрэгцээ стикер ч илгээж
   // болохоор payload-той болгов (өмнө нь зөвхөн текст дэмждэг байсан).
@@ -5749,7 +5770,7 @@ export default function App() {
 
             {chatMode === 'group' && (
               <>
-                <div style={{
+                <div ref={chatScrollRef} style={{
                   flex: 1, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', paddingBottom: 14,
                   minHeight: 300, maxHeight: '58vh',
                 }}>
@@ -5760,7 +5781,7 @@ export default function App() {
                       <div style={{ fontSize: 34, marginBottom: 10 }}>💬</div>
                       <div style={{ fontSize: 13 }}>Одоогоор мессеж алга — эхнийхийг бичээрэй!</div>
                     </div>
-                  ) : chatMessages.map(m => {
+                  ) : chatMessages.map((m, idx) => {
                     const own = m.user_id === currentUser.id;
                     // ЗАСВАР (хэрэглэгчийн хvсэлт): бичиж буй хvний нэрийг vргэлж (өөрийн
                     // мессежийн дээр ч) харуулж, admin эрхтэй бол алтан шаргал өнгөтэй болгов.
@@ -5773,22 +5794,42 @@ export default function App() {
                     // ШИНЭ (хэрэглэгчийн хvсэлт): DM-тэй адил group чатанд ч ❤️/reply.
                     const liked = (m.likedBy || []).includes(currentUser.id);
                     const repliedTo = m.reply_to_id ? chatMessages.find(x => x.id === m.reply_to_id) : null;
+                    // ЗАСВАР (хэрэглэгчийн хvсэлт): "эмх замбараагvй" харагддаг байсныг
+                    // цэгцлэх нэг — ижил хvн дараалан хэд хэдэн мессеж бичвэл (5 минутын
+                    // дотор) зөвхөн ЭХНИЙ мессеж дээр нь нэр/avatar харуулж, дараагийнх
+                    // нь дээр давхардуулахгvй.
+                    const prevMsg = idx > 0 ? chatMessages[idx - 1] : null;
+                    const groupedWithPrev = !!prevMsg && prevMsg.user_id === m.user_id
+                      && (new Date(m.created_at).getTime() - new Date(prevMsg.created_at).getTime()) < 5 * 60 * 1000;
+                    // ШИНЭ (хэрэглэгчийн хvсэлт): Messenger шиг — энэ нээлтээс ӨМНӨ аль
+                    // хэдийн уншсан мессежvvдийг бvдэгрvvлж, шинэ (уншаагvй) мессежvvдийг
+                    // тод харуулна. Өөрийн бичсэн мессеж vргэлж тод vлдэнэ.
+                    const isPreviouslyRead = !own && chatSeenBeforeOpen > 0 && new Date(m.created_at).getTime() <= chatSeenBeforeOpen;
                     return (
-                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start', gap: 3 }}>
+                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start', gap: 3, opacity: isPreviouslyRead ? 0.55 : 1 }}>
                       {repliedTo && (
                         <div style={{ fontSize: 10, color: '#777', maxWidth: '70%', marginLeft: own ? 0 : 34, marginRight: own ? 0 : 0, padding: '3px 10px', borderLeft: '2px solid #8B0000', background: 'rgba(255,255,255,0.03)', borderRadius: '6px 6px 0 0' }}>
                           {repliedTo.users?.name ? `${repliedTo.users.name}: ` : ''}{repliedTo.message_type === 'sticker' ? 'Стикер илгээлээ' : (repliedTo.message || '').slice(0, 60)}
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexDirection: own ? 'row-reverse' : 'row' }}>
-                        <div onClick={() => own ? setProfileOpen(true) : startDmWith(m.user_id, m.users?.name, m.users?.avatar_url)} title={own ? 'Профайл' : 'Хувийн зурвас бичих'} style={{ cursor: 'pointer' }}>
-                          <Avatar url={m.users?.avatar_url} letter={(m.users?.name || '?')[0]} size={26} isVip={!!m.users?.is_vip} />
+                        <div style={{ width: 26, flexShrink: 0 }}>
+                          {/* ЗАСВАР (хэрэглэгчийн хvсэлт): ижил хvний дараалсан мессежvvдэд
+                              avatar-г зөвхөн ЭХНИЙ мессеж дээр л харуулна — цэгцтэй болно. */}
+                          {!groupedWithPrev && (
+                            <div onClick={() => own ? setProfileOpen(true) : startDmWith(m.user_id, m.users?.name, m.users?.avatar_url)} title={own ? 'Профайл' : 'Хувийн зурвас бичих'} style={{ cursor: 'pointer' }}>
+                              <Avatar url={m.users?.avatar_url} letter={(m.users?.name || '?')[0]} size={26} isVip={!!m.users?.is_vip} />
+                            </div>
+                          )}
                         </div>
                         <div style={{ maxWidth: '72%' }}>
                           {/* ЗАСВАР (хэрэглэгчийн хvсэлт): бусдын нэрийг дарж хувийн
                               зурвас бичиж болдгийг тодорхой харагдуулахын тулд, нэрний
                               ард жижиг "зурвас бичих" icon нэмж, tap хийх боломжтойг vзvvлэв.
-                              Өөрийн нэр/зураг дээр дарвал профайл (нэр/зураг засах) нээгдэнэ. */}
+                              Өөрийн нэр/зураг дээр дарвал профайл (нэр/зураг засах) нээгдэнэ.
+                              ЗАСВАР (хэрэглэгчийн хvсэлт): ижил хvний дараалсан мессежvvдэд
+                              нэрийг ч зөвхөн ЭХНИЙ мессеж дээр харуулна. */}
+                          {!groupedWithPrev && (
                           <div onClick={() => own ? setProfileOpen(true) : startDmWith(m.user_id, m.users?.name, m.users?.avatar_url)}
                             style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: isStaffAuthor ? '#f5c518' : '#fff', fontWeight: isStaffAuthor ? 800 : 400, marginBottom: 2, marginLeft: own ? 0 : 4, marginRight: own ? 4 : 0, justifyContent: own ? 'flex-end' : 'flex-start', cursor: 'pointer' }}>
                             {isAdminAuthor ? '💎 ' : isStaffAuthor ? '👑 ' : ''}{m.users?.name || 'Хэрэглэгч'}
@@ -5803,6 +5844,7 @@ export default function App() {
                               </svg>
                             )}
                           </div>
+                          )}
                           {m.message_type === 'sticker' ? (
                             <DmStickerBubble url={m.sticker_url} />
                           ) : (
@@ -5815,13 +5857,15 @@ export default function App() {
                               {m.message}
                             </div>
                           )}
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 3, justifyContent: own ? 'flex-end' : 'flex-start' }}>
-                            <span onClick={() => toggleChatLike(m)} style={{ fontSize: 11, cursor: 'pointer', color: liked ? '#ff5a5a' : '#555' }} className={liked ? 'like-pop' : ''}>
-                              {liked ? '❤️' : '🤍'} {(m.likedBy || []).length > 0 ? m.likedBy.length : ''}
+                          {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "↩ Хариулах" бvтэн vгийг жижиг
+                              icon болгож, ❤️ тоогvй vед бага зэрэг бvдэгрvvлж цэгцлэв. */}
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2, justifyContent: own ? 'flex-end' : 'flex-start' }}>
+                            <span onClick={() => toggleChatLike(m)} style={{ fontSize: 11, cursor: 'pointer', color: liked ? '#ff5a5a' : '#555', opacity: liked || (m.likedBy || []).length > 0 ? 1 : 0.6 }} className={liked ? 'like-pop' : ''}>
+                              {liked ? '❤️' : '🤍'}{(m.likedBy || []).length > 0 ? ` ${m.likedBy.length}` : ''}
                             </span>
                             <span onClick={() => setChatReplyTo({ id: m.id, preview: `${m.users?.name ? m.users.name + ': ' : ''}${m.message_type === 'sticker' ? 'Стикер илгээлээ' : (m.message || '').slice(0, 60)}` })}
-                              style={{ fontSize: 11, cursor: 'pointer', color: '#555' }}>
-                              ↩ Хариулах
+                              title="Хариулах" style={{ fontSize: 11, cursor: 'pointer', color: '#555', opacity: 0.6 }}>
+                              ↩
                             </span>
                           </div>
                         </div>
