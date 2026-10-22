@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from './supabase';
 import { genres, MANGA_STATUSES, STATUS_META, DEFAULT_STATUS_META, PLANS, PLAN_DAYS, DAYS, SALE, SALE_ENDS_AT_MS } from './constants';
-import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, checkImageDecodable } from './helpers';
+import { validateImageFile, normalizeImageFile, uploadToR2, deleteFromR2, formatMnDate, formatNumericDate, formatRemaining, getAnonViewerKey, formatCountdownClock, splitTallImageFile, cropImageFile, optimizeImageFile, checkImageDecodable, fetchBlogspotImages, downloadBlogspotImage } from './helpers';
 import { IconHome, IconGrid, IconBookmark, IconPencil, IconCheck, IconChevronUp, IconChevronDown, IconImage, IconTrash, IconCrop, IconBell, IconGoogle, IconCrown } from './icons';
 import { PasswordField } from './PasswordField';
 import { Avatar, MangaCard, SectionHeader, LiveCountdown, TopbarSearch } from './components';
@@ -262,11 +262,13 @@ export default function App() {
   // ШИНЭ (хэрэглэгчийн хvсэлт): "Бvгдийн шаана" эрхтэй хvмvvст л харагдах
   // тусгай манга — зөвхөн admin тавьж болно.
   const [adminMangaRestricted, setAdminMangaRestricted] = useState(false);
+  // ШИНЭ (хэрэглэгчийн хvсэлт): нvvр хуудасны "VНЭГVЙ" мөрөнд гаргах манга — зөвхөн admin тавина.
+  const [adminMangaFree, setAdminMangaFree] = useState(false);
   // ШИНЭ: нvvр хэсгийн "Санал болгох" мөрөнд ашиглах урт нарийн (portrait) баннер зураг
   const [bannerFile, setBannerFile] = useState(null);
   // ШИНЭ: оруулсан мангаг засах (edit) цонх
   const [editManga, setEditManga] = useState(null);
-  const [editMangaForm, setEditMangaForm] = useState({ title: '', desc: '', genres: [], status: 'Гарч байгаа', restricted: false });
+  const [editMangaForm, setEditMangaForm] = useState({ title: '', desc: '', genres: [], status: 'Гарч байгаа', restricted: false, free: false });
   const [editPosterFile, setEditPosterFile] = useState(null);
   const [editBannerFile, setEditBannerFile] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
@@ -541,6 +543,12 @@ export default function App() {
   const [chapterNumber, setChapterNumber] = useState('');
   const [chapterTitle, setChapterTitle] = useState('');
   const [chapterFiles, setChapterFiles] = useState([]);
+  // ШИНЭ (хэрэглэгчийн хvсэлт): бvлгийн зургийг файлаар биш Blogspot-оос (линкээр) нэмэх горим.
+  // Зургууд R2 руу upload хийгдэхгvй — Blogger-ийн URL-ыг chapter_images-д шууд хадгална.
+  const [chapterSource, setChapterSource] = useState('file'); // 'file' | 'blogspot'
+  const [blogspotInput, setBlogspotInput] = useState('');
+  const [blogspotUrls, setBlogspotUrls] = useState([]);
+  const [blogspotLoading, setBlogspotLoading] = useState(false);
   // ЗАСВАР #169: "БvТНЭЭР ХАРАХ" preview дотор зураг дээр дарж Солих/Устгах/Зөөх хийж болно.
   const [chapterEditIndex, setChapterEditIndex] = useState(null); // chapterFiles-ийн alь index засварлаж буй
   const [chapterEditBusy, setChapterEditBusy] = useState(false);
@@ -1197,7 +1205,7 @@ export default function App() {
   const fetchMangas = useCallback(() => {
     // ЗАСВАР #159: select('*')-ийн оронд шаардлагатай баганаа зааж татна — egress багасна
     supabase.from('mangas')
-      .select('id, title, description, genres, status, poster_url, banner_url, views, is_hidden, schedule_day, schedule_time, created_at, admin_note, is_recommended, restricted_role')
+      .select('id, title, description, genres, status, poster_url, banner_url, views, is_hidden, schedule_day, schedule_time, created_at, admin_note, is_recommended, restricted_role, is_free')
       .then(({ data, error }) => {
       if (error) console.error('Supabase манга алдаа:', error);
       if (data && data.length > 0) {
@@ -1220,6 +1228,7 @@ export default function App() {
           admin_note: m.admin_note, // ШИНЭ: манга хуудсанд admin бичдэг тэмдэглэл
           is_recommended: m.is_recommended || false, // ЗАСВАР #71: "Санал болгох" hero-д admin гараар сонгосон эсэх
           restricted_role: m.restricted_role || null, // ШИНЭ: тавигдсан бол зөвхөн тэр эрхтэй (мөн admin/moderator/editor)-д л харагдана
+          is_free: m.is_free || false, // ШИНЭ: нvvр хуудасны "VНЭГVЙ" мөрөнд харагдах эсэх
         })));
       }
       setMangasLoading(false);
@@ -1284,6 +1293,9 @@ export default function App() {
   const newMangas = [...allMangas]
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
     .slice(0, 10);
+
+  // ШИНЭ (хэрэглэгчийн хvсэлт): нvvр хуудасны хамгийн доод "VНЭГVЙ" мөр — admin "Vнэгvй" гэж тэмдэглэсэн манга
+  const freeMangas = allMangas.filter(m => m.is_free);
 
   // ЗАСВАР #57: full-width hero-г автоматаар эргvvлнэ (жижиг карт мөрийн scroll-ийн оронд)
   const [heroIndex, setHeroIndex] = useState(0);
@@ -3652,6 +3664,7 @@ export default function App() {
     if (allCategory === 'new') return newMangas;
     if (allCategory === 'finished') return allMangas.filter(m => m.status === 'Дууссан');
     if (allCategory === 'recommended') return curatedRecommended;
+    if (allCategory === 'free') return freeMangas;
     if (allCategory === 'monthlyTop') return monthlyTopMangas;
     if (allCategory === 'history') return allMangas.filter(m => history.find(h => h.mangaId === m.id));
     if (allCategory === 'recentChapter') return allMangas.filter(m => recentChapters.find(ch => ch.mangas?.id === m.id));
@@ -4560,6 +4573,16 @@ export default function App() {
                   {allMangas.filter(m => m.status === 'Дууссан').map((m, i) => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 4} /></div>)}
                 </div>
               </div>
+
+              {/* ШИНЭ (хэрэглэгчийн хvсэлт): VНЭГVЙ — admin "Vнэгvй" гэж тэмдэглэсэн манга, нvvр хуудасны хамгийн доод мөр */}
+              {freeMangas.length > 0 && (
+                <div style={{ marginBottom: '2.5rem' }}>
+                  <SectionHeader title="VНЭГVЙ" count={freeMangas.length} onClick={() => { setPreviousPage('home'); setAllCategory('free'); setPage('all'); }} />
+                  <div className="scroll-row" style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
+                    {freeMangas.map((m, i) => <div key={m.id} style={scrollCardStyle}><MangaCard m={m} showChapter={false} history={history} onOpen={goToDetail} priority={i < 4} /></div>)}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ЗАСВАР #178: нvvр хуудасны хамгийн доод хэсэгт "бидний тухай" маягийн
@@ -4637,6 +4660,7 @@ export default function App() {
               new: 'ШИНЭ МАНГА',
               finished: 'ДУУССАН',
               recommended: 'САНАЛ БОЛГОХ',
+              free: 'VНЭГVЙ',
               monthlyTop: 'САРЫН ТОП',
               history: 'ТVVХ',
               recentChapter: 'ШИНЭ БVЛЭГ',
@@ -6415,7 +6439,7 @@ export default function App() {
                 )}
                 {canModerate && (
                   <button onClick={() => {
-                    setEditMangaForm({ title: selected.title, desc: selected.desc || '', genres: selected.genres || [], status: selected.status, restricted: !!selected.restricted_role });
+                    setEditMangaForm({ title: selected.title, desc: selected.desc || '', genres: selected.genres || [], status: selected.status, restricted: !!selected.restricted_role, free: !!selected.is_free });
                     setEditPosterFile(null);
                     setEditBannerFile(null);
                     setEditManga(selected);
@@ -7434,6 +7458,14 @@ export default function App() {
                     👑 Зөвхөн "Бvгдийн шаана" эрхтэй хvмvvст харуулах (дараа нь Нийтэд нээж болно)
                   </label>
                 )}
+                {/* ШИНЭ (хэрэглэгчийн хvсэлт): нvvр хуудасны "VНЭГVЙ" мөрөнд гаргах сонголт — зөвхөн admin */}
+                {isAdmin && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer', fontSize: 13, color: '#4caf50' }}>
+                    <input type="checkbox" checked={adminMangaFree} onChange={e => setAdminMangaFree(e.target.checked)}
+                      style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
+                    🆓 Vнэгvй (нvvр хуудасны "VНЭГVЙ" хэсэгт харуулах)
+                  </label>
+                )}
                 <button disabled={mangaSaving} onClick={async () => {
                   // ЗАСВАР #142: олон дарахад давхар vvсгэхээс сэргийлж, хамгийн эхэнд шалгана
                   // (disabled attribute React-ийн дараагийн render хvртэл хойшлогддог тул
@@ -7473,6 +7505,7 @@ export default function App() {
                       created_by: currentUser.id,
                       is_hidden: adminMangaHidden,
                       restricted_role: (isAdmin && adminMangaRestricted) ? 'shaana' : null,
+                      is_free: isAdmin && adminMangaFree,
                     });
                     if (error) notify('Алдаа: ' + error.message);
                     else {
@@ -7482,6 +7515,7 @@ export default function App() {
                       setBannerFile(null);
                       setAdminMangaHidden(false);
                       setAdminMangaRestricted(false);
+                      setAdminMangaFree(false);
                       fetchMangas(); // ЗАСВАР: жагсаалтыг шууд шинэчилнэ (өмнө нь refresh хэрэгтэй байсан)
                     }
                   } catch (e) {
@@ -7550,6 +7584,18 @@ export default function App() {
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>БVЛГИЙН ЗУРАГНУУД (хуудас бvрээр, дараалсан)</div>
+
+                  {/* ШИНЭ (хэрэглэгчийн хvсэлт): зургийг файлаар эсвэл Blogspot-оос нэмэх сонголт */}
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    {[{ key: 'file', label: '📁 ФАЙЛААС' }, { key: 'blogspot', label: '🅱️ BLOGSPOT-ООС' }].map(opt => (
+                      <button key={opt.key} type="button" onClick={() => setChapterSource(opt.key)}
+                        style={{ flex: 1, background: chapterSource === opt.key ? '#8B0000' : '#1a1a1a', border: '1px solid #2a2a2a', color: '#fff', borderRadius: 6, padding: '7px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {chapterSource === 'file' ? (<>
 
                   {/* ЗАСВАР #199 (хэрэглэгчийн хvсэлт): "Бvтнээр"/"Хуваах" гэсэн гараар
                       сонгох товчийг хассан — оронд нь 6000px-ээс УРТ ЗУРАГ бvгд
@@ -7622,6 +7668,55 @@ export default function App() {
                       </button>
                     </div>
                   )}
+                  </>) : (<>
+                    {/* ШИНЭ (хэрэглэгчийн хvсэлт): Blogspot постын линк (доторх бvх зургийг
+                        дарааллаар нь татна) эсвэл зургийн линкvvдийг мөр мөрөөр нь оруулна. */}
+                    <textarea value={blogspotInput} onChange={e => setBlogspotInput(e.target.value)}
+                      placeholder={'https://танблог.blogspot.com/2026/10/chapter-1.html\nэсвэл зургийн линкvvд (мөр бvрт нэг)'}
+                      rows={4}
+                      style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }} />
+                    <button type="button" disabled={blogspotLoading || !blogspotInput.trim()} onClick={async () => {
+                      setBlogspotLoading(true);
+                      try {
+                        const urls = await fetchBlogspotImages(blogspotInput);
+                        if (urls.length === 0) notify('Зураг олдсонгvй — постод зураг байгаа эсэх, блогийн feed "Бvтэн" (Full) тохиргоотой эсэхийг шалгана уу.');
+                        else { setBlogspotUrls(prev => [...prev, ...urls.filter(u => !prev.includes(u))]); setBlogspotInput(''); }
+                      } catch (err) { notify(err.message); } finally { setBlogspotLoading(false); }
+                    }}
+                      style={{ width: '100%', marginTop: 6, background: blogspotLoading ? '#555' : '#1a1a1a', border: '1px solid #333', color: '#ccc', borderRadius: 6, padding: '7px 10px', fontSize: 11, fontWeight: 700, cursor: blogspotLoading ? 'not-allowed' : 'pointer' }}>
+                      {blogspotLoading ? 'ТАТАЖ БАЙНА...' : '⬇️ ЗУРАГ ТАТАХ'}
+                    </button>
+                    <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Дахин татвал нэмэгдэнэ. "БVЛЭГ НЭМЭХ" дарахад зургууд дарааллаараа өөрийн Cloudflare (R2) руу хуулагдана — дараа нь Blogspot постоо устгасан ч бvлэг хэвээр vлдэнэ.</div>
+
+                    {blogspotUrls.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, maxHeight: 320, overflowY: 'auto', padding: 4, background: '#0d0d0d', borderRadius: 8 }}>
+                        {blogspotUrls.map((url, i) => (
+                          <div key={url} style={{ position: 'relative', width: 76 }}>
+                            <img src={url} alt={`${i + 1}`} loading="lazy" decoding="async" referrerPolicy="no-referrer"
+                              style={{ width: 76, height: 104, objectFit: 'cover', borderRadius: 6, background: '#1a1a1a', display: 'block' }} />
+                            <div style={{ position: 'absolute', top: 2, left: 4, fontSize: 10, fontWeight: 700, color: '#fff', textShadow: '0 0 3px #000' }}>{i + 1}</div>
+                            <span onClick={() => setBlogspotUrls(prev => prev.filter((_, idx) => idx !== i))}
+                              style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.75)', color: '#fff', borderRadius: '50%', width: 18, height: 18, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</span>
+                            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                              <span onClick={() => i > 0 && setBlogspotUrls(prev => { const arr = [...prev]; [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; return arr; })}
+                                style={{ flex: 1, textAlign: 'center', cursor: i > 0 ? 'pointer' : 'default', opacity: i > 0 ? 1 : 0.25, fontSize: 12, color: '#ccc', padding: '3px 0', background: '#1a1a1a', borderRadius: 4 }}>◀</span>
+                              <span onClick={() => i < blogspotUrls.length - 1 && setBlogspotUrls(prev => { const arr = [...prev]; [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]; return arr; })}
+                                style={{ flex: 1, textAlign: 'center', cursor: i < blogspotUrls.length - 1 ? 'pointer' : 'default', opacity: i < blogspotUrls.length - 1 ? 1 : 0.25, fontSize: 12, color: '#ccc', padding: '3px 0', background: '#1a1a1a', borderRadius: 4 }}>▶</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {blogspotUrls.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+                        <div style={{ fontSize: 12, color: '#8B0000' }}>{blogspotUrls.length} зураг татагдсан</div>
+                        <button type="button" onClick={() => setBlogspotUrls([])}
+                          style={{ background: '#1a1a1a', border: '1px solid #333', color: '#ccc', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          🗑 БVГДИЙГ АРИЛГАХ
+                        </button>
+                      </div>
+                    )}
+                  </>)}
                 </div>
 
                 {/* ШИНЭ: VIP бvлэг checkbox */}
@@ -7671,9 +7766,13 @@ export default function App() {
                     if (chapterUploading) return;
                     if (!chapterManga) { notify('Манга сонгоно уу!'); return; }
                     if (!chapterNumber) { notify('Бvлгийн дугаар оруулна уу!'); return; }
-                    if (chapterFiles.length === 0) { notify('Зураг сонгоно уу!'); return; }
+                    // ШИНЭ: Blogspot горимд зургийг upload хийхгvй, татсан URL-уудыг шууд хадгална
+                    const fromBlogspot = chapterSource === 'blogspot';
+                    if (fromBlogspot ? blogspotUrls.length === 0 : chapterFiles.length === 0) {
+                      notify(fromBlogspot ? 'Blogspot-оос зураг татна уу!' : 'Зураг сонгоно уу!'); return;
+                    }
                     // ЗАСВАР #11: бvх зургийг (cover + хуудсууд) upload эхлэхээс өмнө шалгана
-                    const badFile = [chapterCover, ...chapterFiles].filter(Boolean).map(validateImageFile).find(Boolean);
+                    const badFile = [chapterCover, ...(fromBlogspot ? [] : chapterFiles)].filter(Boolean).map(validateImageFile).find(Boolean);
                     if (badFile) { notify(badFile); return; }
 
                     // ЗАСВАР (хэрэглэгчийн хvсэлт — алдаа): олон/том зураг upload хийхэд
@@ -7695,7 +7794,40 @@ export default function App() {
                     // ӨМНӨ өргөнийг нь (1200px-ээс дээш бол л) багасгаж, WebP рvv хөрвvvлнэ —
                     // ингэснээр давхар (a) уншигчийн татах байт багасна, (б) хуваах vеийн
                     // pixel тоо цөөрч, MAX_SAFE_PIXELS-д хvрэх эрсдэл ч буурна.
-                    let filesToUpload = chapterFiles;
+                    // ШИНЭ (хэрэглэгчийн хvсэлт): Blogspot-оос нэмэх vед зургуудыг эхлээд
+                    // (blogspot-proxy-оор) дарааллаар нь татаж File болгоно — дараа нь
+                    // файлаар нэмэхтэй ЯГ адил хуваагдаж/WebP болж ӨӨРИЙН R2 руу орно.
+                    // Аль нэг хуудас татагдахгvй бол бvлэг дундаасаа дутахгvйн тулд
+                    // бvлгийг огт vvсгэхгvй зогсооно.
+                    let sourceFiles = chapterFiles;
+                    if (fromBlogspot) {
+                      const downloaded = new Array(blogspotUrls.length);
+                      let doneDownloads = 0;
+                      let nextIndex = 0;
+                      try {
+                        // 4 зургийг зэрэг татна (дараалал нь index-ээр хадгалагдана)
+                        await Promise.all(Array.from({ length: Math.min(4, blogspotUrls.length) }, async () => {
+                          while (nextIndex < blogspotUrls.length) {
+                            const idx = nextIndex++;
+                            // eslint-disable-next-line no-await-in-loop
+                            downloaded[idx] = await downloadBlogspotImage(blogspotUrls[idx], idx);
+                            doneDownloads += 1;
+                            setChapterUploadProgress(Math.round((doneDownloads / blogspotUrls.length) * 100));
+                          }
+                        }));
+                      } catch (dlErr) {
+                        notify(dlErr.message + ' — бvлэг нэмэгдсэнгvй, дахин оролдоно уу.');
+                        setChapterUploading(false);
+                        setChapterUploadProgress(0);
+                        return;
+                      }
+                      const badDownloaded = downloaded.map(validateImageFile).find(Boolean);
+                      if (badDownloaded) { notify(badDownloaded); setChapterUploading(false); setChapterUploadProgress(0); return; }
+                      sourceFiles = downloaded;
+                      setChapterUploadProgress(0);
+                    }
+
+                    let filesToUpload = sourceFiles;
                     {
                       const expanded = [];
                       // ЗАСВАР #241 (хэрэглэгчийн гомдол — Samsung S22 дээр зарим
@@ -7708,7 +7840,7 @@ export default function App() {
                       // алгасаж, vлдсэн хэвийн зурагтай нь vргэлжлvvлнэ.
                       const failedNames = [];
                       const rawFallbackNames = [];
-                      for (const f of chapterFiles) {
+                      for (const f of sourceFiles) {
                         try {
                           // ЗАСВАР #238 (код шинжилгээ): ӨМНӨ нь эхлээд optimize (өргөнийг
                           // 1200px рvv багасгах), дараа нь split хийдэг байсан — НАРИЙХАН
@@ -7880,6 +8012,8 @@ export default function App() {
                     setChapterNumber('');
                     setChapterTitle('');
                     setChapterFiles([]);
+                    setBlogspotUrls([]);
+                    setBlogspotInput('');
                     setChapterCover(null);
                     setChapterIsVip(false);
                     setChapterHidden(false);
@@ -9361,6 +9495,13 @@ export default function App() {
                   👑 Зөвхөн "Бvгдийн шаана" эрхтэй хvмvvст харуулах {editMangaForm.restricted ? '(идэвхтэй — цуцлахад Нийтэд нээгдэнэ)' : '(Нийтэд нээлттэй)'}
                 </label>
               )}
+              {isAdmin && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.5rem', cursor: 'pointer', fontSize: 13, color: '#4caf50' }}>
+                  <input type="checkbox" checked={editMangaForm.free} onChange={e => setEditMangaForm({ ...editMangaForm, free: e.target.checked })}
+                    style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
+                  🆓 Vнэгvй (нvvр хуудасны "VНЭГVЙ" хэсэгт харуулах)
+                </label>
+              )}
 
               <button disabled={editSaving} onClick={async () => {
                 if (!editMangaForm.title.trim()) { notify('Гарчиг оруулна уу!'); return; }
@@ -9377,7 +9518,7 @@ export default function App() {
                   description: editMangaForm.desc,
                   genres: editMangaForm.genres,
                   status: editMangaForm.status,
-                  ...(isAdmin ? { restricted_role: editMangaForm.restricted ? 'shaana' : null } : {}),
+                  ...(isAdmin ? { restricted_role: editMangaForm.restricted ? 'shaana' : null, is_free: editMangaForm.free } : {}),
                 };
                 if (editPosterFile) {
                   const fileExt = editPosterFile.name.split('.').pop();

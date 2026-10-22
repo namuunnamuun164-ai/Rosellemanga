@@ -96,7 +96,9 @@ export const uploadToR2 = async (file, path) => {
 // urls нь uploadToR2-с буцсан бvтэн public URL-ууд байна — path-ыг нь server
 // талд R2_PUBLIC_BASE_URL-аар нь тайрч тооцно.
 export const deleteFromR2 = async (urls) => {
-  if (!urls || urls.length === 0) return;
+  // ШИНЭ: Blogspot-оос нэмсэн бvлгийн зураг R2-д байхгvй тул устгах жагсаалтаас хасна
+  urls = (urls || []).filter(u => !isBloggerImageUrl(u));
+  if (urls.length === 0) return;
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-to-r2`, {
     method: 'DELETE',
@@ -106,6 +108,104 @@ export const deleteFromR2 = async (urls) => {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Устгах алдаа гарлаа');
   return data;
+};
+
+// ШИНЭ (хэрэглэгчийн хvсэлт): бvлгийг Blogspot-оос нэмэх.
+// Blogger-ийн зураг blogger.googleusercontent.com / *.bp.blogspot.com дээр байрладаг.
+export const isBloggerImageUrl = (url) => {
+  try {
+    const host = new URL(url).hostname;
+    return host === 'blogger.googleusercontent.com' || host.endsWith('.bp.blogspot.com') || host.endsWith('.googleusercontent.com');
+  } catch { return false; }
+};
+
+// Blogger зургийн URL-д "/s640/", "/w400-h300/", "=s1600" гэх мэт хэмжээ заасан
+// хэсэг байдаг — "s0" (эх хэмжээ) болгож солино. s1600 ашиглавал урт webtoon
+// хуудас 1600px өндөр рvv жижгэрч уншигдахгvй болно.
+const toOriginalBloggerSize = (url) => {
+  if (!isBloggerImageUrl(url)) return url;
+  return url
+    .replace(/\/(s\d+|w\d+-h\d+)(-[a-z0-9-]*)?\/(?=[^/]+$)/i, '/s0/')
+    .replace(/=(s\d+|w\d+-h\d+)[^/]*$/i, '=s0');
+};
+
+// Blogger feed нь CORS header буцаадаггvй тул fetch биш JSONP (<script>) ашиглана.
+const bloggerJsonp = (url) => new Promise((resolve, reject) => {
+  const cb = `__blogger_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const script = document.createElement('script');
+  const cleanup = () => { delete window[cb]; script.remove(); clearTimeout(timer); };
+  const timer = setTimeout(() => { cleanup(); reject(new Error('Blogspot хариу өгсөнгvй (timeout)')); }, 20000);
+  window[cb] = (data) => { cleanup(); resolve(data); };
+  script.onerror = () => { cleanup(); reject(new Error('Blogspot feed ачаалж чадсангvй — блог нийтэд нээлттэй эсэхийг шалгана уу')); };
+  script.src = `${url}&callback=${cb}`;
+  document.head.appendChild(script);
+});
+
+// Нэг Blogspot постын бvх зургийг (дарааллаар нь) буцаана. Постын URL-ийн
+// "/YYYY/MM/" хэсгээр тухайн сарын постуудыг feed-ээс татаж, яг тэр постыг олно.
+const fetchBlogspotPostImages = async (postUrl) => {
+  const u = new URL(postUrl);
+  const m = u.pathname.match(/^\/(\d{4})\/(\d{2})\/[^/]+\.html$/);
+  if (!m) throw new Error(`Blogspot постын линк биш байна: ${postUrl}`);
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  // Блогийн цагийн бvс өөр байж болох тул сарын хязгаараас 2 хоног илvv авна
+  const min = new Date(Date.UTC(year, month - 1, 1) - 2 * 86400000).toISOString().slice(0, 19) + 'Z';
+  const max = new Date(Date.UTC(year, month, 1) + 2 * 86400000).toISOString().slice(0, 19) + 'Z';
+  const feedUrl = `https://${u.hostname}/feeds/posts/default?alt=json-in-script&max-results=500&published-min=${min}&published-max=${max}`;
+  const data = await bloggerJsonp(feedUrl);
+  const entry = (data?.feed?.entry || []).find(e => {
+    const href = (e.link || []).find(l => l.rel === 'alternate')?.href;
+    try { return href && new URL(href).pathname === u.pathname; } catch { return false; }
+  });
+  if (!entry) throw new Error(`Пост олдсонгvй: ${postUrl}`);
+  const doc = new DOMParser().parseFromString(entry.content?.$t || '', 'text/html');
+  const urls = [];
+  for (const img of doc.querySelectorAll('img')) {
+    // Blogger зургийг ихэвчлэн эх хэмжээтэй <a href>-аар ороодог — тэрийг илvvд vзнэ
+    const link = img.closest('a')?.getAttribute('href');
+    const src = (link && isBloggerImageUrl(link)) ? link : img.getAttribute('src');
+    if (src && /^https?:\/\//.test(src)) urls.push(toOriginalBloggerSize(src));
+  }
+  return urls;
+};
+
+// Blogspot-ийн нэг зургийг blogspot-proxy Edge Function-аар (CORS-ийн улмаас
+// шууд fetch хийх боломжгvй) татаж File болгоно — дараа нь файлаар нэмэхтэй
+// адил хувааж/WebP болгож R2 руу upload хийгдэнэ.
+export const downloadBlogspotImage = async (url, index) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/blogspot-proxy`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    let msg = `Зураг ${index + 1} татаж чадсангvй`;
+    try { msg += ': ' + ((await res.json()).error || res.status); } catch { msg += ` (${res.status})`; }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+  return new File([blob], `${String(index + 1).padStart(3, '0')}.${ext}`, { type: blob.type });
+};
+
+// Оруулсан текстийн мөр бvрийг уншина: Blogspot постын линк бол доторх бvх
+// зургийг, шууд зургийн линк бол тэр зургийг (оруулсан дарааллаар) буцаана.
+export const fetchBlogspotImages = async (input) => {
+  const lines = String(input || '').split(/\s+/).map(s => s.trim()).filter(Boolean);
+  const result = [];
+  for (const line of lines) {
+    let u;
+    try { u = new URL(line); } catch { throw new Error(`Буруу линк: ${line}`); }
+    if (u.hostname.endsWith('.blogspot.com') && /\.html$/.test(u.pathname)) {
+      // eslint-disable-next-line no-await-in-loop
+      result.push(...await fetchBlogspotPostImages(line));
+    } else {
+      result.push(toOriginalBloggerSize(line));
+    }
+  }
+  return [...new Set(result)];
 };
 
 // "2026 оны 6-р сарын 25" маягийн огноо
