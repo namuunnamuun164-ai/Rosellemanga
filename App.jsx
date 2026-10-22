@@ -33,12 +33,6 @@ export default function App() {
   // ШИНЭ: манга дэлгэрэнгvй хуудаснаас Facebook/Messenger/утасны native share (Instagram
   // гэх мэт бvх суулгасан app-ыг хамарна) руу хуваалцах цэс
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): манга хуваалцах цэснээс шууд хувийн зурвас руу
-  // (хvн сонгоод) илгээх боломж.
-  const [mangaShareOpen, setMangaShareOpen] = useState(false);
-  const [mangaShareQuery, setMangaShareQuery] = useState('');
-  const [mangaShareResults, setMangaShareResults] = useState([]);
-  const [mangaShareSendingId, setMangaShareSendingId] = useState(null);
   const [mangaNoteDraft, setMangaNoteDraft] = useState('');
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [showPopup, setShowPopup] = useState(false);
@@ -82,107 +76,25 @@ export default function App() {
   const [donationOpenInModal, setDonationOpenInModal] = useState(false);
   const [donationAmount, setDonationAmount] = useState('');
   const [donationSending, setDonationSending] = useState(false);
-  // ШИНЭ: "Даалгавар" хуудас — идэвхтэй даалгаврууд + миний явц/авсан шагналууд
-  const [tasksList, setTasksList] = useState([]);
-  const [myTaskClaims, setMyTaskClaims] = useState([]);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): "гараар биелvvлсэн" (manual) даалгаврын vед
-  // admin/moderator баталгаажуулах хvртэл "pending" төлөвтэй байдаг тул task_id
-  // → status ('pending'|'approved') mapping хэрэгтэй.
-  const [myTaskClaimStatus, setMyTaskClaimStatus] = useState({});
-  // ШИНЭ: баталгаажуулах зураг шаарддаг (requires_proof) даалгавар vед,
-  // файл сонгуулах явцад тухайн даалгаврыг түр хадгална.
-  const [pendingProofTask, setPendingProofTask] = useState(null);
-  const [proofUploading, setProofUploading] = useState(false);
-  const taskProofInputRef = useRef(null);
   // ШИНЭ ("цэцэг" систем): VIP биш хэрэглэгч VIP бvлэг vзэхийг оролдоход
   // гарч ирэх сонголтын (VIP авах / цэцгээр нээх) gate. { manga, chapter } эсвэл null.
   const [vipGate, setVipGate] = useState(null);
   const [vipGateUnlocking, setVipGateUnlocking] = useState(false);
-  const [myProgress, setMyProgress] = useState({ comments: 0, chapters_read: 0 });
-  // ШИНЭ: "manga_chapters" төрлийн даалгаварт — тодорхой манга бvрээр
-  // уншсан бvлгийн тоо (manga_id → тоо).
-  const [myMangaProgress, setMyMangaProgress] = useState({});
-  const [taskClaimingId, setTaskClaimingId] = useState(null);
-  // admin талын "Даалгавар" таб — шинэ даалгавар vvсгэх маягт
-  const [newTaskForm, setNewTaskForm] = useState({ title: '', description: '', requirement_type: 'comments', requirement_count: 10, reward_flowers: 1, expires_at: '', target_manga_id: '', requires_proof: false, reward_type: 'flowers', reward_vip_days: 1 });
-  const [taskSaving, setTaskSaving] = useState(false);
-  // ШИНЭ: admin/moderator "манал" (гараар биелvvлсэн) даалгаврын баталгаажуулалт
-  // хvлээж буй хvсэлтvvдийн жагсаалт (task + хэрэглэгчийн нэр хамт).
-  const [pendingTaskClaims, setPendingTaskClaims] = useState([]);
-  const [taskClaimActingId, setTaskClaimActingId] = useState(null);
   // ШИНЭ (дизайн — сайжруулалт): Санал хvсэлт/Даалгавар хуудсуудын ачаалж буй
   // vеийн skeleton, хоосон vеийн харагдац, зурган drag&drop, thread хариу бичих,
   // даалгаврын дэлгэрэнгvй modal, leaderboard, Нийтийн чат — шинэ state-vvд.
   const [feedbackLoading, setFeedbackLoading] = useState(true);
-  const [tasksLoading, setTasksLoading] = useState(true);
   const [feedbackDragActive, setFeedbackDragActive] = useState(false);
   const [feedbackExpandedId, setFeedbackExpandedId] = useState(null);
   const [feedbackThreads, setFeedbackThreads] = useState({});
   const [feedbackThreadLoadingId, setFeedbackThreadLoadingId] = useState(null);
   const [feedbackReplyDrafts, setFeedbackReplyDrafts] = useState({});
   const [feedbackReplySendingId, setFeedbackReplySendingId] = useState(null);
-  const [taskDetailModal, setTaskDetailModal] = useState(null);
-  const [taskLeaderboard, setTaskLeaderboard] = useState([]);
   // ШИНЭ (хэрэглэгчийн хvсэлт): "ЭРЭМБЭ" хуудас — энэ сард хамгийн олон бvлэг
   // уншсан хэрэглэгчдийн жагсаалт (сар бvр шинэчлэгддэг).
   const [rankList, setRankList] = useState([]);
   const [rankLoading, setRankLoading] = useState(true);
   const [myRank, setMyRank] = useState(null);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatSending, setChatSending] = useState(false);
-  const [groupStickerPickerOpen, setGroupStickerPickerOpen] = useState(false);
-  const [chatLoading, setChatLoading] = useState(true);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): чат нээхээс ӨМНӨХ "сvvлд харсан" цаг —
-  // энэ нээлт дотор аль мессеж шинэ (тод), аль нь өмнө уншсан (бvдэг) болохыг
-  // ялгахад ашиглана.
-  const [chatSeenBeforeOpen, setChatSeenBeforeOpen] = useState(0);
-  const chatScrollRef = useRef(null);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): группд (Roselle уншигчид, Админуудын чат)
-  // ч мөн DM-тэй адил тодорхой мессежид reply/❤️ хийх боломжтой болгов.
-  const [chatReplyTo, setChatReplyTo] = useState(null);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): "Нийтийн чат" дангаараа биш, БvРЭН чат систем —
-  // хэрэглэгчид хоорондоо хувийн зурвас (DM) бичиж, манга хуваалцаж, стикер
-  // илгээж, тодорхой мессежид reply/❤️ хийж болно. chatMode: group|inbox|thread.
-  // ЗАСВАР (хэрэглэгчийн хvсэлт): tab switcher-ийн оронд — Чат хуудас нээгдэхэд
-  // vргэлж НЭГДСЭН жагсаалт ('inbox': Нийтийн чат мөр дээрээ + доор нь хувийн
-  // зурвасууд) харагдана, 'group'/'thread' нь тухайн мөрөн дээр дарахад ордог.
-  const [chatMode, setChatMode] = useState('inbox');
-  const [dmRowMenuOpenId, setDmRowMenuOpenId] = useState(null);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): "Roselle уншигчид" (нээлттэй) vs "Админуудын
-  // чат" (зөвхөн editor/moderator/admin) — хоёр өрөөг room баганаар ялгана.
-  const [chatRoom, setChatRoom] = useState('public');
-  // ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator "тусгай хэсгээс" нэмдэг, БvХ
-  // хэрэглэгч чатанд (нийтийн/staff/DM) ашиглаж болох нийтийн стикерийн сан.
-  const [giftStickers, setGiftStickers] = useState([]);
-  const [adminGiftStickerUploading, setAdminGiftStickerUploading] = useState(false);
-  const [dmInbox, setDmInbox] = useState([]);
-  const [dmInboxLoading, setDmInboxLoading] = useState(true);
-  const [dmUnreadTotal, setDmUnreadTotal] = useState(0);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): сайтад байх vед мессежийн мэдэгдэл vргэлж
-  // харагдаж байх ёстой (хvссэн vедээ Нийтийн чатыг дуугvй болгож болно).
-  const [publicChatMuted, setPublicChatMuted] = useState(() => {
-    try { return localStorage.getItem('public_chat_muted') === '1'; } catch { return false; }
-  });
-  const [publicChatUnreadCount, setPublicChatUnreadCount] = useState(0);
-  const [dmPartner, setDmPartner] = useState(null);
-  const [dmMessages, setDmMessages] = useState([]);
-  const [dmLoading, setDmLoading] = useState(true);
-  const [dmInput, setDmInput] = useState('');
-  const [dmSending, setDmSending] = useState(false);
-  const [dmReplyTo, setDmReplyTo] = useState(null);
-  const [dmStickerPickerOpen, setDmStickerPickerOpen] = useState(false);
-  const [dmMangaShareOpen, setDmMangaShareOpen] = useState(false);
-  const [dmMangaShareQuery, setDmMangaShareQuery] = useState('');
-  const [dmNewMsgOpen, setDmNewMsgOpen] = useState(false);
-  const [dmSearchQuery, setDmSearchQuery] = useState('');
-  const [dmSearchResults, setDmSearchResults] = useState([]);
-  // ШИНЭ (хэрэглэгчийн хvсэлт): DM яриаг устгах, хvнийг блоклох, цэцэг/VIP бэлэглэх
-  const [dmMenuOpen, setDmMenuOpen] = useState(false);
-  const [dmPartnerBlocked, setDmPartnerBlocked] = useState(false);
-  const [dmGiftFlowersOpen, setDmGiftFlowersOpen] = useState(false);
-  const [dmGiftFlowersAmount, setDmGiftFlowersAmount] = useState(1);
-  const [dmGifting, setDmGifting] = useState(false);
   // ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor уншигчдад vнэгvй
   // (өөрийн балансаас биш) цэцэг бэлэглэж болно, сард 10 хvртэл хязгаартай —
   // тусдаа "ЦЭЦЭГ БЭЛЭГЛЭХ" admin-таб хуудсанд зориулсан state.
@@ -1177,29 +1089,6 @@ export default function App() {
     }
   }, []);
 
-  // ШИНЭ: даалгавар биелvvлэх мэт "ёслолын" vед богинохон "чинь" гэсэн чимээ
-  // (гадны аудио файлгvйгээр, Web Audio API-ээр шууд vvсгэнэ).
-  const playChime = useCallback(() => {
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = new Ctx();
-      [880, 1318.5].forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + i * 0.09 + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.09 + 0.35);
-        osc.connect(gain).connect(ctx.destination);
-        osc.start(ctx.currentTime + i * 0.09);
-        osc.stop(ctx.currentTime + i * 0.09 + 0.36);
-      });
-      setTimeout(() => ctx.close(), 700);
-    } catch { /* аудио дэмжигдэхгvй орчинд чимээгvй алгасна */ }
-  }, []);
-
   // Supabase-ээс манга татах — админ шинээр нэмсний дараа дахин дуудаж болохоор
   // тусдаа функц болгосон (ЗАСВАР: өмнө нь нэмсний дараа refresh хийх шаардлагатай байсан).
   const fetchMangas = useCallback(() => {
@@ -1600,43 +1489,6 @@ export default function App() {
     }
     setShareMenuOpen(false);
   };
-  // ШИНЭ: сонгосон хvнд тухайн манганы карт бvхий DM мессеж шууд илгээнэ
-  // (thread нээхгvйгээр, "хуваалцлаа" гэсэн товч мэдэгдлээр баталгаажуулна).
-  const shareMangaToUser = async (manga, partner) => {
-    if (mangaShareSendingId) return;
-    setMangaShareSendingId(partner.id);
-    try {
-      const { error } = await supabase.from('direct_messages').insert({
-        sender_id: currentUser.id, recipient_id: partner.id, message_type: 'manga_share', manga_id: manga.id,
-      });
-      if (error) {
-        if (/blocked/.test(error.message || '')) notify('Энэ хэрэглэгчтэй харилцах боломжгvй байна.');
-        else notify('Алдаа: ' + error.message);
-        return;
-      }
-      notify(`${partner.name || 'Хэрэглэгч'}-д "${manga.title}" илгээгдлээ! 📖`);
-      setMangaShareOpen(false);
-      setMangaShareQuery('');
-      setShareMenuOpen(false);
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setMangaShareSendingId(null);
-    }
-  };
-  useEffect(() => {
-    const q = mangaShareQuery.trim();
-    if (!q) { setMangaShareResults([]); return; }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      supabase.rpc('search_users', { query_in: q }).then(({ data, error }) => {
-        if (cancelled || error) return;
-        setMangaShareResults(data || []);
-      });
-    }, 250);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [mangaShareQuery]);
-
   // ШИНЭ (SEO): SPA тул бvх хуудас index.html-ийн НЭГ ижил <title>/meta
   // description-той байсан — Google/browser tab хуудас бvрийг ялгаж чадахгvй
   // байв. Хуудас солигдох бvрт эдгээрийг тухайн агуулгад тохируулж шинэчилнэ.
@@ -1981,12 +1833,6 @@ export default function App() {
         .eq('user_id', currentUser.id).eq('status', 'approved')
         .order('reviewed_at', { ascending: false }).limit(5);
 
-      // ШИНЭ (хэрэглэгчийн хvсэлт): шинэ даалгавар нэмэгдэхэд бvх хэрэглэгчид
-      // хонхон дээр мэдэгдэл харагдана — сvvлийн 5 идэвхтэй даалгаврыг татна.
-      const newTasksPromise = supabase.from('tasks')
-        .select('id, title, created_at')
-        .eq('is_active', true).order('created_at', { ascending: false }).limit(5);
-
       // ШИНЭ (хэрэглэгчийн хvсэлт): admin миний санал хvсэлтэд хариу бичихэд
       // мэдэгдэл ирнэ — feedback_messages-ийн RLS аль хэдийн зөвхөн ӨӨРИЙН
       // санал хvсэлт рvv хязгаарласан тул нэмэлт шvvлт хэрэггvй.
@@ -2050,7 +1896,7 @@ export default function App() {
         }));
       }
 
-      const [{ data: approvedVip }, { data: newTasks }, { data: newFeedbackReplies }, { data: donationThanks }, { data: appreciationsReceived }, { data: appreciationsOversight }, { data: staffGiftsReceived }] = await Promise.all([vipReqPromise, newTasksPromise, feedbackRepliesPromise, donationThanksPromise, appreciationReceivedPromise, appreciationOversightPromise, staffGiftReceivedPromise]);
+      const [{ data: approvedVip }, { data: newFeedbackReplies }, { data: donationThanks }, { data: appreciationsReceived }, { data: appreciationsOversight }, { data: staffGiftsReceived }] = await Promise.all([vipReqPromise, feedbackRepliesPromise, donationThanksPromise, appreciationReceivedPromise, appreciationOversightPromise, staffGiftReceivedPromise]);
       if (cancelled) return;
       const withAuthors = await attachAuthors([...replies, ...likes]);
       // ЗАСВАР: attachAuthors нь user_id-аар get_public_profiles дуудаж зохиогчийг
@@ -2069,11 +1915,6 @@ export default function App() {
       });
       // ШИНЭ: шинэ даалгавар + admin-ий санал хvсэлтэд өгсөн хариу — хоёулаа
       // статик "Roselle Manga" эзэмшигчтэй (vip мэдэгдэлтэй адил зарчим).
-      const newTaskItems = (newTasks || []).map(t => ({
-        id: `task-${t.id}`, kind: 'new_task', user_id: currentUser.id, created_at: t.created_at,
-        content: t.title, sticker_url: null, chapter_id: null, manga_id: null, chapters: null, mangas: null,
-        users: { name: 'Roselle Manga', avatar_url: null },
-      }));
       const feedbackReplyItems = (newFeedbackReplies || []).map(m => ({
         id: `fbreply-${m.id}`, kind: 'feedback_reply', user_id: currentUser.id, created_at: m.created_at,
         content: m.message, sticker_url: null, chapter_id: null, manga_id: null, chapters: null, mangas: null,
@@ -2107,7 +1948,7 @@ export default function App() {
         sticker_url: null, chapter_id: null, manga_id: null, chapters: null, mangas: null,
         users: { name: g.sender?.name || 'Ажилтан', avatar_url: g.sender?.avatar_url || null },
       }));
-      const merged = [...withAuthors, ...vipItems, ...newTaskItems, ...feedbackReplyItems, ...donationThanksItems, ...appreciationReceivedItems, ...appreciationOversightItems, ...staffGiftReceivedItems].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
+      const merged = [...withAuthors, ...vipItems, ...feedbackReplyItems, ...donationThanksItems, ...appreciationReceivedItems, ...appreciationOversightItems, ...staffGiftReceivedItems].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
       if (!cancelled) setPersonalActivity(merged);
     };
     fetchPersonal();
@@ -2157,12 +1998,11 @@ export default function App() {
     if (item.kind === 'vip_approved') { setProfileOpen(true); return; }
     // ШИНЭ: "шинэ даалгавар" / "санал хvсэлтэд хариу ирлээ" мэдэгдлvvд —
     // харгалзах хуудас руу шууд чиглvvлнэ.
-    if (item.kind === 'new_task') { setPage('tasks'); return; }
     if (item.kind === 'feedback_reply') { setPage('feedback'); return; }
     if (item.kind === 'donation_thanked') { setPage('feedback'); return; }
     if (item.kind === 'appreciation_received' || item.kind === 'appreciation_oversight') { setPage('feedback'); return; }
     // ШИНЭ: staff-ийн бэлэглэсэн цэцэг DM мессеж хэлбэрээр ирдэг тул чат руу.
-    if (item.kind === 'staff_gift_received') { setPreviousPage(page); setPage('chat'); setChatMode('inbox'); return; }
+    if (item.kind === 'staff_gift_received') return;
     if (item.chapter_id) {
       const mangaId = item.chapters?.manga_id;
       const manga = dbMangas.find(m => m.id === mangaId);
@@ -2602,16 +2442,6 @@ export default function App() {
       .then(({ data, error }) => { if (error) console.error('Дэмжих vг татах алдаа:', error); else setRecentAppreciations(data || []); });
   }, []);
 
-  // ШИНЭ: admin-ий "Даалгавар" таб — vvсгэсэн бvх даалгавар (идэвхтэй/идэвхгvй хамт)
-  const fetchTasksAdmin = useCallback(() => {
-    supabase.from('tasks').select('*').order('created_at', { ascending: false })
-      .then(({ data, error }) => { if (error) console.error('Даалгавар татах алдаа:', error); else setTasksList(data || []); });
-    // ШИНЭ: баталгаажуулалт хvлээж буй "манал" даалгаврын хvсэлтvvд
-    supabase.from('task_claims').select('task_id, user_id, proof_image_urls, claimed_at, tasks(title, reward_flowers, reward_type, reward_vip_days), users!user_id(name, avatar_url)')
-      .eq('status', 'pending').order('claimed_at', { ascending: true })
-      .then(({ data, error }) => { if (error) console.error('Хvлээгдэж буй хvсэлт татах алдаа:', error); else setPendingTaskClaims(data || []); });
-  }, []);
-
   // ЗАСВАР #125: moderator/editor-ийн устгах хvсэлт илгээсэн бvлгvvд (зөвхөн admin)
   const fetchPendingDeleteChapters = useCallback(() => {
     supabase.from('chapters').select('*, mangas(title), users!delete_requested_by(name, email)').eq('pending_delete', true).order('delete_requested_at')
@@ -2719,10 +2549,9 @@ export default function App() {
       fetchVipUsers();
       fetchAnalytics();
       fetchFeedbackList();
-      fetchTasksAdmin();
       fetchRecentAppreciations();
     }
-  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers, fetchAnalytics, fetchFeedbackList, fetchTasksAdmin, fetchRecentAppreciations]);
+  }, [page, isStaff, canModerate, isAdmin, fetchPending, fetchReports, fetchPaymentRequests, fetchStaffUsers, fetchPendingDeleteChapters, fetchVipUsers, fetchAnalytics, fetchFeedbackList, fetchRecentAppreciations]);
 
   // ШИНЭ: "Санал хvсэлт" хуудас нээгдэхэд өөрийн (сvvлийн) мессежvvдийг татна
   useEffect(() => {
@@ -2791,448 +2620,6 @@ export default function App() {
     });
     return () => { cancelled = true; };
   }, [page, currentUser]);
-
-  // ШИНЭ: "Даалгавар" хуудас нээгдэхэд идэвхтэй даалгаврууд + миний явц (нийт
-  // сэтгэгдэл/уншсан бvлгийн тоо) + аль хэдийн авсан шагналуудаа татна.
-  useEffect(() => {
-    if (page !== 'tasks' || !currentUser) return;
-    let cancelled = false;
-    setTasksLoading(true);
-    Promise.all([
-      supabase.from('tasks').select('*').eq('is_active', true).order('reward_flowers'),
-      supabase.from('task_claims').select('task_id, status').eq('user_id', currentUser.id),
-      supabase.from('comments').select('id', { count: 'exact', head: true }).eq('user_id', currentUser.id),
-      supabase.from('reading_progress').select('manga_id, read_chapters').eq('user_id', currentUser.id),
-      supabase.rpc('get_task_leaderboard', { limit_in: 5 }),
-    ]).then(([tasksRes, claimsRes, commentsCountRes, progressRes, leaderboardRes]) => {
-      if (cancelled) return;
-      setTasksList(tasksRes.data || []);
-      setMyTaskClaims((claimsRes.data || []).map(c => c.task_id));
-      setMyTaskClaimStatus(Object.fromEntries((claimsRes.data || []).map(c => [c.task_id, c.status])));
-      const chaptersRead = (progressRes.data || []).reduce((sum, r) => sum + ((r.read_chapters || []).length), 0);
-      setMyProgress({ comments: commentsCountRes.count ?? 0, chapters_read: chaptersRead });
-      setMyMangaProgress(Object.fromEntries((progressRes.data || []).map(r => [r.manga_id, (r.read_chapters || []).length])));
-      setTaskLeaderboard(leaderboardRes.data || []);
-      setTasksLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [page, currentUser]);
-
-  // ЗАСВАР (хэрэглэгчийн хvсэлт — гvйцэтгэлийн сайжруулалт): 4 секундийн
-  // polling-ийн оронд Supabase Realtime (WebSocket) ашиглаж, зөвхөн бодит
-  // шинэ/устсан мессеж vед л шинэчилнэ. АНХААР: Supabase dashboard →
-  // Database → Replication хэсэгт "chat_messages" хvснэгтийг идэвхжvvлсэн
-  // байх ёстой, эс тэгвэл events ирэхгvй.
-  useEffect(() => {
-    if (page !== 'chat' || chatMode !== 'group' || !currentUser) return;
-    let cancelled = false;
-    setChatLoading(true);
-    // ЗАСВАР (хэрэглэгчийн хvсэлт): Нийтийн чатыг нээж vзсэн даруйд "сvvлд
-    // харсан" цагийг ШИНЭЧЛЭХЭЭС ӨМНӨ хуучин утгыг нь хадгалж авна — ингэснээр
-    // тухайн НЭЭЛТ дотор аль мессежvvд шинэ (уншаагvй) байсныг тод, аль нь
-    // өмнө нь уншсан болохыг бvдэг харуулах боломжтой болно (доор рендерт ашиглана).
-    if (chatRoom === 'public') {
-      let prevSeen = 0;
-      try { prevSeen = Number(localStorage.getItem('public_chat_last_seen_at')) || 0; } catch { /* хор хөнөөлгvй */ }
-      setChatSeenBeforeOpen(prevSeen);
-      try { localStorage.setItem('public_chat_last_seen_at', String(Date.now())); } catch { /* хор хөнөөлгvй */ }
-      setPublicChatUnreadCount(0);
-    } else {
-      setChatSeenBeforeOpen(0);
-    }
-    // ШИНЭ: мессежvvдийн хамт тэдгээрийн ❤️ like-ыг татаж нэгтгэнэ (DM thread-тэй адил загвар).
-    const loadChatMessages = async () => {
-      const { data, error } = await supabase.from('chat_messages').select('*, users!user_id(name, avatar_url, is_vip, roles)').eq('room', chatRoom).order('created_at', { ascending: false }).limit(60);
-      if (error) return null;
-      const msgs = (data || []).slice().reverse();
-      const ids = msgs.map(m => m.id);
-      let likesByMsg = {};
-      if (ids.length > 0) {
-        const { data: likes } = await supabase.from('chat_message_likes').select('message_id, user_id').in('message_id', ids);
-        (likes || []).forEach(l => { (likesByMsg[l.message_id] = likesByMsg[l.message_id] || []).push(l.user_id); });
-      }
-      return msgs.map(m => ({ ...m, likedBy: likesByMsg[m.id] || [] }));
-    };
-    loadChatMessages().then(msgs => {
-      if (cancelled || !msgs) { if (!cancelled) setChatLoading(false); return; }
-      setChatMessages(msgs);
-      setChatLoading(false);
-    });
-    const channel = supabase.channel(`chat_room_${chatRoom}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room=eq.${chatRoom}` }, async payload => {
-        const row = payload.new;
-        const { data: author } = await supabase.from('users').select('name, avatar_url, is_vip, roles').eq('id', row.user_id).single();
-        if (cancelled) return;
-        setChatMessages(prev => prev.some(m => m.id === row.id) ? prev : [...prev, { ...row, users: author || null, likedBy: [] }]);
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `room=eq.${chatRoom}` }, payload => {
-        setChatMessages(prev => prev.filter(m => m.id !== payload.old.id));
-      })
-      .subscribe();
-    return () => { cancelled = true; supabase.removeChannel(channel); };
-  }, [page, chatMode, chatRoom, currentUser]);
-
-  // ЗАСВАР (хэрэглэгчийн хvсэлт): чат нээх бvрт (мөн шинэ мессеж ирэх vед)
-  // хамгийн сvvлийн мессеж рvv автоматаар гvйлгэнэ — өмнө нь эхнээсээ (хамгийн
-  // хуучин мессежээс) харагддаг тул доош гараар гvйлгэх шаардлагатай байв.
-  useEffect(() => {
-    if (page !== 'chat' || chatMode !== 'group' || chatLoading) return;
-    const el = chatScrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [page, chatMode, chatLoading, chatMessages]);
-
-  // ЗАСВАР (хэрэглэгчийн хvсэлт): текст мессежийн зэрэгцээ стикер ч илгээж
-  // болохоор payload-той болгов (өмнө нь зөвхөн текст дэмждэг байсан).
-  const sendChatMessage = async (payload) => {
-    const insertRow = payload || { message_type: 'text', message: chatInput.trim() };
-    if (insertRow.message_type === 'text' && !insertRow.message) return;
-    if (chatSending) return;
-    setChatSending(true);
-    try {
-      const { error } = await supabase.from('chat_messages').insert({ user_id: currentUser.id, room: chatRoom, reply_to_id: chatReplyTo?.id || null, ...insertRow });
-      if (error) {
-        if (/rate_limited/.test(error.message || '')) notify('Хэт хурдан бичиж байна — жоохон хvлээгээрэй.');
-        else notify('Алдаа: ' + error.message);
-        return;
-      }
-      setChatInput('');
-      setGroupStickerPickerOpen(false);
-      setChatReplyTo(null);
-      // ЗАСВАР (гvйцэтгэлийн сайжруулалт): дахин бvтэн жагсаалт татахгvй —
-      // дээрх Realtime INSERT subscription шинэ мессежийг (өөрийнхөө илгээснийг
-      // ч оролцуулан) автоматаар нэмнэ.
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setChatSending(false);
-    }
-  };
-
-  // ШИНЭ: "Зурвас" (DM) inbox — хvн бvртэй хийсэн сvvлийн мессеж + уншаагvй тоо
-  const fetchDmInbox = useCallback(() => {
-    setDmInboxLoading(true);
-    supabase.rpc('get_dm_inbox').then(({ data, error }) => {
-      setDmInboxLoading(false);
-      if (error) { console.error('DM inbox алдаа:', error); return; }
-      setDmInbox(data || []);
-    });
-  }, []);
-
-  // ШИНЭ: чат хуудас нээгдэхэд admin/moderator-ийн нэмсэн нийтийн стикерvvдийг татна
-  useEffect(() => {
-    if (!currentUser || (page !== 'chat' && !(page === 'admin' && canModerate))) return;
-    supabase.from('gift_stickers').select('id, url').eq('is_active', true).order('created_at', { ascending: false })
-      .then(({ data, error }) => { if (!error) setGiftStickers(data || []); });
-  }, [page, currentUser, canModerate]);
-
-  // admin/moderator: шинэ нийтийн стикер нэмэх
-  const uploadGiftSticker = async (file) => {
-    const err = validateImageFile(file);
-    if (err) { notify(err); return; }
-    setAdminGiftStickerUploading(true);
-    try {
-      const normalized = await normalizeImageFile(file);
-      const optimized = await optimizeImageFile(normalized, 400);
-      const url = await uploadToR2(optimized.file, `gift-stickers/${Date.now()}-${optimized.file.name}`);
-      const { error } = await supabase.from('gift_stickers').insert({ url, created_by: currentUser.id });
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Стикер нэмэгдлээ! 🎉');
-      const { data } = await supabase.from('gift_stickers').select('id, url').eq('is_active', true).order('created_at', { ascending: false });
-      setGiftStickers(data || []);
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setAdminGiftStickerUploading(false);
-    }
-  };
-
-  const deleteGiftSticker = (sticker) => {
-    askConfirm('Энэ нийтийн стикерийг устгах уу?', async () => {
-      const { error } = await supabase.from('gift_stickers').delete().eq('id', sticker.id);
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      setGiftStickers(prev => prev.filter(s => s.id !== sticker.id));
-      notify('Стикер устгагдлаа.');
-    });
-  };
-
-  useEffect(() => {
-    if (page !== 'chat' || !currentUser) return;
-    supabase.rpc('get_dm_unread_count').then(({ data }) => setDmUnreadTotal(data || 0));
-  }, [page, currentUser, chatMode]);
-
-  // ШИНЭ (хэрэглэгчийн хvсэлт): сайтад хаана ч байсан (Чат хуудсанд ороогvй ч)
-  // мессежийн мэдэгдэл (DM + дуугvй болгоогvй бол Нийтийн чат) харагдаж байх
-  // ёстой тул page-ээс vл хамааран тогтмол шалгана.
-  useEffect(() => {
-    if (!currentUser) return;
-    let cancelled = false;
-    const checkUnread = () => {
-      if (document.visibilityState !== 'visible') return;
-      supabase.rpc('get_dm_unread_count').then(({ data, error }) => { if (!cancelled && !error) setDmUnreadTotal(data || 0); });
-      let lastSeen = 0;
-      try { lastSeen = Number(localStorage.getItem('public_chat_last_seen_at')) || 0; } catch { /* хор хөнөөлгvй */ }
-      supabase.from('chat_messages').select('id', { count: 'exact', head: true })
-        .eq('room', 'public').gt('created_at', new Date(lastSeen).toISOString())
-        .then(({ count, error }) => { if (!cancelled && !error) setPublicChatUnreadCount(count || 0); });
-    };
-    checkUnread();
-    const interval = setInterval(checkUnread, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (page !== 'chat' || chatMode !== 'inbox' || !currentUser) return;
-    fetchDmInbox();
-  }, [page, chatMode, currentUser, fetchDmInbox]);
-
-  // ЗАСВАР (хэрэглэгчийн хvсэлт — гvйцэтгэлийн сайжруулалт): 4 секундийн
-  // polling-ийн оронд Supabase Realtime ашиглана. АНХААР: Supabase dashboard
-  // → Database → Replication хэсэгт "direct_messages" хvснэгтийг идэвхжvvлсэн
-  // байх ёстой.
-  useEffect(() => {
-    if (page !== 'chat' || chatMode !== 'thread' || !dmPartner || !currentUser) return;
-    let cancelled = false;
-    supabase.from('blocked_users').select('blocked_id').eq('blocker_id', currentUser.id).eq('blocked_id', dmPartner.id).maybeSingle()
-      .then(({ data }) => { if (!cancelled) setDmPartnerBlocked(!!data); });
-    supabase.from('direct_messages')
-      .select('*, mangas(id, title, poster_url)')
-      .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${dmPartner.id}),and(sender_id.eq.${dmPartner.id},recipient_id.eq.${currentUser.id})`)
-      .order('created_at', { ascending: true }).limit(200)
-      .then(async ({ data, error }) => {
-        if (cancelled) return;
-        if (error) { console.error('DM thread алдаа:', error); setDmLoading(false); return; }
-        const msgs = data || [];
-        const ids = msgs.map(m => m.id);
-        let likesByMsg = {};
-        if (ids.length > 0) {
-          const { data: likes } = await supabase.from('direct_message_likes').select('message_id, user_id').in('message_id', ids);
-          (likes || []).forEach(l => { (likesByMsg[l.message_id] = likesByMsg[l.message_id] || []).push(l.user_id); });
-        }
-        if (cancelled) return;
-        setDmMessages(msgs.map(m => ({ ...m, likedBy: likesByMsg[m.id] || [] })));
-        setDmLoading(false);
-      });
-    supabase.rpc('mark_dm_read', { partner_id_in: dmPartner.id }).then(() => {
-      supabase.rpc('get_dm_unread_count').then(({ data }) => setDmUnreadTotal(data || 0));
-    });
-    // ЗАСВАР: зөвхөн ХАРИЛЦАГЧААС over ирэх мессежийг барина (recipient_id
-    // өөрийн uid-тай тохирсноор шvvж, sender_id нь яг энэ харилцагч мөн эсэхийг
-    // callback дотор дахин баталгаажуулна — өөр хvнтэй харилцах DM танигдахгvй).
-    // Өөрийн илгээсэн мессежийг sendDirectMessage функц шууд орон нvvдлээр нэмдэг.
-    const channel = supabase.channel(`dm_thread_${[currentUser.id, dmPartner.id].sort().join('_')}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `recipient_id=eq.${currentUser.id}` }, async payload => {
-        const row = payload.new;
-        if (row.sender_id !== dmPartner.id) return;
-        let full = row;
-        if (row.manga_id) {
-          const { data: manga } = await supabase.from('mangas').select('id, title, poster_url').eq('id', row.manga_id).maybeSingle();
-          full = { ...row, mangas: manga || null };
-        }
-        if (cancelled) return;
-        setDmMessages(prev => prev.some(m => m.id === row.id) ? prev : [...prev, { ...full, likedBy: [] }]);
-        supabase.rpc('mark_dm_read', { partner_id_in: dmPartner.id }).then(() => {
-          supabase.rpc('get_dm_unread_count').then(({ data }) => setDmUnreadTotal(data || 0));
-        });
-      })
-      .subscribe();
-    return () => { cancelled = true; supabase.removeChannel(channel); };
-  }, [page, chatMode, dmPartner, currentUser]);
-
-  const openDmThread = (partner) => {
-    setDmPartner(partner);
-    setDmMessages([]);
-    setDmLoading(true);
-    setDmReplyTo(null);
-    setDmMenuOpen(false);
-    setDmGiftFlowersOpen(false);
-    setChatMode('thread');
-  };
-
-  // ШИНЭ (хэрэглэгчийн хvсэлт): сэтгэгдэл/нийтийн чат доtorх хvний avatar/нэр
-  // дээр дарахад шууд тvvнтэй хувийн зурвас нээгддэг ганц товч цэг.
-  const startDmWith = (userId, name, avatarUrl) => {
-    if (!currentUser || !userId || userId === currentUser.id) return;
-    setPreviousPage(page);
-    setPage('chat');
-    openDmThread({ id: userId, name, avatar_url: avatarUrl });
-  };
-
-  const sendDirectMessage = async (payload) => {
-    if (dmSending || !dmPartner) return;
-    setDmSending(true);
-    try {
-      const { data: inserted, error } = await supabase.from('direct_messages').insert({
-        sender_id: currentUser.id, recipient_id: dmPartner.id,
-        reply_to_id: dmReplyTo?.id || null,
-        ...payload,
-      }).select('*, mangas(id, title, poster_url)').single();
-      if (error) {
-        if (/rate_limited/.test(error.message || '')) notify('Хэт хурдан бичиж байна — жоохон хvлээгээрэй.');
-        else notify('Алдаа: ' + error.message);
-        return;
-      }
-      // ЗАСВАР (гvйцэтгэлийн сайжруулалт — Realtime рvv шилжсэн): доод Realtime
-      // subscription зөвхөн ХАРИЛЦАГЧААС ирэх мессежийг барьдаг (recipient_id
-      // өөрийн uid-тай тохирсноор шvvдэг) тул өөрийн илгээсэн мессежээ энд
-      // шууд орон нvvдэл (optimistic) байдлаар нэмнэ.
-      if (inserted) setDmMessages(prev => prev.some(m => m.id === inserted.id) ? prev : [...prev, { ...inserted, likedBy: [] }]);
-      setDmInput('');
-      setDmReplyTo(null);
-      setDmStickerPickerOpen(false);
-      setDmMangaShareOpen(false);
-      setDmMangaShareQuery('');
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setDmSending(false);
-    }
-  };
-
-  const toggleDmLike = async (msg) => {
-    const iLiked = (msg.likedBy || []).includes(currentUser.id);
-    setDmMessages(prev => prev.map(m => m.id !== msg.id ? m : {
-      ...m, likedBy: iLiked ? m.likedBy.filter(id => id !== currentUser.id) : [...(m.likedBy || []), currentUser.id],
-    }));
-    if (iLiked) await supabase.from('direct_message_likes').delete().eq('message_id', msg.id).eq('user_id', currentUser.id);
-    else await supabase.from('direct_message_likes').insert({ message_id: msg.id, user_id: currentUser.id });
-  };
-
-  // ШИНЭ (хэрэглэгчийн хvсэлт): группд (Roselle уншигчид, Админуудын чат) ч
-  // DM-тэй адил ❤️ like хийх боломжтой.
-  const toggleChatLike = async (msg) => {
-    const iLiked = (msg.likedBy || []).includes(currentUser.id);
-    setChatMessages(prev => prev.map(m => m.id !== msg.id ? m : {
-      ...m, likedBy: iLiked ? m.likedBy.filter(id => id !== currentUser.id) : [...(m.likedBy || []), currentUser.id],
-    }));
-    if (iLiked) await supabase.from('chat_message_likes').delete().eq('message_id', msg.id).eq('user_id', currentUser.id);
-    else await supabase.from('chat_message_likes').insert({ message_id: msg.id, user_id: currentUser.id });
-  };
-
-  // ШИНЭ: тухайн хvнтэй хийсэн харилцаагаа бvхэлд нь (хоёр талдаа) устгах
-  const deleteDmConversation = () => {
-    if (!dmPartner) return;
-    askConfirm(`${dmPartner.name || 'Энэ хэрэглэгч'}-тэй хийсэн бvх харилцааг vvрд устгах уу?`, async () => {
-      const { error } = await supabase.from('direct_messages').delete()
-        .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${dmPartner.id}),and(sender_id.eq.${dmPartner.id},recipient_id.eq.${currentUser.id})`);
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Харилцаа устгагдлаа.');
-      setDmMenuOpen(false);
-      setChatMode('inbox');
-      setDmPartner(null);
-      fetchDmInbox();
-    });
-  };
-
-  // ШИНЭ: inbox жагсаалтын мөр бvрийн "⋮" цэснээс, thread нээхгvйгээр шууд
-  // блоклох/устгах — дээрхтэй адил vйлдэл ч, dmPartner state-ээс vл хамааран
-  // жагсаалтад өгөгдсөн тухайн мөрийн хvнийг шууд параметрээр авна.
-  // ШИНЭ (хэрэглэгчийн хvсэлт): Нийтийн чат "шуугиантай" байх тул хvссэн vедээ
-  // дуугvй болгож, мэдэгдлийн тооноос хасаж болно (DM-vvд vvнд хамаарахгvй).
-  const togglePublicChatMute = () => {
-    setPublicChatMuted(prev => {
-      const next = !prev;
-      try { localStorage.setItem('public_chat_muted', next ? '1' : '0'); } catch { /* хор хөнөөлгvй */ }
-      return next;
-    });
-  };
-
-  const blockUserFromRow = (partner) => {
-    askConfirm(`${partner.name || 'Энэ хэрэглэгч'}-ийг блоклох уу? Та хоёр цаашид бие биедээ мессеж бичих боломжгvй болно.`, async () => {
-      const { error } = await supabase.from('blocked_users').insert({ blocker_id: currentUser.id, blocked_id: partner.id });
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Блоклогдлоо.');
-      setDmRowMenuOpenId(null);
-    });
-  };
-
-  const deleteConversationFromRow = (partner) => {
-    askConfirm(`${partner.name || 'Энэ хэрэглэгч'}-тэй хийсэн бvх харилцааг vvрд устгах уу?`, async () => {
-      const { error } = await supabase.from('direct_messages').delete()
-        .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${partner.id}),and(sender_id.eq.${partner.id},recipient_id.eq.${currentUser.id})`);
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Харилцаа устгагдлаа.');
-      setDmRowMenuOpenId(null);
-      fetchDmInbox();
-    });
-  };
-
-  const toggleBlockDmPartner = () => {
-    if (!dmPartner) return;
-    if (dmPartnerBlocked) {
-      supabase.from('blocked_users').delete().eq('blocker_id', currentUser.id).eq('blocked_id', dmPartner.id)
-        .then(({ error }) => {
-          if (error) { notify('Алдаа: ' + error.message); return; }
-          setDmPartnerBlocked(false);
-          notify('Блок цуцлагдлаа.');
-        });
-      return;
-    }
-    askConfirm(`${dmPartner.name || 'Энэ хэрэглэгч'}-ийг блоклох уу? Та хоёр цаашид бие биедээ мессеж бичих боломжгvй болно.`, async () => {
-      const { error } = await supabase.from('blocked_users').insert({ blocker_id: currentUser.id, blocked_id: dmPartner.id });
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      setDmPartnerBlocked(true);
-      setDmMenuOpen(false);
-      notify('Блоклогдлоо.');
-    });
-  };
-
-  const giftFlowersToPartner = async () => {
-    if (!dmPartner || dmGifting) return;
-    const amount = Math.max(1, Math.floor(Number(dmGiftFlowersAmount) || 0));
-    setDmGifting(true);
-    try {
-      const { error } = await supabase.rpc('gift_flowers', { recipient_id_in: dmPartner.id, amount_in: amount });
-      if (error) {
-        if (/not_enough_flowers/.test(error.message || '')) notify('Танд хvрэлцэхvйц цэцэг алга.');
-        else if (/blocked/.test(error.message || '')) notify('Энэ хэрэглэгчтэй харилцах боломжгvй байна.');
-        else notify('Алдаа: ' + error.message);
-        return;
-      }
-      notify(`${amount} цэцэг бэлэглэлээ! 💐`);
-      setDmGiftFlowersOpen(false);
-      setDmGiftFlowersAmount(1);
-      fetchProfile(currentUser.id);
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setDmGifting(false);
-    }
-  };
-
-  const giftVipToPartner = async () => {
-    if (!dmPartner || dmGifting) return;
-    setDmGifting(true);
-    try {
-      const { error } = await supabase.rpc('gift_vip_with_points', { recipient_id_in: dmPartner.id });
-      if (error) {
-        if (/not_enough_points/.test(error.message || '')) notify('Танд 5000 од хvрэхгvй байна.');
-        else if (/blocked/.test(error.message || '')) notify('Энэ хэрэглэгчтэй харилцах боломжгvй байна.');
-        else notify('Алдаа: ' + error.message);
-        return;
-      }
-      notify(`${dmPartner.name || 'Хэрэглэгч'}-д 1 сарын VIP бэлэглэлээ! 👑`);
-      setDmMenuOpen(false);
-      fetchProfile(currentUser.id);
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setDmGifting(false);
-    }
-  };
-
-  // ШИНЭ: нэр хайж шинэ зурвас эхлvvлэх
-  useEffect(() => {
-    const q = dmSearchQuery.trim();
-    if (!q) { setDmSearchResults([]); return; }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      supabase.rpc('search_users', { query_in: q }).then(({ data, error }) => {
-        if (cancelled || error) return;
-        setDmSearchResults(data || []);
-      });
-    }, 250);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [dmSearchQuery]);
 
   // ШИНЭ: admin-ий "ЦЭЦЭГ БЭЛЭГЛЭХ" хуудсанд хvлээн авагч хайх
   useEffect(() => {
@@ -3404,65 +2791,6 @@ export default function App() {
     }
   };
 
-  // ШИНЭ: даалгаврын шагналыг нэхэх (RPC биелэлтийг серверт дахин шалгаж, цэцэг олгоно).
-  // "manual" төрлийн даалгавар vед шагнал шууд биш, admin/moderator баталсны
-  // дараа л олгогдоно — тул RPC амжилттай ч, "pending" төлөвтэй тэмдэглэнэ.
-  const claimTask = async (task, proofUrls) => {
-    if (taskClaimingId) return;
-    const taskId = task.id;
-    setTaskClaimingId(taskId);
-    try {
-      const { error } = await supabase.rpc('claim_task', { task_id_in: taskId, proof_image_urls_in: (proofUrls && proofUrls.length > 0) ? proofUrls : null });
-      if (error) {
-        if (/not_enough_progress/.test(error.message || '')) notify('Даалгаврыг хараахан гvйцэтгээгvй байна.');
-        else if (/already_claimed/.test(error.message || '')) notify('Та энэ шагналыг аль хэдийн авсан байна.');
-        else if (/proof_required/.test(error.message || '')) notify('Баталгаажуулах зураг хавсаргана уу.');
-        else if (/too_many_proof_images/.test(error.message || '')) notify('Дээд тал нь 5 зураг хавсаргаж болно.');
-        else notify('Алдаа: ' + error.message);
-        return;
-      }
-      const isManual = task.requirement_type === 'manual';
-      const rewardLabel = task.reward_type === 'vip_days' ? `${task.reward_vip_days || 1} хоногийн VIP` : `${task.reward_flowers} цэцэг`;
-      notify(isManual ? `Илгээгдлээ! Admin/moderator баталгаажуулсны дараа ${rewardLabel} орно ⏳` : `Шагнал амжилттай авлаа! ${rewardLabel} 🎉`);
-      if (!isManual) { fireConfetti(); playChime(); }
-      setMyTaskClaims(prev => [...prev, taskId]);
-      setMyTaskClaimStatus(prev => ({ ...prev, [taskId]: isManual ? 'pending' : 'approved' }));
-      fetchProfile(currentUser.id);
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setTaskClaimingId(null);
-    }
-  };
-
-  // ШИНЭ: "requires_proof" даалгаврын vед сонгосон зургуудыг (дээд тал нь 5)
-  // R2-д upload хийгээд, амжилттай бол л claimTask-ыг proof URL-vvдтэй нь дуудна.
-  const handleTaskProofFiles = async (fileList) => {
-    if (!pendingProofTask || !fileList || fileList.length === 0) return;
-    const files = Array.from(fileList).slice(0, 5);
-    if (fileList.length > 5) notify('Дээд тал нь 5 зураг хавсаргаж болно — эхний 5-ыг ашиглав.');
-    for (const file of files) {
-      const err = validateImageFile(file);
-      if (err) { notify(err); return; }
-    }
-    setProofUploading(true);
-    try {
-      const urls = [];
-      for (const file of files) {
-        const normalized = await normalizeImageFile(file);
-        const optimized = await optimizeImageFile(normalized, 1200);
-        const url = await uploadToR2(optimized.file, `task-proofs/${Date.now()}-${crypto.randomUUID()}-${optimized.file.name}`);
-        urls.push(url);
-      }
-      await claimTask(pendingProofTask, urls);
-    } catch (e) {
-      notify('Зураг upload алдаа: ' + e.message);
-    } finally {
-      setProofUploading(false);
-      setPendingProofTask(null);
-    }
-  };
-
   // ШИНЭ ("од" систем — цэцэгтэй огт хамааралгvй, тусдаа): хэрэглэгч VIP
   // худалдаж авах бvрт "од" (loyalty_points) цугладаг (1 сар→500, 3 сар→2000,
   // 6 сар→5000 — approve_payment_request RPC-д хийгдэнэ). 5000 одноос дээш
@@ -3497,7 +2825,7 @@ export default function App() {
     try {
       const { error } = await supabase.rpc('unlock_chapter_with_flower', { chapter_id_in: vipGate.chapter.id });
       if (error) {
-        if (/not_enough_flowers/.test(error.message || '')) notify('Цэцэг хvрэлцэхгvй байна — Даалгавар биелvvлж цэцэг цуглуулаарай! 🌸');
+        if (/not_enough_flowers/.test(error.message || '')) notify('Цэцэг хvрэлцэхгvй байна 🌸');
         else if (/already_unlocked/.test(error.message || '')) notify('Та энэ бvлгийг аль хэдийн нээсэн байна.');
         else notify('Алдаа: ' + error.message);
         return;
@@ -3522,88 +2850,6 @@ export default function App() {
     if (error) { notify('Алдаа: ' + error.message); return; }
     notify('Шийдэгдсэн гэж тэмдэглэлээ.');
     fetchFeedbackList();
-  };
-
-  // admin: шинэ даалгавар vvсгэх
-  const createTask = async () => {
-    if (!newTaskForm.title.trim()) { notify('Гарчиг бичнэ vv!'); return; }
-    if (taskSaving) return;
-    setTaskSaving(true);
-    try {
-      const isManga = newTaskForm.requirement_type === 'manga_chapters';
-      const isManual = newTaskForm.requirement_type === 'manual';
-      const isVipReward = newTaskForm.reward_type === 'vip_days';
-      if (isManga && !newTaskForm.target_manga_id) { notify('Манга сонгоно уу!'); return; }
-      const { error } = await supabase.from('tasks').insert({
-        title: newTaskForm.title.trim(),
-        description: newTaskForm.description.trim() || null,
-        requirement_type: newTaskForm.requirement_type,
-        requirement_count: Number(newTaskForm.requirement_count),
-        reward_flowers: isVipReward ? 0 : Number(newTaskForm.reward_flowers),
-        expires_at: newTaskForm.expires_at ? new Date(newTaskForm.expires_at).toISOString() : null,
-        created_by: currentUser.id,
-        target_manga_id: isManga ? Number(newTaskForm.target_manga_id) : null,
-        requires_proof: isManual, // ЗАСВАР: manual даалгавар БvГД заавал зурагтай (сонголт биш)
-        reward_type: newTaskForm.reward_type,
-        reward_vip_days: isVipReward ? Number(newTaskForm.reward_vip_days) : null,
-      });
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Даалгавар vvсгэгдлээ! 🎉');
-      setNewTaskForm({ title: '', description: '', requirement_type: 'comments', requirement_count: 10, reward_flowers: 1, expires_at: '', target_manga_id: '', requires_proof: false, reward_type: 'flowers', reward_vip_days: 1 });
-      fetchTasksAdmin();
-    } catch (e) {
-      notify('Алдаа: ' + e.message);
-    } finally {
-      setTaskSaving(false);
-    }
-  };
-
-  // admin: даалгаврыг идэвхтэй/идэвхгvй болгох (устгахгvйгээр хэрэглэгчид харагдахаа болих)
-  const toggleTaskActive = async (task) => {
-    const { error } = await supabase.from('tasks').update({ is_active: !task.is_active }).eq('id', task.id);
-    if (error) { notify('Алдаа: ' + error.message); return; }
-    fetchTasksAdmin();
-  };
-
-  // admin: даалгавар бvрмөсөн устгах
-  const deleteTask = (task) => {
-    askConfirm(`"${task.title}" даалгаврыг vvрд устгах уу?`, async () => {
-      const { error } = await supabase.from('tasks').delete().eq('id', task.id);
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Даалгавар устгагдлаа.');
-      fetchTasksAdmin();
-    });
-  };
-
-  // admin/moderator: "манал" даалгаврын хvсэлтийг батлах (шагнал олгоно)
-  const approveTaskClaim = async (claim) => {
-    const key = `${claim.user_id}-${claim.task_id}`;
-    if (taskClaimActingId) return;
-    setTaskClaimActingId(key);
-    try {
-      const { error } = await supabase.rpc('approve_task_claim', { user_id_in: claim.user_id, task_id_in: claim.task_id });
-      if (error) { notify('Алдаа: ' + error.message); return; }
-      notify('Хvсэлтийг баталж, шагнал олгов! 🎉');
-      fetchTasksAdmin();
-    } finally {
-      setTaskClaimActingId(null);
-    }
-  };
-
-  // admin/moderator: "манал" даалгаврын хvсэлтийг татгалзах (шагналгvйгээр цуцлана)
-  const rejectTaskClaim = (claim) => {
-    askConfirm(`${claim.users?.name || 'Хэрэглэгч'}-ийн "${claim.tasks?.title || ''}" хvсэлтийг татгалзах уу?`, async () => {
-      const key = `${claim.user_id}-${claim.task_id}`;
-      setTaskClaimActingId(key);
-      try {
-        const { error } = await supabase.rpc('reject_task_claim', { user_id_in: claim.user_id, task_id_in: claim.task_id });
-        if (error) { notify('Алдаа: ' + error.message); return; }
-        notify('Хvсэлтийг татгалзлаа.');
-        fetchTasksAdmin();
-      } finally {
-        setTaskClaimActingId(null);
-      }
-    });
   };
 
   // ЗАСВАР #21: тодорхой цагт (publish_at) товлогдсон бvлгvvдийг татаж,
@@ -4191,7 +3437,6 @@ export default function App() {
                         const actionLabel = item.kind === 'reply' ? `таны сэтгэгдэлд хариулав${contextLabel}`
                           : item.kind === 'like' ? `таны сэтгэгдэлд ❤️ дарлаа${contextLabel}`
                           : item.kind === 'vip_approved' ? '👑 таны VIP эрх амжилттай сунгагдлаа!'
-                          : item.kind === 'new_task' ? '🗒️ шинэ даалгавар нэмэгдлээ!'
                           : item.kind === 'feedback_reply' ? '💬 таны санал хvсэлтэд хариу бичлээ'
                           : item.kind === 'donation_thanked' ? '💛 таны хандивд баярлалаа!'
                           : item.kind === 'appreciation_received' ? '🙏 танд дэмжих vг илгээлээ'
@@ -5207,7 +4452,7 @@ export default function App() {
                           <div style={{ fontWeight: 700, fontSize: 13 }}>{s.name || 'Ажилтан'}</div>
                           <div style={{ fontSize: 10, color: roleMeta.color, marginTop: 2, fontWeight: 700 }}>{roleMeta.label}</div>
                         </div>
-                        <button onClick={() => { setAppreciateTarget(s); setAppreciateMessage(''); setDonationOpenInModal(false); setDonationAmount(''); setDonationMessage(''); }}
+                        <button onClick={() => { setAppreciateTarget(s); setAppreciateMessage(''); setDonationOpenInModal(false); setDonationAmount(''); }}
                           style={{ background: 'rgba(245,166,35,0.12)', border: '1px solid rgba(245,166,35,0.35)', color: '#f5c518', padding: '7px 14px', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
                           ⭐ Дэмжих
                         </button>
@@ -5518,745 +4763,6 @@ export default function App() {
           );
         })()}
 
-        {/* ШИНЭ: ДААЛГАВАР хуудас — доод pill nav-ийн Профайл цэснээс нээгдэнэ */}
-        {page === 'tasks' && currentUser && (() => {
-          const claimedCount = tasksList.filter(t => myTaskClaims.includes(t.id)).length;
-          // ЗАСВАР (хэрэглэгчийн хvсэлт — "цэцэг" систем): даалгавар биелvvлэхэд
-          // шууд VIP хоног биш, "цэцэг" (💐) шагнадаг болов — цэцгээ дараа нь
-          // дурын НЭГ VIP бvлгийг 3 хоногийн турш нээхэд зарцуулна (VIP gate modal).
-          return (
-          <div style={{ padding: '1.5rem 2rem', maxWidth: 560, margin: '0 auto' }}>
-            {/* ЗАСВАР (дизайн — бvрэн шинэчлэл): icon+гарчигтай толгой хэсэг, миний
-                нийт явцын (биелvvлсэн/нийт, олсон цэцэг) хураангуй карт нэмж,
-                чеклистийн мөр бvрийг glass+glow загварт оруулав. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-              <div style={{
-                width: 46, height: 46, borderRadius: 14, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'radial-gradient(circle at 32% 28%, rgba(255,90,90,0.4), rgba(139,0,0,0.15))',
-                boxShadow: '0 0 20px rgba(139,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.1)',
-              }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff8080" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3"/><path d="M9 12l2 2 4-4"/></svg>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#888' }}>Даалгавар биелvvлээд цэцэг цуглуулж, VIP бvлэг нээгээрэй</div>
-              </div>
-            </div>
-
-            {tasksList.length > 0 && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, padding: '14px 18px',
-                background: 'linear-gradient(135deg, rgba(139,0,0,0.1), rgba(255,255,255,0.02))',
-                backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14,
-              }}>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800 }}>{claimedCount}/{tasksList.length}</div>
-                  <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Биелvvлсэн</div>
-                </div>
-                <div style={{ width: 1, height: 30, background: 'rgba(255,255,255,0.1)' }} />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#f5a623' }}>💐 {userProfile?.flower_balance || 0}</div>
-                  <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Одоо байгаа цэцэг</div>
-                </div>
-              </div>
-            )}
-
-            {/* ШИНЭ: хамгийн олон даалгавар биелvvлсэн хэрэглэгчдийн leaderboard */}
-            {taskLeaderboard.length > 0 && (
-              <div className="scroll-row" style={{
-                display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20, padding: '12px 16px', borderRadius: 14, overflowX: 'auto',
-                background: 'linear-gradient(135deg, rgba(245,166,35,0.08), rgba(255,255,255,0.02))',
-                border: '1px solid rgba(245,166,35,0.18)',
-              }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: '#f5a623', flexShrink: 0 }}>🏆 ТОП</div>
-                {taskLeaderboard.map((u, i) => (
-                  <div key={u.user_id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                    <span style={{ fontSize: 11, color: '#666', fontWeight: 700 }}>{i + 1}.</span>
-                    <Avatar url={u.avatar_url} letter={(u.name || '?')[0]} size={22} />
-                    <span style={{ fontSize: 11, color: '#ccc', maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || 'Хэрэглэгч'}</span>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: '#f5a623' }}>{u.completed_count}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {tasksLoading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {[0, 1, 2, 3].map(i => <div key={i} className="poster-skeleton" style={{ height: 62, borderRadius: 14 }} />)}
-              </div>
-            ) : tasksList.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#555' }}>
-                <div style={{ fontSize: 34, marginBottom: 10 }}>🗒️</div>
-                <div style={{ fontSize: 13 }}>Одоогоор идэвхтэй даалгавар алга</div>
-                <div style={{ fontSize: 11, color: '#444', marginTop: 4 }}>Удахгvй шинэ даалгавар нэмэгдэх болно, дахин эргэж vзээрэй!</div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {tasksList
-                  .slice()
-                  .sort((a, b) => (myTaskClaims.includes(a.id) ? 1 : 0) - (myTaskClaims.includes(b.id) ? 1 : 0))
-                  .map(t => {
-                  // ШИНЭ (хэрэглэгчийн хvсэлт): "manual" төрлийн даалгавар — автомат
-                  // явц тооцохгvй, хэрэглэгч шууд "БИЕЛvvЛЛЭЭ" дараад admin/moderator
-                  // баталгаажуулах хvртэл "Шалгагдаж байна" төлөвтэй байна.
-                  const isManual = t.requirement_type === 'manual';
-                  const isMangaChapters = t.requirement_type === 'manga_chapters';
-                  const progress = isMangaChapters ? (myMangaProgress[t.target_manga_id] || 0) : (myProgress[t.requirement_type] || 0);
-                  const done = isManual || progress >= t.requirement_count;
-                  const hasClaim = myTaskClaims.includes(t.id);
-                  const claimStatus = myTaskClaimStatus[t.id];
-                  const isPending = hasClaim && claimStatus === 'pending';
-                  const claimed = hasClaim && claimStatus !== 'pending';
-                  const targetMangaTitle = isMangaChapters ? (dbMangas.find(m => m.id === t.target_manga_id)?.title || '') : '';
-                  const typeLabel = t.requirement_type === 'comments' ? 'сэтгэгдэл' : (t.requirement_type === 'chapters_read' || isMangaChapters) ? 'бvлэг' : '';
-                  const pct = Math.min(100, Math.round((progress / (t.requirement_count || 1)) * 100));
-                  const hasDeadline = !!t.expires_at && new Date(t.expires_at).getTime() > nowTs;
-                  const remainingMs = hasDeadline ? new Date(t.expires_at).getTime() - nowTs : 0;
-                  const rewardLabel = t.reward_type === 'vip_days' ? `👑 ${t.reward_vip_days || 1} хоног VIP` : `💐 ${t.reward_flowers} цэцэг`;
-                  const handleClaimClick = () => {
-                    if (!done || hasClaim) return;
-                    // ЗАСВАР (хэрэглэгчийн хvсэлт): зурагтай баталгаажуулалтгvйгээр
-                    // ганцхан товшилтоор бичvvлдэг байсныг арилгав — цаашид
-                    // "manual" даалгавар БvГД (requires_proof-оос vл хамаарч)
-                    // заавал баталгаажуулах зураг шаардана.
-                    if (isManual) {
-                      setPendingProofTask(t);
-                      taskProofInputRef.current?.click();
-                      return;
-                    }
-                    claimTask(t);
-                  };
-                  return (
-                    <div key={t.id} onClick={handleClaimClick} className={`page-fade-in ${(done && !hasClaim) ? 'task-claimable-glow' : ''}`}
-                      style={{
-                        position: 'relative', overflow: 'hidden',
-                        display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px 13px 18px',
-                        background: 'rgba(255,255,255,0.025)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14,
-                        cursor: (done && !hasClaim) ? 'pointer' : 'default', opacity: claimed ? 0.55 : 1,
-                      }}>
-                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: claimed ? 'linear-gradient(180deg, #6bd06b, #2e7d32)' : isPending ? 'linear-gradient(180deg, #f5a623, #b8790a)' : done ? 'linear-gradient(180deg, #ff5a5a, #8B0000)' : 'rgba(255,255,255,0.08)' }} />
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: claimed ? '#4caf50' : isPending ? 'rgba(245,166,35,0.15)' : done ? 'radial-gradient(circle at 32% 28%, rgba(255,90,90,0.4), rgba(139,0,0,0.15))' : 'rgba(255,255,255,0.03)',
-                        boxShadow: claimed ? '0 0 12px rgba(76,175,80,0.5)' : done ? '0 0 14px rgba(139,0,0,0.4)' : 'none',
-                        border: (claimed || done) ? 'none' : '1.5px solid rgba(255,255,255,0.15)',
-                      }}>
-                        {isPending ? <span style={{ fontSize: 13 }}>⏳</span> : (claimed || done) && <IconCheck size={13} color={claimed ? '#fff' : '#ff8080'} />}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, textDecoration: claimed ? 'line-through' : 'none', color: claimed ? '#777' : '#fff', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {t.title}
-                          {/* ШИНЭ: даалгаврын дэлгэрэнгvй тайлбарыг modal-аар харуулах товч */}
-                          <span onClick={e => { e.stopPropagation(); setTaskDetailModal(t); }} title="Дэлгэрэнгvй"
-                            style={{ fontSize: 11, color: '#666', cursor: 'pointer', flexShrink: 0 }}>ⓘ</span>
-                        </div>
-                        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                          {isPending ? 'Admin/moderator шалгаж байна...' : isManual ? `Гараар тэмдэглэнэ (зураг хавсаргана) · ${rewardLabel}` : `${targetMangaTitle ? targetMangaTitle + ': ' : ''}${Math.min(progress, t.requirement_count)}/${t.requirement_count} ${typeLabel} · ${rewardLabel}`}
-                          {hasDeadline && <> · ⏳ {formatCountdownClock(remainingMs)}</>}
-                        </div>
-                        {/* ШИНЭ: явцын progress bar (manual төрөлд харуулахгvй) */}
-                        {!claimed && !isPending && !isManual && (
-                          <div style={{ height: 4, borderRadius: 3, background: 'rgba(255,255,255,0.08)', marginTop: 6, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, background: done ? 'linear-gradient(90deg, #8B0000, #ff5a5a)' : 'linear-gradient(90deg, #555, #888)', transition: 'width 0.4s ease' }} />
-                          </div>
-                        )}
-                      </div>
-                      {!hasClaim && (
-                        done ? (
-                          <span style={{ fontSize: 11, fontWeight: 800, color: '#ff8080', flexShrink: 0 }}>
-                            {(taskClaimingId === t.id || (proofUploading && pendingProofTask?.id === t.id)) ? '...' : isManual ? 'БИЕЛVVЛЛЭЭ' : 'АВАХ →'}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 10, fontWeight: 700, color: '#555', flexShrink: 0 }}>ДУТУУ</span>
-                        )
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ШИНЭ: баталгаажуулах зураг(ууд) сонгуулах нуугдмал input (манал
-                даалгаварт, дээд тал нь 5 зураг зэрэг сонгож болно) */}
-            <input ref={taskProofInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
-              onChange={e => { const files = e.target.files; e.target.value = ''; if (files && files.length > 0) handleTaskProofFiles(files); }} />
-
-            {/* ШИНЭ: даалгаврын дэлгэрэнгvй мэдээллийн modal */}
-            {taskDetailModal && (
-              <>
-                <div onClick={() => setTaskDetailModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400, cursor: 'pointer' }} />
-                <div style={{
-                  position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                  width: 320, maxWidth: '90vw', background: 'rgba(17,17,17,0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: 18, padding: '1.5rem', zIndex: 401,
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-                }}>
-                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>{taskDetailModal.title}</div>
-                  {taskDetailModal.description && <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5, marginBottom: 14 }}>{taskDetailModal.description}</div>}
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
-                    Шаардлага: {taskDetailModal.requirement_type === 'manual'
-                      ? 'Гараар тэмдэглэнэ (баталгаажуулах зураг шаардана)'
-                      : `${taskDetailModal.requirement_count} ${taskDetailModal.requirement_type === 'comments' ? 'сэтгэгдэл' : taskDetailModal.requirement_type === 'manga_chapters' ? `бvлэг (${dbMangas.find(m => m.id === taskDetailModal.target_manga_id)?.title || '?'})` : 'уншсан бvлэг'}`}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#888', marginBottom: taskDetailModal.expires_at ? 4 : 14 }}>
-                    Шагнал: {taskDetailModal.reward_type === 'vip_days' ? `👑 ${taskDetailModal.reward_vip_days || 1} хоног VIP` : `💐 ${taskDetailModal.reward_flowers} цэцэг`}
-                  </div>
-                  {taskDetailModal.expires_at && (
-                    <div style={{ fontSize: 12, color: '#f5a623', marginBottom: 14 }}>Дуусах хугацаа: {formatMnDate(taskDetailModal.expires_at)}</div>
-                  )}
-                  <button onClick={() => setTaskDetailModal(null)}
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.06)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', padding: 11, borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                    ХААХ
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-          );
-        })()}
-
-        {/* ШИНЭ: НИЙТИЙН ЧАТ хуудас — сайт даяарх бvх нэвтэрсэн хэрэглэгчийн ярилцах хэсэг */}
-        {page === 'chat' && currentUser && (() => {
-          return (
-          <div style={{ padding: '1.5rem 2rem 0', maxWidth: 560, margin: '0 auto', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-            {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "Нийтийн чат" дангаараа биш, бvрэн чат
-                систем байх ёстой тул — нэмж "Зурвас" (1-1 хувийн DM: манга
-                хуваалцах, стикер илгээх, reply, ❤️) горим оруулав. */}
-            {chatMode === 'thread' && dmPartner ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <button onClick={() => { setChatMode('inbox'); setDmPartner(null); setDmReplyTo(null); }} title="Буцах"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-                </button>
-                <Avatar url={dmPartner.avatar_url} letter={(dmPartner.name || '?')[0]} size={36} />
-                <div style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dmPartner.name || 'Хэрэглэгч'}{dmPartnerBlocked ? ' 🚫' : ''}</div>
-                {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "⋯" dropdown цэсийг хассан (блоклох/
-                    устгах vйлдлvvд одоо inbox жагсаалтын мөр бvрийн "⋮" цэсэнд
-                    аль хэдийн байгаа тул давхардуулахгvй) — цэцэг/VIP бэлэглэх
-                    хоёрыг шууд харагдахаар жижиг icon товч болгов. */}
-                <span onClick={() => setDmGiftFlowersOpen(true)} title="Цэцэг бэлэглэх"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', fontSize: 16 }}>
-                  💐
-                </span>
-                <span onClick={giftVipToPartner} title="VIP бэлэглэх (5000 од)"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', fontSize: 16 }}>
-                  👑
-                </span>
-                <button onClick={() => setPage(previousPage)} title="Хаах"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16 }}>
-                  ✕
-                </button>
-              </div>
-            ) : chatMode === 'group' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <button onClick={() => setChatMode('inbox')} title="Буцах"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-                </button>
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: '#1c2233',
-                }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 11.5c0 4.42-4.03 8-9 8-1.06 0-2.08-.15-3.02-.44L4 21l1.15-3.65C4.16 15.94 3 13.84 3 11.5 3 7.08 7.03 3.5 12 3.5s9 3.58 9 8z"/>
-                    <circle cx="8.3" cy="11.5" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="11.5" r="1" fill="#fff" stroke="none"/><circle cx="15.7" cy="11.5" r="1" fill="#fff" stroke="none"/>
-                  </svg>
-                </div>
-                <div style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: 15 }}>{chatRoom === 'staff' ? 'Админуудын чат' : 'Roselle уншигчид'}</div>
-                <button onClick={() => setPage(previousPage)} title="Хаах"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16 }}>
-                  ✕
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
-                {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "Санал хvсэлт" хуудасны icon badge-той
-                    ижил (улаан speech-bubble) дvрсийг цэвэрхэн хос-бvбvvл (floating
-                    чат товчтой ижил) дvрсээр сольж, доод тайлбар мөрийг хассан. */}
-                <div style={{
-                  width: 46, height: 46, borderRadius: 14, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: '#1c2233', boxShadow: '0 0 20px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.08)',
-                }}>
-                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 11.5c0 4.42-4.03 8-9 8-1.06 0-2.08-.15-3.02-.44L4 21l1.15-3.65C4.16 15.94 3 13.84 3 11.5 3 7.08 7.03 3.5 12 3.5s9 3.58 9 8z"/>
-                    <circle cx="8.3" cy="11.5" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="11.5" r="1" fill="#fff" stroke="none"/><circle cx="15.7" cy="11.5" r="1" fill="#fff" stroke="none"/>
-                  </svg>
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }} />
-                <button onClick={() => setPage(previousPage)} title="Хаах"
-                  style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', fontSize: 16 }}>
-                  ✕
-                </button>
-              </div>
-            )}
-
-            {chatMode === 'group' && (
-              <>
-                <div ref={chatScrollRef} style={{
-                  flex: 1, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', paddingBottom: 14,
-                  minHeight: 300, maxHeight: '58vh',
-                }}>
-                  {chatLoading ? (
-                    [0, 1, 2, 3].map(i => <div key={i} className="poster-skeleton" style={{ height: 44, borderRadius: 12, width: i % 2 ? '70%' : '55%', alignSelf: i % 2 ? 'flex-end' : 'flex-start' }} />)
-                  ) : chatMessages.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#555' }}>
-                      <div style={{ fontSize: 34, marginBottom: 10 }}>💬</div>
-                      <div style={{ fontSize: 13 }}>Одоогоор мессеж алга — эхнийхийг бичээрэй!</div>
-                    </div>
-                  ) : chatMessages.map((m, idx) => {
-                    const own = m.user_id === currentUser.id;
-                    // ЗАСВАР (хэрэглэгчийн хvсэлт): бичиж буй хvний нэрийг vргэлж (өөрийн
-                    // мессежийн дээр ч) харуулж, admin эрхтэй бол алтан шаргал өнгөтэй болгов.
-                    // ЗАСВАР (хэрэглэгчийн хvсэлт): admin/moderator/editor (staff) бvгд алтан
-                    // шаргал, энгийн уншигч бол цагаан өнгөтэй болгов.
-                    const isStaffAuthor = (m.users?.roles || []).some(r => ['admin', 'moderator', 'editor'].includes(r));
-                    // ЗАСВАР (хэрэглэгчийн хvсэлт): admin-ыг бусад staff-аас ялгаж
-                    // 💎 тэмдгээр, moderator/editor-г 👑-ээр ялгав.
-                    const isAdminAuthor = (m.users?.roles || []).includes('admin');
-                    // ШИНЭ (хэрэглэгчийн хvсэлт): DM-тэй адил group чатанд ч ❤️/reply.
-                    const liked = (m.likedBy || []).includes(currentUser.id);
-                    const repliedTo = m.reply_to_id ? chatMessages.find(x => x.id === m.reply_to_id) : null;
-                    // ЗАСВАР (хэрэглэгчийн хvсэлт): "эмх замбараагvй" харагддаг байсныг
-                    // цэгцлэх нэг — ижил хvн дараалан хэд хэдэн мессеж бичвэл (5 минутын
-                    // дотор) зөвхөн ЭХНИЙ мессеж дээр нь нэр/avatar харуулж, дараагийнх
-                    // нь дээр давхардуулахгvй.
-                    const prevMsg = idx > 0 ? chatMessages[idx - 1] : null;
-                    const groupedWithPrev = !!prevMsg && prevMsg.user_id === m.user_id
-                      && (new Date(m.created_at).getTime() - new Date(prevMsg.created_at).getTime()) < 5 * 60 * 1000;
-                    // ШИНЭ (хэрэглэгчийн хvсэлт): Messenger шиг — энэ нээлтээс ӨМНӨ аль
-                    // хэдийн уншсан мессежvvдийг бvдэгрvvлж, шинэ (уншаагvй) мессежvvдийг
-                    // тод харуулна. Өөрийн бичсэн мессеж vргэлж тод vлдэнэ.
-                    const isPreviouslyRead = !own && chatSeenBeforeOpen > 0 && new Date(m.created_at).getTime() <= chatSeenBeforeOpen;
-                    return (
-                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start', gap: 3, opacity: isPreviouslyRead ? 0.55 : 1 }}>
-                      {repliedTo && (
-                        <div style={{ fontSize: 10, color: '#777', maxWidth: '70%', marginLeft: own ? 0 : 34, marginRight: own ? 0 : 0, padding: '3px 10px', borderLeft: '2px solid #8B0000', background: 'rgba(255,255,255,0.03)', borderRadius: '6px 6px 0 0' }}>
-                          {repliedTo.users?.name ? `${repliedTo.users.name}: ` : ''}{repliedTo.message_type === 'sticker' ? 'Стикер илгээлээ' : (repliedTo.message || '').slice(0, 60)}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexDirection: own ? 'row-reverse' : 'row' }}>
-                        <div style={{ width: 26, flexShrink: 0 }}>
-                          {/* ЗАСВАР (хэрэглэгчийн хvсэлт): ижил хvний дараалсан мессежvvдэд
-                              avatar-г зөвхөн ЭХНИЙ мессеж дээр л харуулна — цэгцтэй болно. */}
-                          {!groupedWithPrev && (
-                            <div onClick={() => own ? setProfileOpen(true) : startDmWith(m.user_id, m.users?.name, m.users?.avatar_url)} title={own ? 'Профайл' : 'Хувийн зурвас бичих'} style={{ cursor: 'pointer' }}>
-                              <Avatar url={m.users?.avatar_url} letter={(m.users?.name || '?')[0]} size={26} isVip={!!m.users?.is_vip} />
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ maxWidth: '72%' }}>
-                          {/* ЗАСВАР (хэрэглэгчийн хvсэлт): бусдын нэрийг дарж хувийн
-                              зурвас бичиж болдгийг тодорхой харагдуулахын тулд, нэрний
-                              ард жижиг "зурвас бичих" icon нэмж, tap хийх боломжтойг vзvvлэв.
-                              Өөрийн нэр/зураг дээр дарвал профайл (нэр/зураг засах) нээгдэнэ.
-                              ЗАСВАР (хэрэглэгчийн хvсэлт): ижил хvний дараалсан мессежvvдэд
-                              нэрийг ч зөвхөн ЭХНИЙ мессеж дээр харуулна. */}
-                          {!groupedWithPrev && (
-                          <div onClick={() => own ? setProfileOpen(true) : startDmWith(m.user_id, m.users?.name, m.users?.avatar_url)}
-                            style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: isStaffAuthor ? '#f5c518' : '#fff', fontWeight: isStaffAuthor ? 800 : 400, marginBottom: 2, marginLeft: own ? 0 : 4, marginRight: own ? 4 : 0, justifyContent: own ? 'flex-end' : 'flex-start', cursor: 'pointer' }}>
-                            {isAdminAuthor ? '💎 ' : isStaffAuthor ? '👑 ' : ''}{m.users?.name || 'Хэрэглэгч'}
-                            {!own ? (
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6, flexShrink: 0 }}>
-                                <path d="M21 11.5c0 4.42-4.03 8-9 8-1.06 0-2.08-.15-3.02-.44L4 21l1.15-3.65C4.16 15.94 3 13.84 3 11.5 3 7.08 7.03 3.5 12 3.5s9 3.58 9 8z"/>
-                              </svg>
-                            ) : (
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6, flexShrink: 0 }}>
-                                <path d="M12 20h9"/>
-                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
-                              </svg>
-                            )}
-                          </div>
-                          )}
-                          {m.message_type === 'sticker' ? (
-                            <DmStickerBubble url={m.sticker_url} />
-                          ) : (
-                            <div style={{
-                              padding: '8px 12px', borderRadius: 14,
-                              borderBottomRightRadius: own ? 4 : 14, borderBottomLeftRadius: own ? 14 : 4,
-                              background: own ? 'linear-gradient(135deg, #8B0000, #a30000)' : 'rgba(255,255,255,0.06)',
-                              color: '#fff', fontSize: 13, lineHeight: 1.4, wordBreak: 'break-word',
-                            }}>
-                              {m.message}
-                            </div>
-                          )}
-                          {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "↩ Хариулах" бvтэн vгийг жижиг
-                              icon болгож, ❤️ тоогvй vед бага зэрэг бvдэгрvvлж цэгцлэв. */}
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2, justifyContent: own ? 'flex-end' : 'flex-start' }}>
-                            <span onClick={() => toggleChatLike(m)} style={{ fontSize: 11, cursor: 'pointer', color: liked ? '#ff5a5a' : '#555', opacity: liked || (m.likedBy || []).length > 0 ? 1 : 0.6 }} className={liked ? 'like-pop' : ''}>
-                              {liked ? '❤️' : '🤍'}{(m.likedBy || []).length > 0 ? ` ${m.likedBy.length}` : ''}
-                            </span>
-                            <span onClick={() => setChatReplyTo({ id: m.id, preview: `${m.users?.name ? m.users.name + ': ' : ''}${m.message_type === 'sticker' ? 'Стикер илгээлээ' : (m.message || '').slice(0, 60)}` })}
-                              title="Хариулах" style={{ fontSize: 11, cursor: 'pointer', color: '#555', opacity: 0.6 }}>
-                              ↩
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {chatReplyTo && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 10, background: 'rgba(139,0,0,0.12)', border: '1px solid rgba(139,0,0,0.3)', marginBottom: 6, fontSize: 11 }}>
-                    <span style={{ flex: 1, minWidth: 0, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>↩ {chatReplyTo.preview}</span>
-                    <span onClick={() => setChatReplyTo(null)} style={{ cursor: 'pointer', color: '#888', fontWeight: 700 }}>✕</span>
-                  </div>
-                )}
-
-                {/* ШИНЭ: admin/moderator-ийн нэмсэн нийтийн стикер + өөрийн стикерvvд */}
-                {groupStickerPickerOpen && (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '8px 0', maxHeight: 160, overflowY: 'auto' }}>
-                    {giftStickers.map(s => (
-                      <img key={`gift-${s.id}`} src={s.url} alt="" onClick={() => sendChatMessage({ message_type: 'sticker', sticker_url: s.url })}
-                        style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 10, cursor: 'pointer', border: '1px solid rgba(245,166,35,0.4)' }} />
-                    ))}
-                    {stickerSlots.map(slot => {
-                      const url = userProfile?.[`sticker_${slot}`];
-                      if (!url) return null;
-                      return <img key={`own-${slot}`} src={url} alt="" onClick={() => sendChatMessage({ message_type: 'sticker', sticker_url: url })}
-                        style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 10, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }} />;
-                    })}
-                    {giftStickers.length === 0 && stickerSlots.every(slot => !userProfile?.[`sticker_${slot}`]) && (
-                      <div style={{ fontSize: 11, color: '#555' }}>Стикер алга — профайл дээрээ vvсгээрэй.</div>
-                    )}
-                  </div>
-                )}
-
-                <div style={{
-                  position: 'sticky', bottom: 0, display: 'flex', gap: 6, padding: '12px 0 20px', alignItems: 'center',
-                  background: 'linear-gradient(to top, #050505 60%, transparent)',
-                }}>
-                  <span onClick={() => setGroupStickerPickerOpen(o => !o)} title="Стикер"
-                    style={{ fontSize: 20, cursor: 'pointer', flexShrink: 0, opacity: groupStickerPickerOpen ? 1 : 0.6 }}>😊</span>
-                  <input value={chatInput} onChange={e => setChatInput(e.target.value.slice(0, 500))}
-                    onKeyDown={e => { if (e.key === 'Enter') sendChatMessage(); }}
-                    placeholder="Мессеж бичих..."
-                    style={{ flex: 1, minWidth: 0, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '11px 16px', color: '#fff', fontSize: 13, outline: 'none' }} />
-                  <button disabled={chatSending || !chatInput.trim()} onClick={() => sendChatMessage()}
-                    style={{
-                      background: chatInput.trim() ? '#8B0000' : '#333', color: '#fff', border: 'none', width: 42, height: 42, borderRadius: '50%',
-                      cursor: chatInput.trim() ? 'pointer' : 'not-allowed', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  </button>
-                </div>
-              </>
-            )}
-
-            {chatMode === 'inbox' && (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <button onClick={() => setDmNewMsgOpen(true)}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', marginBottom: 14, padding: 12, borderRadius: 12, background: 'rgba(139,0,0,0.15)', border: '1px solid rgba(139,0,0,0.4)', color: '#ff8080', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-                  ✉️ Шинэ зурвас бичих
-                </button>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "Нийтийн чат" тусдаа tab биш, энэ
-                      нэгдсэн жагсаалтын хамгийн эхний "групп" мөр болж, "Roselle
-                      уншигчид" нэртэй боллоо. Зөвхөн идэвхтэй VIP (эсвэл staff)
-                      хэрэглэгчид харагдана. Staff-д зориулсан тусдаа "Админуудын
-                      чат" мөр доор нь нэмэгдэв. */}
-                  {(hasActiveVip || isStaff) && (
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12, background: 'rgba(28,34,51,0.55)', border: '1px solid rgba(255,255,255,0.09)' }}>
-                      <div onClick={() => { setChatRoom('public'); setChatMode('group'); }} style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                        <div style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1c2233' }}>
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 11.5c0 4.42-4.03 8-9 8-1.06 0-2.08-.15-3.02-.44L4 21l1.15-3.65C4.16 15.94 3 13.84 3 11.5 3 7.08 7.03 3.5 12 3.5s9 3.58 9 8z"/>
-                            <circle cx="8.3" cy="11.5" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="11.5" r="1" fill="#fff" stroke="none"/><circle cx="15.7" cy="11.5" r="1" fill="#fff" stroke="none"/>
-                          </svg>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
-                            Roselle уншигчид {publicChatMuted && <span title="Дуугvй" style={{ fontSize: 11, color: '#666' }}>🔇</span>}
-                          </div>
-                          <div style={{ fontSize: 11, color: '#888', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            VIP хэрэглэгчид ярилцдаг нээлттэй өрөө
-                          </div>
-                        </div>
-                      </div>
-                      {/* ШИНЭ: Нийтийн чатыг дуугvй/дуутай болгох "⋮" цэс */}
-                      <span onClick={e => { e.stopPropagation(); setDmRowMenuOpenId(o => o === 'public-chat' ? null : 'public-chat'); }}
-                        style={{ fontSize: 18, color: '#666', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>⋮</span>
-                      {dmRowMenuOpenId === 'public-chat' && (
-                        <>
-                          <div onClick={() => setDmRowMenuOpenId(null)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-                          <div style={{ position: 'absolute', top: '100%', right: 8, width: 180, background: '#161616', border: '1px solid #2a2a2a', borderRadius: 10, zIndex: 61, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-                            <div onClick={() => { togglePublicChatMute(); setDmRowMenuOpenId(null); }}
-                              style={{ padding: '11px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff' }}
-                              onMouseEnter={e => e.currentTarget.style.background = '#1e2430'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                              {publicChatMuted ? '🔊 Дуутай болгох' : '🔇 Дуугvй болгох'}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {isStaff && (
-                    <div onClick={() => { setChatRoom('staff'); setChatMode('group'); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12, background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.25)', cursor: 'pointer' }}>
-                      <div style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#2a2210' }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f5c518" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3 6 7 1-5 5 1.5 7L12 18l-6.5 3L7 14 2 9l7-1z"/></svg>
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: '#f5c518' }}>👑 Админуудын чат</div>
-                        <div style={{ fontSize: 11, color: '#888', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Зөвхөн editor/moderator/admin эрхтэй хvмvvст
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {dmInboxLoading ? (
-                    [0, 1, 2].map(i => <div key={i} className="poster-skeleton" style={{ height: 58, borderRadius: 12 }} />)
-                  ) : dmInbox.length === 0 ? null : dmInbox.map(row => {
-                    const partner = { id: row.partner_id, name: row.partner_name, avatar_url: row.partner_avatar_url };
-                    return (
-                      <div key={row.partner_id} onClick={() => openDmThread(partner)}
-                        style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)', cursor: 'pointer' }}>
-                        <Avatar url={row.partner_avatar_url} letter={(row.partner_name || '?')[0]} size={40} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13 }}>{row.partner_name || 'Хэрэглэгч'}</div>
-                          <div style={{ fontSize: 11, color: '#888', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {row.last_message_type === 'sticker' ? 'Стикер илгээлээ' : row.last_message_type === 'manga_share' ? '📖 Манга хуваалцлаа' : row.last_message_type === 'gift_flowers' ? '💐 Цэцэг бэлэглэлээ' : row.last_message_type === 'gift_vip' ? '👑 VIP бэлэглэлээ' : row.last_message}
-                          </div>
-                        </div>
-                        {row.unread_count > 0 && (
-                          <span style={{ background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800, borderRadius: 10, minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{row.unread_count}</span>
-                        )}
-                        {/* ШИНЭ: мөр бvрийн "⋮" цэс — thread нээхгvйгээр шууд блоклох/устгах */}
-                        <span onClick={e => { e.stopPropagation(); setDmRowMenuOpenId(o => o === row.partner_id ? null : row.partner_id); }}
-                          style={{ fontSize: 18, color: '#666', cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>⋮</span>
-                        {dmRowMenuOpenId === row.partner_id && (
-                          <>
-                            <div onClick={e => { e.stopPropagation(); setDmRowMenuOpenId(null); }} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-                            <div onClick={e => e.stopPropagation()}
-                              style={{ position: 'absolute', top: '100%', right: 8, width: 180, background: '#161616', border: '1px solid #2a2a2a', borderRadius: 10, zIndex: 61, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-                              <div onClick={() => blockUserFromRow(partner)}
-                                style={{ padding: '11px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff' }}
-                                onMouseEnter={e => e.currentTarget.style.background = '#1e2430'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                🚫 Блоклох
-                              </div>
-                              <div onClick={() => deleteConversationFromRow(partner)}
-                                style={{ padding: '11px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#ff6b6b', borderTop: '1px solid #222' }}
-                                onMouseEnter={e => e.currentTarget.style.background = '#1e2430'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                🗑 Устгах
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {chatMode === 'thread' && dmPartner && (() => {
-              const findMsg = id => dmMessages.find(m => m.id === id);
-              return (
-              <>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', paddingBottom: 14, minHeight: 300, maxHeight: '52vh' }}>
-                  {dmLoading ? (
-                    [0, 1, 2].map(i => <div key={i} className="poster-skeleton" style={{ height: 44, borderRadius: 12, width: i % 2 ? '70%' : '55%', alignSelf: i % 2 ? 'flex-end' : 'flex-start' }} />)
-                  ) : dmMessages.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#555' }}>
-                      <div style={{ fontSize: 34, marginBottom: 10 }}>👋</div>
-                      <div style={{ fontSize: 13 }}>Мессежээ эхлvvлээрэй!</div>
-                    </div>
-                  ) : dmMessages.map(m => {
-                    const own = m.sender_id === currentUser.id;
-                    const liked = (m.likedBy || []).includes(currentUser.id);
-                    const repliedTo = m.reply_to_id ? findMsg(m.reply_to_id) : null;
-                    return (
-                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start', gap: 3 }}>
-                        {repliedTo && (
-                          <div style={{ fontSize: 10, color: '#777', maxWidth: '70%', padding: '3px 10px', borderLeft: '2px solid #8B0000', background: 'rgba(255,255,255,0.03)', borderRadius: '6px 6px 0 0' }}>
-                            {repliedTo.message_type === 'sticker' ? 'Стикер илгээлээ' : repliedTo.message_type === 'manga_share' ? '📖 Манга' : (repliedTo.content || '').slice(0, 60)}
-                          </div>
-                        )}
-                        <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: own ? 'flex-end' : 'flex-start' }}>
-                          {m.message_type === 'sticker' ? (
-                            <DmStickerBubble url={m.sticker_url} />
-                          ) : m.message_type === 'manga_share' ? (
-                            <div onClick={() => { const manga = dbMangas.find(x => x.id === m.manga_id); if (manga) { setSelected(manga); setPreviousPage('chat'); setPage('detail'); } }}
-                              style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 8, borderRadius: 12, background: 'rgba(255,255,255,0.06)', cursor: 'pointer', width: 200 }}>
-                              <img src={m.mangas?.poster_url} alt="" style={{ width: 40, height: 54, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
-                              <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: 10, color: '#888' }}>📖 Манга хуваалцлаа</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.mangas?.title}</div>
-                              </div>
-                            </div>
-                          ) : m.message_type === 'gift_flowers' ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 14, background: 'linear-gradient(135deg, rgba(255,90,140,0.18), rgba(255,255,255,0.03))', border: '1px solid rgba(255,90,140,0.3)', fontSize: 12, fontWeight: 700 }}>
-                              💐 {own ? `Та ${m.gift_amount} цэцэг бэлэглэлээ` : `${m.gift_amount} цэцэг бэлэглэлээ`}
-                            </div>
-                          ) : m.message_type === 'gift_vip' ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 14, background: 'linear-gradient(135deg, rgba(245,166,35,0.18), rgba(255,255,255,0.03))', border: '1px solid rgba(245,166,35,0.35)', fontSize: 12, fontWeight: 700 }}>
-                              👑 {own ? `Та VIP ${m.gift_amount} хоног бэлэглэлээ` : `VIP ${m.gift_amount} хоног бэлэглэлээ`}
-                            </div>
-                          ) : (
-                            <div style={{
-                              padding: '8px 12px', borderRadius: 14,
-                              borderBottomRightRadius: own ? 4 : 14, borderBottomLeftRadius: own ? 14 : 4,
-                              background: own ? 'linear-gradient(135deg, #8B0000, #a30000)' : 'rgba(255,255,255,0.06)',
-                              color: '#fff', fontSize: 13, lineHeight: 1.4, wordBreak: 'break-word',
-                            }}>
-                              {m.content}
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 3 }}>
-                            <span onClick={() => toggleDmLike(m)} style={{ fontSize: 11, cursor: 'pointer', color: liked ? '#ff5a5a' : '#555' }} className={liked ? 'like-pop' : ''}>
-                              {liked ? '❤️' : '🤍'} {(m.likedBy || []).length > 0 ? m.likedBy.length : ''}
-                            </span>
-                            <span onClick={() => setDmReplyTo({ id: m.id, preview: m.message_type === 'sticker' ? 'Стикер илгээлээ' : m.message_type === 'manga_share' ? '📖 Манга' : (m.content || '').slice(0, 60) })}
-                              style={{ fontSize: 11, cursor: 'pointer', color: '#555' }}>
-                              ↩ Хариулах
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {dmPartnerBlocked ? (
-                  <div style={{ textAlign: 'center', padding: '14px', color: '#777', fontSize: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                    🚫 Та энэ хэрэглэгчийг блоклосон тул мессеж бичих боломжгvй.
-                  </div>
-                ) : (
-                <>
-                {dmReplyTo && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 10, background: 'rgba(139,0,0,0.12)', border: '1px solid rgba(139,0,0,0.3)', marginBottom: 6, fontSize: 11 }}>
-                    <span style={{ flex: 1, minWidth: 0, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>↩ {dmReplyTo.preview}</span>
-                    <span onClick={() => setDmReplyTo(null)} style={{ cursor: 'pointer', color: '#888', fontWeight: 700 }}>✕</span>
-                  </div>
-                )}
-
-                {dmStickerPickerOpen && (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '8px 0', maxHeight: 160, overflowY: 'auto' }}>
-                    {giftStickers.map(s => (
-                      <img key={`gift-${s.id}`} src={s.url} alt="" onClick={() => sendDirectMessage({ message_type: 'sticker', sticker_url: s.url })}
-                        style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 10, cursor: 'pointer', border: '1px solid rgba(245,166,35,0.4)' }} />
-                    ))}
-                    {stickerSlots.map(slot => {
-                      const url = userProfile?.[`sticker_${slot}`];
-                      if (!url) return null;
-                      return <img key={`own-${slot}`} src={url} alt="" onClick={() => sendDirectMessage({ message_type: 'sticker', sticker_url: url })}
-                        style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 10, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }} />;
-                    })}
-                    {giftStickers.length === 0 && stickerSlots.every(slot => !userProfile?.[`sticker_${slot}`]) && (
-                      <div style={{ fontSize: 11, color: '#555' }}>Профайл дээрээ эхлээд стикер vvсгээрэй.</div>
-                    )}
-                  </div>
-                )}
-
-                {dmMangaShareOpen && (
-                  <div style={{ padding: '8px 0' }}>
-                    <input value={dmMangaShareQuery} onChange={e => setDmMangaShareQuery(e.target.value)}
-                      placeholder="Манганы нэрээр хайх..." autoFocus
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none', boxSizing: 'border-box', marginBottom: 6 }} />
-                    {dmMangaShareQuery.trim() && (
-                      <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {dbMangas.filter(m => m.title.toLowerCase().includes(dmMangaShareQuery.trim().toLowerCase())).slice(0, 20).map(m => (
-                          <div key={m.id} onClick={() => sendDirectMessage({ message_type: 'manga_share', manga_id: m.id })}
-                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 8, cursor: 'pointer', background: 'rgba(255,255,255,0.03)' }}>
-                            <img src={m.poster} alt="" style={{ width: 28, height: 38, objectFit: 'cover', borderRadius: 4 }} />
-                            <span style={{ fontSize: 12 }}>{m.title}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div style={{
-                  position: 'sticky', bottom: 0, display: 'flex', gap: 6, padding: '12px 0 20px', alignItems: 'center',
-                  background: 'linear-gradient(to top, #050505 60%, transparent)',
-                }}>
-                  <span onClick={() => { setDmStickerPickerOpen(o => !o); setDmMangaShareOpen(false); }} title="Стикер"
-                    style={{ fontSize: 20, cursor: 'pointer', flexShrink: 0, opacity: dmStickerPickerOpen ? 1 : 0.6 }}>😊</span>
-                  <span onClick={() => { setDmMangaShareOpen(o => !o); setDmStickerPickerOpen(false); }} title="Манга хуваалцах"
-                    style={{ fontSize: 18, cursor: 'pointer', flexShrink: 0, opacity: dmMangaShareOpen ? 1 : 0.6 }}>📖</span>
-                  <input value={dmInput} onChange={e => setDmInput(e.target.value.slice(0, 1000))}
-                    onKeyDown={e => { if (e.key === 'Enter' && dmInput.trim()) sendDirectMessage({ message_type: 'text', content: dmInput.trim() }); }}
-                    placeholder="Мессеж бичих..."
-                    style={{ flex: 1, minWidth: 0, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '11px 16px', color: '#fff', fontSize: 13, outline: 'none' }} />
-                  <button disabled={dmSending || !dmInput.trim()} onClick={() => sendDirectMessage({ message_type: 'text', content: dmInput.trim() })}
-                    style={{
-                      background: dmInput.trim() ? '#8B0000' : '#333', color: '#fff', border: 'none', width: 42, height: 42, borderRadius: '50%',
-                      cursor: dmInput.trim() ? 'pointer' : 'not-allowed', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  </button>
-                </div>
-                </>
-                )}
-              </>
-              );
-            })()}
-
-            {/* ШИНЭ: цэцэг бэлэглэх тоо хэмжээ сонгох modal */}
-            {dmGiftFlowersOpen && dmPartner && (
-              <>
-                <div onClick={() => setDmGiftFlowersOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400, cursor: 'pointer' }} />
-                <div style={{
-                  position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                  width: 280, maxWidth: '88vw', background: 'rgba(17,17,17,0.97)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '1.25rem', zIndex: 401,
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.6)', textAlign: 'center',
-                }}>
-                  <div style={{ fontSize: 28, marginBottom: 6 }}>💐</div>
-                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{dmPartner.name || 'Хэрэглэгч'}-д цэцэг бэлэглэх</div>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 14 }}>
-                    Танд {userProfile?.flower_balance || 0} цэцэг байна
-                  </div>
-                  <input type="number" min={1} max={userProfile?.flower_balance || 1} value={dmGiftFlowersAmount}
-                    onChange={e => setDmGiftFlowersAmount(e.target.value)}
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box', textAlign: 'center', marginBottom: 12 }} />
-                  <button disabled={dmGifting} onClick={giftFlowersToPartner}
-                    style={{ width: '100%', background: '#8B0000', color: '#fff', border: 'none', padding: 12, borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                    {dmGifting ? 'БЭЛЭГЛЭЖ БАЙНА...' : 'БЭЛЭГЛЭХ'}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* ШИНЭ: нэр хайж шинэ зурвас эхлvvлэх modal */}
-            {dmNewMsgOpen && (
-              <>
-                <div onClick={() => { setDmNewMsgOpen(false); setDmSearchQuery(''); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400, cursor: 'pointer' }} />
-                <div style={{
-                  position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                  width: 320, maxWidth: '90vw', maxHeight: '70vh', overflowY: 'auto', background: 'rgba(17,17,17,0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: 18, padding: '1.25rem', zIndex: 401,
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-                }}>
-                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Хvнийг хайх</div>
-                  <input value={dmSearchQuery} onChange={e => setDmSearchQuery(e.target.value)}
-                    placeholder="Нэрээр хайх..." autoFocus
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', marginBottom: 10 }} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {dmSearchResults.map(u => (
-                      <div key={u.id} onClick={() => { setDmNewMsgOpen(false); setDmSearchQuery(''); openDmThread(u); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8, borderRadius: 8, cursor: 'pointer' }}>
-                        <Avatar url={u.avatar_url} letter={(u.name || '?')[0]} size={30} />
-                        <span style={{ fontSize: 13 }}>{u.name || 'Хэрэглэгч'}</span>
-                      </div>
-                    ))}
-                    {dmSearchQuery.trim() && dmSearchResults.length === 0 && (
-                      <div style={{ fontSize: 12, color: '#555', textAlign: 'center', padding: '1rem 0' }}>Олдсонгvй</div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-          );
-        })()}
-
         {/* DETAIL PAGE — ЗАСВАР #110: cover-с vvсгэсэн бvдэгрvvлсэн дэвсгэр, том
             голлосон cover, орчуулагчийн нэрийг энгийн (хvрээгvй) мөр болгож,
             3 tab-тай (Бvлгvvд / Мэдээлэл / Vнэлгээ+сэтгэгдэл) шинэ бvтэц. */}
@@ -6303,17 +4809,9 @@ export default function App() {
                     <>
                       <div onClick={() => setShareMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
                       <div style={{ position: 'absolute', top: '120%', right: 0, width: 210, background: '#161616', border: '1px solid #2a2a2a', borderRadius: 10, zIndex: 61, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-                        {currentUser && (
-                          <div onClick={() => setMangaShareOpen(true)}
-                            style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff' }}
-                            onMouseEnter={e => e.currentTarget.style.background = '#1e2430'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                            💬 Хувийн чат руу хуваалцах
-                          </div>
-                        )}
                         {navigator.share && (
                           <div onClick={() => shareMangaNative(selected)}
-                            style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', borderTop: currentUser ? '1px solid #222' : 'none' }}
+                            style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', borderTop: 'none' }}
                             onMouseEnter={e => e.currentTarget.style.background = '#1e2430'}
                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                             📤 Системийн цэсээр хуваалцах
@@ -6330,35 +4828,6 @@ export default function App() {
                           onMouseEnter={e => e.currentTarget.style.background = '#1e2430'}
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                           🔗 Холбоос хуулах
-                        </div>
-                      </div>
-                    </>
-                  )}
-                  {/* ШИНЭ: "Хувийн чат руу хуваалцах" дарахад гарч ирэх хvн хайх modal */}
-                  {mangaShareOpen && (
-                    <>
-                      <div onClick={() => { setMangaShareOpen(false); setMangaShareQuery(''); }} style={{ position: 'fixed', inset: 0, zIndex: 400 }} />
-                      <div style={{
-                        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                        width: 300, maxWidth: '88vw', maxHeight: '60vh', overflowY: 'auto', background: 'rgba(17,17,17,0.97)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '1.1rem', zIndex: 401,
-                        boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-                      }}>
-                        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Хэнд илгээх вэ?</div>
-                        <input value={mangaShareQuery} onChange={e => setMangaShareQuery(e.target.value)}
-                          placeholder="Нэрээр хайх..." autoFocus
-                          style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          {mangaShareResults.map(u => (
-                            <div key={u.id} onClick={() => shareMangaToUser(selected, u)}
-                              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 7, borderRadius: 8, cursor: 'pointer', opacity: mangaShareSendingId === u.id ? 0.5 : 1 }}>
-                              <Avatar url={u.avatar_url} letter={(u.name || '?')[0]} size={28} />
-                              <span style={{ fontSize: 12 }}>{u.name || 'Хэрэглэгч'}</span>
-                            </div>
-                          ))}
-                          {mangaShareQuery.trim() && mangaShareResults.length === 0 && (
-                            <div style={{ fontSize: 11, color: '#555', textAlign: 'center', padding: '0.6rem 0' }}>Олдсонгvй</div>
-                          )}
                         </div>
                       </div>
                     </>
@@ -6711,15 +5180,15 @@ export default function App() {
                               хэсэгтэй нийцэхгvй байсан) хvрээг саарал болгож, VIP хэрэглэгчийн
                               avatar-д алт цагираг (vip-ring) нэмэв. */}
                           {c.users?.avatar_url ? (
-                            <img src={c.users.avatar_url} alt="" onClick={() => startDmWith(c.user_id, c.users?.name, c.users?.avatar_url)} title="Хувийн зурвас бичих" className={c.users?.is_vip ? 'vip-ring' : ''} style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: c.users?.is_vip ? undefined : '2px solid rgba(255,255,255,0.12)', boxSizing: 'border-box', cursor: 'pointer' }} />
+                            <img src={c.users.avatar_url} alt="" className={c.users?.is_vip ? 'vip-ring' : ''} style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: c.users?.is_vip ? undefined : '2px solid rgba(255,255,255,0.12)', boxSizing: 'border-box', cursor: 'pointer' }} />
                           ) : (
-                            <div onClick={() => startDmWith(c.user_id, c.users?.name, c.users?.avatar_url)} title="Хувийн зурвас бичих" className={c.users?.is_vip ? 'vip-ring' : ''} style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', background: '#1a1a1a', border: c.users?.is_vip ? undefined : '2px solid rgba(255,255,255,0.12)', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: isReply ? 11 : 13, color: '#fff', flexShrink: 0, cursor: 'pointer' }}>
+                            <div className={c.users?.is_vip ? 'vip-ring' : ''} style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', background: '#1a1a1a', border: c.users?.is_vip ? undefined : '2px solid rgba(255,255,255,0.12)', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: isReply ? 11 : 13, color: '#fff', flexShrink: 0, cursor: 'pointer' }}>
                               {(c.users?.name || '?')[0].toUpperCase()}
                             </div>
                           )}
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-                              <span onClick={() => startDmWith(c.user_id, c.users?.name, c.users?.avatar_url)} style={{ fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>{c.users?.name || 'Хэрэглэгч'}</span>
+                              <span style={{ fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>{c.users?.name || 'Хэрэглэгч'}</span>
                               <span style={{ fontSize: 11, color: '#6b7385' }}>{formatMnDate(c.created_at)}</span>
                               <span style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
                                 {currentUser && (c.user_id === currentUser.id || canModerate) && (
@@ -7243,15 +5712,15 @@ export default function App() {
                     <div key={c.id} style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-start', marginLeft: isReply ? 32 : 0 }}>
                       {/* Хvрээтэй дугуй avatar */}
                       {c.users?.avatar_url ? (
-                        <img src={c.users.avatar_url} alt="" onClick={() => startDmWith(c.user_id, c.users?.name, c.users?.avatar_url)} title="Хувийн зурвас бичих" style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #2a3142', cursor: 'pointer' }} />
+                        <img src={c.users.avatar_url} alt="" style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #2a3142', cursor: 'pointer' }} />
                       ) : (
-                        <div onClick={() => startDmWith(c.user_id, c.users?.name, c.users?.avatar_url)} title="Хувийн зурвас бичих" style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: isReply ? 11 : 13, color: '#fff', flexShrink: 0, cursor: 'pointer' }}>
+                        <div style={{ width: isReply ? 24 : 30, height: isReply ? 24 : 30, borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: isReply ? 11 : 13, color: '#fff', flexShrink: 0, cursor: 'pointer' }}>
                           {(c.users?.name || '?')[0].toUpperCase()}
                         </div>
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-                          <span onClick={() => startDmWith(c.user_id, c.users?.name, c.users?.avatar_url)} style={{ fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>{c.users?.name || 'Хэрэглэгч'}</span>
+                          <span style={{ fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>{c.users?.name || 'Хэрэглэгч'}</span>
                           {/* ЗАСВАР #104: chapter уншиж буй хуудсанд admin/moderator/editor
                               бэлгэдлийг харуулахгvй болгов */}
                           <span style={{ fontSize: 11, color: '#6b7385' }}>{formatMnDate(c.created_at)}</span>
@@ -7363,8 +5832,6 @@ export default function App() {
                 { key: 'deleteRequests', label: `УСТГАХ ХVСЭЛТ (${pendingDeleteChapters.length})`, show: isAdmin },
                 { key: 'reports', label: `МЭДЭГДЭЛ (${reportsList.length})`, show: canModerate },
                 { key: 'feedback', label: `САНАЛ ХvСЭЛТ (${feedbackList.filter(f => f.status === 'open').length})`, show: canModerate },
-                { key: 'tasks', label: 'ДААЛГАВАР', show: isAdmin },
-                { key: 'stickers', label: `ЧАТНЫ СТИКЕР (${giftStickers.length})`, show: canModerate },
                 { key: 'giftFlowers', label: '💐 ЦЭЦЭГ БЭЛЭГЛЭХ', show: isStaff },
                 { key: 'analytics', label: '📊 СТАТИСТИК', show: isAdmin },
               ].filter(t => t.show).map(t => (
@@ -8739,205 +7206,7 @@ export default function App() {
               </div>
             )}
 
-            {/* ШИНЭ: admin-ий VIP хоногоор шагнадаг даалгаврыг vvсгэх/удирдах таб */}
-            {adminTab === 'tasks' && isAdmin && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e', maxWidth: 480 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
-                    ШИНЭ ДААЛГАВАР
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ГАРЧИГ</div>
-                    <input value={newTaskForm.title} onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
-                      placeholder="Жишээ нь: 10 сэтгэгдэл бичээд 1 цэцэг аваарай!"
-                      style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ТАЙЛБАР (заавал биш)</div>
-                    <input value={newTaskForm.description} onChange={e => setNewTaskForm(f => ({ ...f, description: e.target.value }))}
-                      style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ШААРДЛАГЫН ТӨРӨЛ</div>
-                      <select value={newTaskForm.requirement_type} onChange={e => setNewTaskForm(f => ({ ...f, requirement_type: e.target.value }))}
-                        style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}>
-                        <option value="comments">Сэтгэгдлийн тоо</option>
-                        <option value="chapters_read">Уншсан бvлгийн тоо (нийт)</option>
-                        <option value="manga_chapters">Тодорхой манганаас бvлэг унших</option>
-                        <option value="manual">Гараар тэмдэглэх (admin батална)</option>
-                      </select>
-                    </div>
-                    {newTaskForm.requirement_type !== 'manual' && (
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ШААРДЛАГАТАЙ ТОО</div>
-                        <input type="number" min={1} value={newTaskForm.requirement_count}
-                          onChange={e => setNewTaskForm(f => ({ ...f, requirement_count: e.target.value }))}
-                          style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                      </div>
-                    )}
-                  </div>
-                  {/* ШИНЭ: "manga_chapters" төрөлд зорилтот манга сонгоно */}
-                  {newTaskForm.requirement_type === 'manga_chapters' && (
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ЗОРИЛТОТ МАНГА</div>
-                      <select value={newTaskForm.target_manga_id} onChange={e => setNewTaskForm(f => ({ ...f, target_manga_id: e.target.value }))}
-                        style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}>
-                        <option value="">— сонгох —</option>
-                        {dbMangas.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {/* ЗАСВАР (хэрэглэгчийн хvсэлт): "manual" даалгавар БvГД заавал
-                      баталгаажуулах зурагтай байхаар болсон тул (шалгалтгvйгээр
-                      амархан "биелvvлсэн" гэж хуурч болдог байсныг хаав) сонголт хассан. */}
-                  {newTaskForm.requirement_type === 'manual' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 12, color: '#888' }}>
-                      📷 Баталгаажуулах зураг ЗААВАЛ шаардана
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ШАГНАЛЫН ТӨРӨЛ</div>
-                      <select value={newTaskForm.reward_type} onChange={e => setNewTaskForm(f => ({ ...f, reward_type: e.target.value }))}
-                        style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}>
-                        <option value="flowers">💐 Цэцэг</option>
-                        <option value="vip_days">👑 VIP хоног</option>
-                      </select>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{newTaskForm.reward_type === 'vip_days' ? 'ШАГНАЛ (VIP ХОНОГ)' : 'ШАГНАЛ (ЦЭЦЭГ 💐)'}</div>
-                      {newTaskForm.reward_type === 'vip_days' ? (
-                        <input type="number" min={1} value={newTaskForm.reward_vip_days}
-                          onChange={e => setNewTaskForm(f => ({ ...f, reward_vip_days: e.target.value }))}
-                          style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                      ) : (
-                        <input type="number" min={1} value={newTaskForm.reward_flowers}
-                          onChange={e => setNewTaskForm(f => ({ ...f, reward_flowers: e.target.value }))}
-                          style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                      )}
-                    </div>
-                  </div>
-                  {/* ШИНЭ: сонголттой дуусах хугацаа — тавибал хэрэглэгчийн Даалгавар
-                      хуудсанд тухайн даалгаврын ард countdown timer харагдана. */}
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>ДУУСАХ ХУГАЦАА (заавал биш)</div>
-                    <input type="datetime-local" value={newTaskForm.expires_at}
-                      onChange={e => setNewTaskForm(f => ({ ...f, expires_at: e.target.value }))}
-                      style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', colorScheme: 'dark' }} />
-                  </div>
-                  <button disabled={taskSaving} onClick={createTask}
-                    style={{ width: '100%', background: taskSaving ? '#555' : '#8B0000', color: '#fff', border: 'none', padding: '10px', borderRadius: 8, cursor: taskSaving ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
-                    {taskSaving ? 'ХАДГАЛЖ БАЙНА...' : 'ДААЛГАВАР vvСГЭХ'}
-                  </button>
-                </div>
 
-                <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
-                    БvХ ДААЛГАВАР ({tasksList.length})
-                  </div>
-                  {tasksList.length === 0 ? (
-                    <div style={{ fontSize: 13, color: '#555' }}>Даалгавар vvсгээгvй байна</div>
-                  ) : tasksList.map(t => (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', background: '#1a1a1a', borderRadius: 10, marginBottom: 10, opacity: t.is_active ? 1 : 0.5 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{t.title}</div>
-                        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                          {t.requirement_type === 'comments' ? `Сэтгэгдэл: ${t.requirement_count}`
-                            : t.requirement_type === 'chapters_read' ? `Уншсан бvлэг: ${t.requirement_count}`
-                            : t.requirement_type === 'manga_chapters' ? `${dbMangas.find(m => m.id === t.target_manga_id)?.title || '?'}: ${t.requirement_count} бvлэг`
-                            : 'Гараар + зураг'}
-                          {' · '}{t.reward_type === 'vip_days' ? `👑 ${t.reward_vip_days || 1} хоног VIP` : `💐 ${t.reward_flowers} цэцэг`}
-                          {!t.is_active && ' · ИДЭВХГvЙ'}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                        <button onClick={() => toggleTaskActive(t)}
-                          style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>
-                          {t.is_active ? 'ИДЭВХГvЙ БОЛГОХ' : 'ИДЭВХЖvvЛЭХ'}
-                        </button>
-                        <span onClick={() => deleteTask(t)} title="Устгах"
-                          style={{ fontSize: 15, color: '#8B0000', cursor: 'pointer', fontWeight: 700 }}>✕</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* ШИНЭ: "гараар тэмдэглэсэн" даалгаврын баталгаажуулалт хvлээж буй хvсэлтvvд */}
-                <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 4, height: 16, background: '#f5a623', borderRadius: 2 }} />
-                    ⏳ БАТАЛГААЖУУЛАХ ХvСЭЛТ ({pendingTaskClaims.length})
-                  </div>
-                  {pendingTaskClaims.length === 0 ? (
-                    <div style={{ fontSize: 13, color: '#555' }}>Хvлээгдэж буй хvсэлт алга</div>
-                  ) : pendingTaskClaims.map(c => {
-                    const key = `${c.user_id}-${c.task_id}`;
-                    const acting = taskClaimActingId === key;
-                    return (
-                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: '#1a1a1a', borderRadius: 10, marginBottom: 10 }}>
-                        <Avatar url={c.users?.avatar_url} letter={(c.users?.name || '?')[0]} size={32} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700 }}>{c.users?.name || 'Хэрэглэгч'}</div>
-                          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                            {c.tasks?.title} · {c.tasks?.reward_type === 'vip_days' ? `👑 ${c.tasks?.reward_vip_days || 1} хоног VIP` : `💐 ${c.tasks?.reward_flowers} цэцэг`}
-                          </div>
-                          {c.proof_image_urls && c.proof_image_urls.length > 0 && (
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                              {c.proof_image_urls.map((url, i) => (
-                                <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: 'inline-block' }}>
-                                  <img src={url} alt="Баталгаажуулах зураг" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #2a2a2a' }} />
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                          <button disabled={acting} onClick={() => approveTaskClaim(c)}
-                            style={{ background: acting ? '#555' : '#2e7d32', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, cursor: acting ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 11 }}>
-                            {acting ? '...' : 'БАТЛАХ'}
-                          </button>
-                          <button disabled={acting} onClick={() => rejectTaskClaim(c)}
-                            style={{ background: '#222', color: '#aaa', border: '1px solid #333', padding: '6px 12px', borderRadius: 8, cursor: acting ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 11 }}>
-                            ТАТГАЛЗАХ
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator чатанд БvХ хэрэглэгч
-                ашиглаж болох нийтийн стикер нэмэх/устгах таб */}
-            {adminTab === 'stickers' && canModerate && (
-              <div style={{ background: '#111', borderRadius: 12, padding: '1.5rem', border: '1px solid #1e1e1e' }}>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 4, height: 16, background: '#8B0000', borderRadius: 2 }} />
-                  ЧАТНЫ НИЙТИЙН СТИКЕР ({giftStickers.length})
-                </div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 14 }}>
-                  Энд нэмсэн стикерvvдийг БvХ хэрэглэгч Нийтийн чат, Админуудын чат, хувийн зурвасандаа ашиглаж болно.
-                </div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {giftStickers.map(s => (
-                    <div key={s.id} style={{ position: 'relative', width: 72, height: 72 }}>
-                      <img src={s.url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, border: '1px solid #2a2a2a' }} />
-                      <span onClick={() => deleteGiftSticker(s)} title="Устгах"
-                        style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#8B0000', color: '#fff', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>✕</span>
-                    </div>
-                  ))}
-                  <label style={{ width: 72, height: 72, borderRadius: 10, border: '1px dashed #333', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#555', fontSize: 24 }}>
-                    {adminGiftStickerUploading ? '…' : '+'}
-                    <input type="file" accept="image/*" style={{ display: 'none' }}
-                      onChange={e => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadGiftSticker(f); }} />
-                  </label>
-                </div>
-              </div>
-            )}
 
             {/* ШИНЭ (хэрэглэгчийн хvсэлт): admin/moderator/editor хvссэн уншигчдаа
                 vнэгvй цэцгээр (сард 10 хvртэл) дэмжих — нэрээр хайж сонгоод бэлэглэнэ. */}
@@ -10141,10 +8410,6 @@ export default function App() {
                         icon: <IconBookmark />,
                       },
                       {
-                        label: 'Даалгавар', onClick: () => navigateTo('tasks'),
-                        icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3"/><path d="M9 12l2 2 4-4"/></svg>,
-                      },
-                      {
                         label: 'Санал хvсэлт', onClick: () => navigateTo('feedback'),
                         icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="13" y2="13"/></svg>,
                       },
@@ -10175,37 +8440,6 @@ export default function App() {
         );
       })()}
 
-      {/* ШИНЭ (хэрэглэгчийн хvсэлт): "Нийтийн чат"-ыг профайл цэснээс хассан —
-          оронд нь доод pill nav-ийн дээгvvр (тvvнтэй давхцалгvй), бие даасан
-          дугуй чат-bubble товч болгож, chat/reader хуудаснаас бусад vед харуулна. */}
-      {currentUser && page !== 'chat' && page !== 'reader' && page !== 'rank' && (
-        <div onClick={() => { setPreviousPage(page); setPage('chat'); setChatMode('inbox'); setDmPartner(null); }} title="Чат"
-          style={{
-            position: 'fixed', right: 16, bottom: isMobile ? 104 : 40, zIndex: 240,
-            width: 52, height: 52, borderRadius: '50%', cursor: 'pointer',
-            background: '#1c2233', border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 11.5c0 4.42-4.03 8-9 8-1.06 0-2.08-.15-3.02-.44L4 21l1.15-3.65C4.16 15.94 3 13.84 3 11.5 3 7.08 7.03 3.5 12 3.5s9 3.58 9 8z"/>
-            <circle cx="8.3" cy="11.5" r="1" fill="#fff" stroke="none"/>
-            <circle cx="12" cy="11.5" r="1" fill="#fff" stroke="none"/>
-            <circle cx="15.7" cy="11.5" r="1" fill="#fff" stroke="none"/>
-          </svg>
-          {/* ШИНЭ (хэрэглэгчийн хvсэлт): сайтад хаана ч байсан уншаагvй мессежийн
-              (DM + дуугvй болгоогvй Нийтийн чат) тоог badge-аар харуулна. */}
-          {(dmUnreadTotal + (publicChatMuted ? 0 : publicChatUnreadCount)) > 0 && (
-            <span style={{
-              position: 'absolute', top: -3, right: -3, background: '#8B0000', color: '#fff', fontSize: 10, fontWeight: 800,
-              borderRadius: 10, minWidth: 19, height: 19, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '0 4px', border: '2px solid #050505',
-            }}>
-              {Math.min(99, dmUnreadTotal + (publicChatMuted ? 0 : publicChatUnreadCount))}
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
