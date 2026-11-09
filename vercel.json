@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/manga/:id/chapter/:ch", "destination": "/api/og?id=:id&ch=:ch" },
+    { "source": "/manga/:id", "destination": "/api/og?id=:id" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

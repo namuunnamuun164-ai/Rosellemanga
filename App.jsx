@@ -713,14 +713,19 @@ export default function App() {
     return () => window.removeEventListener('scroll', onScroll);
   }, [page, selectedChapter]);
 
-  // ЗАСВАР #103: бvлэг уншиж байх vед гараар (pinch) zoom хийж болохоор
-  // viewport хязгаарлалтыг тvр сулруулна; бусад хуудсанд буцаагаад хориглоно.
+  // ЗАСВАР (хэрэглэгчийн хvсэлт): бvлэг уншиж байх vед утсан дээр zoom хийхийг
+  // хориглоно (өмнө нь ЗАСВАР #103-аар зөвшөөрдөг байсан). Viewport-ийн
+  // "user-scalable=no"-г (index.html) iOS Safari vл тоодог тул Safari-ийн
+  // gesture event-ийг ч таслана. Компьютерийн (Ctrl+scroll) zoom-д нөлөөлөхгvй.
   useEffect(() => {
-    const meta = document.querySelector('meta[name="viewport"]');
-    if (!meta) return;
-    meta.setAttribute('content', page === 'reader'
-      ? 'width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes'
-      : 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+    if (page !== 'reader') return;
+    const block = (e) => e.preventDefault();
+    document.addEventListener('gesturestart', block, { passive: false });
+    document.addEventListener('gesturechange', block, { passive: false });
+    return () => {
+      document.removeEventListener('gesturestart', block);
+      document.removeEventListener('gesturechange', block);
+    };
   }, [page]);
   // ЗАСВАР #58: удирдлагын панелийг доошоо жагсаасан олон карт биш, хажуу тийш
   // жигсаасан таб (each) хэсэгтэй болгосон
@@ -5483,7 +5488,7 @@ export default function App() {
 
         {/* READER PAGE — ЗАСВАР #19: 100% өргөнөөр (edge-to-edge) харагдана, ойртуулах (pinch-zoom) хориглосон */}
         {page === 'reader' && selectedChapter && (
-          <div style={{ touchAction: 'pan-y pinch-zoom' }}>
+          <div style={{ touchAction: 'pan-y' }}>
             {/* ЗАСВАР #203 (хэрэглэгчийн хvсэлт): мэдэгдлээс орж ирэхэд зурган
                 хуудсыг огт харуулахгvй, шууд сэтгэгдлийн хэсэгт хvргэх энгийн
                 толгой хэсэг. */}
@@ -5925,8 +5930,8 @@ export default function App() {
                     👑 Зөвхөн "Бvгдийн шаана" эрхтэй хvмvvст харуулах (дараа нь Нийтэд нээж болно)
                   </label>
                 )}
-                {/* ШИНЭ (хэрэглэгчийн хvсэлт): нvvр хуудасны "VНЭГVЙ" мөрөнд гаргах сонголт — зөвхөн admin */}
-                {isAdmin && (
+                {/* ШИНЭ (хэрэглэгчийн хvсэлт): нvvр хуудасны "VНЭГVЙ" мөрөнд гаргах сонголт — admin болон moderator */}
+                {canModerate && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer', fontSize: 13, color: '#4caf50' }}>
                     <input type="checkbox" checked={adminMangaFree} onChange={e => setAdminMangaFree(e.target.checked)}
                       style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
@@ -5972,7 +5977,7 @@ export default function App() {
                       created_by: currentUser.id,
                       is_hidden: adminMangaHidden,
                       restricted_role: (isAdmin && adminMangaRestricted) ? 'shaana' : null,
-                      is_free: isAdmin && adminMangaFree,
+                      is_free: canModerate && adminMangaFree,
                     });
                     if (error) notify('Алдаа: ' + error.message);
                     else {
@@ -7764,7 +7769,7 @@ export default function App() {
                   👑 Зөвхөн "Бvгдийн шаана" эрхтэй хvмvvст харуулах {editMangaForm.restricted ? '(идэвхтэй — цуцлахад Нийтэд нээгдэнэ)' : '(Нийтэд нээлттэй)'}
                 </label>
               )}
-              {isAdmin && (
+              {canModerate && (
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1.5rem', cursor: 'pointer', fontSize: 13, color: '#4caf50' }}>
                   <input type="checkbox" checked={editMangaForm.free} onChange={e => setEditMangaForm({ ...editMangaForm, free: e.target.checked })}
                     style={{ accentColor: '#8B0000', width: 16, height: 16 }} />
@@ -7787,7 +7792,8 @@ export default function App() {
                   description: editMangaForm.desc,
                   genres: editMangaForm.genres,
                   status: editMangaForm.status,
-                  ...(isAdmin ? { restricted_role: editMangaForm.restricted ? 'shaana' : null, is_free: editMangaForm.free } : {}),
+                  ...(isAdmin ? { restricted_role: editMangaForm.restricted ? 'shaana' : null } : {}),
+                  ...(canModerate ? { is_free: editMangaForm.free } : {}),
                 };
                 if (editPosterFile) {
                   const fileExt = editPosterFile.name.split('.').pop();
